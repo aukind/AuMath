@@ -1,6 +1,7 @@
 import { BookOpen } from 'lucide-react';
 import { login } from '@/app/actions/auth';
 import LoginForm from '@/components/LoginForm';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export default async function LoginPage({
   searchParams,
@@ -11,6 +12,11 @@ export default async function LoginPage({
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col items-center justify-center px-4">
+      {/* 主题切换 - 右上角 */}
+      <div className="fixed top-4 right-4">
+        <ThemeToggle />
+      </div>
+
       {/* Logo */}
       <div className="flex items-center gap-2.5 mb-8">
         <BookOpen size={22} className="text-blue-600 dark:text-blue-400" />

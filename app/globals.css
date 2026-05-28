@@ -1,9 +1,17 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* 将 Tailwind v4 暗色模式从 media query 切换为 class 策略（配合 next-themes） */
+@variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #ffffff;
   --foreground: #171717;
+}
+
+.dark {
+  --background: #0a0a0a;
+  --foreground: #ededed;
 }
 
 @theme inline {
@@ -11,13 +19,6 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
@@ -36,6 +37,20 @@ body {
 /* 行内公式字号与正文保持一致 */
 .katex {
   font-size: 1em;
+}
+
+/* KaTeX 暗色模式：公式颜色跟随正文前景色 */
+.dark .katex,
+.dark .katex-html {
+  color: inherit;
+}
+
+/* KaTeX 分数线、根号线等边框在暗色下用 currentColor */
+.dark .katex .frac-line,
+.dark .katex .sqrt > .root,
+.dark .katex .overline > .overline-line,
+.dark .katex .underline > .underline-line {
+  border-color: currentColor;
 }
 
 /* prose 内标题增加中文行高 */

@@ -5,6 +5,7 @@ import TopicTree from '@/components/TopicTree';
 import QuestionCard from '@/components/QuestionCard';
 import SortSelect from '@/components/SortSelect';
 import { BookOpen, PenLine, LogOut } from 'lucide-react';
+import ThemeToggle from '@/components/ThemeToggle';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +56,7 @@ export default async function HomePage({
           <span className="hidden sm:block text-xs text-zinc-400">高考拔高 · 圆锥曲线 · 导数</span>
 
           <div className="ml-auto flex items-center gap-2">
+            <ThemeToggle />
             {isAdmin ? (
               <>
                 <a
