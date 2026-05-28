@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 :root {
   --background: #ffffff;
@@ -23,4 +24,23 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* KaTeX 公式块防止宽屏溢出，允许横向滚动 */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-block: 0.25rem;
+}
+
+/* 行内公式字号与正文保持一致 */
+.katex {
+  font-size: 1em;
+}
+
+/* prose 内标题增加中文行高 */
+.prose h1,
+.prose h2,
+.prose h3 {
+  line-height: 1.6;
 }
