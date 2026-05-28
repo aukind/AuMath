@@ -6,6 +6,7 @@ import SortSelect from '@/components/SortSelect';
 import QuestionSearch from '@/components/QuestionSearch';
 import { BookOpen, PenLine, LogOut } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
+import CanvasScratchpad from '@/components/CanvasScratchpad';
 
 export const dynamic = 'force-dynamic';
 
@@ -143,6 +144,9 @@ export default async function HomePage({
           )}
         </main>
       </div>
+
+      {/* 沉浸式草稿本（全局浮动，FAB + Canvas Overlay） */}
+      <CanvasScratchpad />
     </div>
   );
 }
