@@ -59,3 +59,158 @@ body {
 .prose h3 {
   line-height: 1.6;
 }
+
+/* ── 打印讲义样式 ─────────────────────────────────────────────── */
+
+/* 屏幕上隐藏打印容器 */
+.print-portal {
+  display: none;
+}
+
+@media print {
+  /* 打印时隐藏所有 body 直接子元素，只显示打印容器 */
+  body > *:not(.print-portal) {
+    display: none !important;
+  }
+
+  /* A4 纸张设置 */
+  @page {
+    size: A4;
+    margin: 20mm;
+  }
+
+  /* 打印容器基础排版 */
+  .print-portal {
+    display: block !important;
+    font-family: 'Times New Roman', Georgia, 'Noto Serif SC', 'SimSun', serif;
+    font-size: 11pt;
+    line-height: 1.8;
+    color: #000;
+    background: #fff;
+  }
+
+  /* 讲义标题区 */
+  .print-header {
+    text-align: center;
+    padding-bottom: 8mm;
+    margin-bottom: 10mm;
+    border-bottom: 2pt solid #000;
+  }
+
+  .print-header h1 {
+    font-size: 22pt;
+    font-weight: bold;
+    margin: 0 0 2mm;
+    color: #000;
+  }
+
+  .print-header p {
+    font-size: 9.5pt;
+    color: #555;
+    margin: 0;
+  }
+
+  /* 题目块 — 避免跨页截断 */
+  .print-question {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    padding-bottom: 6mm;
+    margin-bottom: 8mm;
+    border-bottom: 0.5pt solid #ccc;
+  }
+
+  .print-question:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+    margin-bottom: 0;
+  }
+
+  /* 元信息行（题号、知识点、年份、来源、难度） */
+  .print-question-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4mm;
+    align-items: baseline;
+    font-size: 9pt;
+    color: #666;
+    margin-bottom: 3mm;
+  }
+
+  .print-question-number {
+    font-size: 11pt;
+    font-weight: bold;
+    color: #000;
+  }
+
+  /* 题目正文 */
+  .print-question-content {
+    font-size: 11pt;
+    line-height: 1.9;
+  }
+
+  /* 作答空白区 */
+  .print-answer-space {
+    min-height: 45mm;
+    margin-top: 5mm;
+    border: 1pt dashed #bbb;
+    border-radius: 2mm;
+    position: relative;
+  }
+
+  .print-answer-space::before {
+    content: '解答区';
+    position: absolute;
+    top: 2.5mm;
+    right: 3mm;
+    font-size: 8pt;
+    color: #bbb;
+    font-style: italic;
+  }
+
+  /* KaTeX 公式在打印中保持矢量清晰 */
+  .print-portal .katex {
+    font-size: 1em !important;
+    color: #000 !important;
+  }
+
+  .print-portal .katex-html {
+    color: #000 !important;
+  }
+
+  .print-portal .katex-display {
+    overflow: visible;
+    padding-block: 2mm;
+    margin-block: 2mm;
+  }
+
+  /* prose 装饰在打印中精简 */
+  .print-portal .prose {
+    max-width: none;
+    color: #000;
+  }
+
+  .print-portal .prose a {
+    text-decoration: none;
+    color: #000;
+  }
+
+  .print-portal .prose p {
+    margin-top: 0;
+    margin-bottom: 2mm;
+  }
+
+  .print-portal .prose h1,
+  .print-portal .prose h2,
+  .print-portal .prose h3 {
+    color: #000;
+    margin-top: 2mm;
+    margin-bottom: 1.5mm;
+  }
+
+  .print-portal .prose pre,
+  .print-portal .prose code {
+    background: #f5f5f5;
+    border: 0.5pt solid #ddd;
+    box-shadow: none;
+  }
+}
