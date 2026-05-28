@@ -2,8 +2,8 @@ import { getQuestions, getQuestionTopics } from '@/app/actions/questions';
 import { createClient } from '@/lib/supabase/server';
 import { logout } from '@/app/actions/auth';
 import TopicTree from '@/components/TopicTree';
-import QuestionCard from '@/components/QuestionCard';
 import SortSelect from '@/components/SortSelect';
+import QuestionSearch from '@/components/QuestionSearch';
 import { BookOpen, PenLine, LogOut } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 
@@ -132,11 +132,7 @@ export default async function HomePage({
           {questions.length === 0 ? (
             <EmptyState hasTopics={topics.length > 0} isAdmin={isAdmin} />
           ) : (
-            <div className="space-y-5 max-w-3xl">
-              {questions.map(q => (
-                <QuestionCard key={q.id} question={q} isAdmin={isAdmin} />
-              ))}
-            </div>
+            <QuestionSearch questions={questions} isAdmin={isAdmin} />
           )}
         </main>
       </div>
