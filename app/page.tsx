@@ -54,6 +54,13 @@ export default async function HomePage({
           </span>
           <span className="hidden sm:block text-zinc-300 dark:text-zinc-700">|</span>
           <span className="hidden sm:block text-xs text-zinc-400">高考拔高 · 圆锥曲线 · 导数</span>
+          <a
+            href="/geometry"
+            className="hidden sm:flex items-center gap-1 text-xs text-zinc-400 hover:text-purple-600 dark:hover:text-purple-400 transition-colors ml-2"
+            title="GeoGebra 精准作图"
+          >
+            几何作图 ↗
+          </a>
 
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />
