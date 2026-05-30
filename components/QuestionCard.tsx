@@ -5,15 +5,7 @@ import { ChevronDown, GripVertical, Layers, Pencil, Star, Trash2, X } from 'luci
 import MathRenderer from '@/components/MathRenderer';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import { toggleFavorite, markError, removeError, recordView } from '@/app/actions/user-workspace';
-import type { QuestionWithTopics, Difficulty } from '@/types/database';
-
-const DIFFICULTY_META: Record<Difficulty, { label: string; cls: string }> = {
-  1: { label: '基础', cls: 'text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-950/40' },
-  2: { label: '进阶', cls: 'text-sky-700 bg-sky-50 dark:text-sky-300 dark:bg-sky-950/40' },
-  3: { label: '中等', cls: 'text-yellow-700 bg-yellow-50 dark:text-yellow-300 dark:bg-yellow-950/40' },
-  4: { label: '拔高', cls: 'text-orange-700 bg-orange-50 dark:text-orange-300 dark:bg-orange-950/40' },
-  5: { label: '竞赛', cls: 'text-red-700 bg-red-50 dark:text-red-300 dark:bg-red-950/40' },
-};
+import type { QuestionWithTopics } from '@/types/database';
 
 interface QuestionCardProps {
   question: QuestionWithTopics;
@@ -77,7 +69,8 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
   }
 
   const primaryTopic = (question.question_topic_relations.find(r => r.is_primary) ?? question.question_topic_relations[0])?.topics;
-  const diff = DIFFICULTY_META[question.difficulty] ?? { label: '未知', cls: 'text-zinc-600 bg-zinc-100' };
+  // 完整试卷名（含年份，如「2002年上海卷理」）是最鲜明的检索特征，原样保留；
+  // 不再单独显示 year 字段，避免重复占用视觉。
   const solutionContent = [question.answer, question.analysis || question.solution].filter(Boolean).join('\n\n---\n\n');
   const options = normalizeOptions(question.metadata?.options);
 
@@ -116,54 +109,55 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
               <GripVertical size={13} />
             </button>
           )}
-          <span className={`text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full ${diff.cls}`}>
-            {diff.label}
-          </span>
-          {primaryTopic && (
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">{primaryTopic.name}</span>
+          {/* 收藏键 —— 最左 */}
+          {isLoggedIn && (
+            <button
+              onClick={handleToggleFavorite}
+              disabled={isPending}
+              title={favorited ? '取消收藏' : '收藏此题'}
+              className={[
+                'flex items-center justify-center w-6 h-6 rounded-md transition-colors shrink-0',
+                favorited
+                  ? 'text-amber-400 hover:text-amber-500'
+                  : 'text-zinc-300 dark:text-zinc-600 hover:text-amber-400 dark:hover:text-amber-500',
+                isPending && 'opacity-50 cursor-not-allowed',
+              ].join(' ')}
+            >
+              <Star size={14} fill={favorited ? 'currentColor' : 'none'} />
+            </button>
           )}
-          <div className="ml-auto flex items-center gap-2 text-xs text-zinc-400">
-            {isLoggedIn && (
-              <button
-                onClick={handleToggleFavorite}
-                disabled={isPending}
-                title={favorited ? '取消收藏' : '收藏此题'}
-                className={[
-                  'flex items-center justify-center w-6 h-6 rounded-md transition-colors',
-                  favorited
-                    ? 'text-amber-400 hover:text-amber-500'
-                    : 'text-zinc-300 dark:text-zinc-600 hover:text-amber-400 dark:hover:text-amber-500',
-                  isPending && 'opacity-50 cursor-not-allowed',
-                ].join(' ')}
-              >
-                <Star size={13} fill={favorited ? 'currentColor' : 'none'} />
-              </button>
-            )}
-            {question.year && <span>{question.year} 年</span>}
-            {question.source && <span>{question.source}</span>}
-            {(isAdmin || (effectiveCanModify && onDelete)) && (
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                {isAdmin && (
-                  <a
-                    href={`/admin/edit/${question.id}`}
-                    title="编辑题目"
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:text-blue-600 hover:border-blue-300 dark:hover:text-blue-400 dark:hover:border-blue-700 transition-colors"
-                  >
-                    <Pencil size={11} /> 编辑
-                  </a>
-                )}
-                {effectiveCanModify && onDelete && (
-                  <button
-                    onClick={() => setShowConfirm(true)}
-                    title="删除题目"
-                    className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:text-red-600 hover:border-red-300 dark:hover:text-red-500 dark:hover:border-red-700 transition-colors"
-                  >
-                    <Trash2 size={11} /> 删除
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
+          {/* 题目来源（完整卷名，含年份）—— 收藏键右侧 */}
+          {question.source && (
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200 truncate">
+              {question.source}
+            </span>
+          )}
+          {primaryTopic && (
+            <span className="text-xs text-zinc-400 dark:text-zinc-500 truncate">· {primaryTopic.name}</span>
+          )}
+          {/* 管理员编辑/删除 —— hover 显示，靠右 */}
+          {(isAdmin || (effectiveCanModify && onDelete)) && (
+            <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0">
+              {isAdmin && (
+                <a
+                  href={`/admin/edit/${question.id}`}
+                  title="编辑题目"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:text-blue-600 hover:border-blue-300 dark:hover:text-blue-400 dark:hover:border-blue-700 transition-colors"
+                >
+                  <Pencil size={11} /> 编辑
+                </a>
+              )}
+              {effectiveCanModify && onDelete && (
+                <button
+                  onClick={() => setShowConfirm(true)}
+                  title="删除题目"
+                  className="flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:text-red-600 hover:border-red-300 dark:hover:text-red-500 dark:hover:border-red-700 transition-colors"
+                >
+                  <Trash2 size={11} /> 删除
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Question body */}
