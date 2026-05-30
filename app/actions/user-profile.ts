@@ -149,9 +149,9 @@ async function buildPostFeed(from: FromFn, uid: string): Promise<ActivityFeedIte
       id: `post-${p.id}`,
       type: 'created_post',
       title: p.title,
-      description: '在社群发布了新帖子',
+      description: '在社区发布了新帖子',
       timestamp: p.created_at,
-      repoOrTopic: p.tags?.[0] ?? '社群讨论区',
+      repoOrTopic: p.tags?.[0] ?? '社区讨论区',
     }));
   } catch {
     return [];

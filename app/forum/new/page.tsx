@@ -16,7 +16,7 @@ export default async function NewForumPostPage() {
     <main className="min-h-screen bg-zinc-50 py-8 dark:bg-zinc-950">
       <div className="mx-auto max-w-2xl px-3">
         <Link href="/" className="mb-3 inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
-          <ChevronLeft size={16} /> 返回社群
+          <ChevronLeft size={16} /> 返回社区
         </Link>
         <h1 className="mb-4 text-xl font-bold text-zinc-900 dark:text-zinc-50">发表新主题</h1>
         <PostComposer />

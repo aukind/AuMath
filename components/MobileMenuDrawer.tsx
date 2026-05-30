@@ -70,7 +70,7 @@ export default function MobileMenuDrawer({
                 href="/"
                 className="flex items-center gap-1.5 text-xs font-medium text-zinc-600 hover:text-indigo-600 dark:text-zinc-300 transition-colors"
               >
-                💬 社群论坛
+                💬 社区论坛
               </a>
               <a
                 href="/?view=mybank"

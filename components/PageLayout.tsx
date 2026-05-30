@@ -162,7 +162,7 @@ export default function PageLayout({
             <>
               {/* ── 社区论坛 / 我的题库 切换 ── */}
               <div className="flex items-center gap-1 mb-5 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800/80 w-fit">
-                <ModeTab href="/" active={mainView === 'forum'} icon={MessagesSquare}>社群论坛</ModeTab>
+                <ModeTab href="/" active={mainView === 'forum'} icon={MessagesSquare}>社区论坛</ModeTab>
                 <ModeTab href="/?view=mybank" active={mainView === 'mybank'} icon={BookMarked}>我的题库</ModeTab>
               </div>
 
@@ -258,7 +258,7 @@ function BrowseView({
   return (
     <>
       <a href="/" className="inline-flex items-center gap-1 mb-4 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors">
-        <ChevronLeft size={13} /> 返回社群
+        <ChevronLeft size={13} /> 返回社区
       </a>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>

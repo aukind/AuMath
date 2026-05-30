@@ -14,17 +14,16 @@ interface ForumPostListProps {
 export default function ForumPostList({ posts, canPost = true }: ForumPostListProps) {
   return (
     <div>
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">社群讨论区</h1>
-        {canPost && (
+      {canPost && (
+        <div className="mb-4 flex justify-end">
           <Link
             href="/forum/new"
             className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
           >
             <MessageSquarePlus size={14} /> 发帖
           </Link>
-        )}
-      </div>
+        </div>
+      )}
 
       {posts.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
