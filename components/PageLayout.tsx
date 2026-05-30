@@ -20,6 +20,8 @@ import SortSelect from '@/components/SortSelect';
 import QuestionSearch from '@/components/QuestionSearch';
 import SiteViewsBadge from '@/components/SiteViewsBadge';
 import ForumPostList from '@/components/forum/ForumPostList';
+import DashboardWorkspace from '@/components/dashboard/DashboardWorkspace';
+import type { TabItem } from '@/components/ui/AnimatedTabs';
 import { deleteQuestion, updateQuestionCategory } from '@/app/actions/questions';
 import type { SortOrder } from '@/app/actions/questions';
 import type { TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceType } from '@/types/database';
@@ -52,6 +54,12 @@ const MYBANK_TABS: { key: WorkspaceType; label: string; icon: typeof Star }[] = 
   { key: 'favorites', label: '我的收藏', icon: Star },
   { key: 'errors', label: '我的错题', icon: XCircle },
   { key: 'history', label: '最近浏览', icon: Clock },
+];
+
+/** 顶层工作区切换：社区论坛 / 我的题库（Magic Tab）。 */
+const WORKSPACE_TABS: TabItem[] = [
+  { id: 'forum', label: '社区论坛', icon: <MessagesSquare size={14} /> },
+  { id: 'bank', label: '我的题库', icon: <BookMarked size={14} /> },
 ];
 
 export default function PageLayout({
@@ -88,6 +96,12 @@ export default function PageLayout({
       });
       showToast(`删除失败：${result.error}`, 'error');
     }
+  }, []);
+
+  // ── 顶层 论坛/题库 切换：纯客户端态，软更新 URL（不触发服务端导航，刷新/分享仍保留当前页）──
+  const syncWorkspaceUrl = useCallback((tabId: string) => {
+    const url = tabId === 'bank' ? '/?view=mybank' : '/';
+    window.history.replaceState(window.history.state, '', url);
   }, []);
 
   // ── Toast ────────────────────────────────────────────────────
@@ -159,30 +173,29 @@ export default function PageLayout({
               onDelete={handleDelete}
             />
           ) : (
-            <>
-              {/* ── 社区论坛 / 我的题库 切换 ── */}
-              <div className="flex items-center gap-1 mb-5 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800/80 w-fit">
-                <ModeTab href="/" active={mainView === 'forum'} icon={MessagesSquare}>社区论坛</ModeTab>
-                <ModeTab href="/?view=mybank" active={mainView === 'mybank'} icon={BookMarked}>我的题库</ModeTab>
-              </div>
-
-              {mainView === 'forum' ? (
-                <ForumPostList posts={forumPosts} canPost={isLoggedIn} />
-              ) : !isLoggedIn ? (
-                <MyBankGate />
-              ) : (
-                <MyBankView
-                  tab={mybankTab}
-                  questions={visibleQuestions}
-                  isAdmin={isAdmin}
-                  isLoggedIn={isLoggedIn}
-                  userId={userId}
-                  favoritedIds={favoritedIds}
-                  erroredIds={erroredIds}
-                  onDelete={handleDelete}
-                />
-              )}
-            </>
+            // ── 论坛 / 我的题库：Magic Tab + 伪 Keep-Alive，两棵子树常驻、0ms 秒切 ──
+            <DashboardWorkspace
+              tabs={WORKSPACE_TABS}
+              defaultTab={mainView === 'mybank' ? 'bank' : 'forum'}
+              onTabChange={syncWorkspaceUrl}
+              forum={<ForumPostList posts={forumPosts} canPost={isLoggedIn} />}
+              bank={
+                isLoggedIn ? (
+                  <MyBankView
+                    tab={mybankTab}
+                    questions={visibleQuestions}
+                    isAdmin={isAdmin}
+                    isLoggedIn={isLoggedIn}
+                    userId={userId}
+                    favoritedIds={favoritedIds}
+                    erroredIds={erroredIds}
+                    onDelete={handleDelete}
+                  />
+                ) : (
+                  <MyBankGate />
+                )
+              }
+            />
           )}
         </main>
       </div>
@@ -214,25 +227,6 @@ export default function PageLayout({
         </div>
       )}
     </DndContext>
-  );
-}
-
-function ModeTab({
-  href, active, icon: Icon, children,
-}: { href: string; active: boolean; icon: typeof Star; children: React.ReactNode }) {
-  return (
-    <a
-      href={href}
-      className={[
-        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150',
-        active
-          ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-          : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300',
-      ].join(' ')}
-    >
-      <Icon size={12} />
-      {children}
-    </a>
   );
 }
 

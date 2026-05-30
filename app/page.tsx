@@ -59,10 +59,12 @@ export default async function HomePage({
     mainView === 'browse' && topicId && !paperId
       ? getQuestions(topicId, validSort, 20, 'public')
       : Promise.resolve<QuestionWithTopics[]>([]),
-    mainView === 'mybank'
+    // 非 browse（论坛或题库）时两份数据都预取，喂给 DashboardWorkspace 的两个常驻 slot，
+    // 客户端切换 Tab 不再发起服务端导航 → 0ms 秒切。
+    mainView !== 'browse'
       ? getWorkspaceQuestions(mybankTab)
       : Promise.resolve<QuestionWithTopics[]>([]),
-    mainView === 'forum'
+    mainView !== 'browse'
       ? getForumPosts()
       : Promise.resolve<ForumPost[]>([]),
     getFavoritedQuestionIds(),
@@ -74,11 +76,10 @@ export default async function HomePage({
   const isLoggedIn = !!user;
   const userId = user?.id;
 
+  // 非 browse 时统一携带 workspaceQuestions，供「我的题库」常驻 slot 使用（论坛 slot 用 forumPosts）。
   const questions = mainView === 'browse'
     ? (paperId ? paperResult.questions : topicQuestions)
-    : mainView === 'mybank'
-      ? workspaceQuestions
-      : [];
+    : workspaceQuestions;
   const activePaper = paperResult.paper;
 
   const findTopic = (id: string, nodes = topics): string | undefined => {
