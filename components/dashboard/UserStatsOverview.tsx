@@ -15,7 +15,7 @@ interface StatCard {
 
 const CARDS: StatCard[] = [
   { key: 'totalSolved', label: '攻克难题', hint: '累计练习的题目', icon: Target, accent: 'text-indigo-500 dark:text-indigo-400' },
-  { key: 'forumReputation', label: '论坛声望', hint: '社区贡献值', icon: Trophy, accent: 'text-violet-500 dark:text-violet-400' },
+  { key: 'forumReputation', label: '论坛声望', hint: '社群贡献值', icon: Trophy, accent: 'text-violet-500 dark:text-violet-400' },
   { key: 'streakDays', label: '连续学习', hint: '坚持的天数', icon: Flame, suffix: '天', accent: 'text-amber-500 dark:text-amber-400' },
 ];
 

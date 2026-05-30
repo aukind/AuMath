@@ -72,8 +72,22 @@ function splitSubQuestions(input: string): string {
   );
 }
 
+/**
+ * 修复 OCR/AI 提取产生的「悬空上下标」退化结构，避免一个坏 token 让整段公式飘红。
+ *
+ * 典型来源：填空题的横线 "____" 被模型误转写成 `=_{ {{{ {_}}}}}` 之类——下标里有个
+ * 裸 `_`（KaTeX 报 "Expected group after '_'"）。这类 `_`/`^` 后面缺操作数的情况，
+ * 给它补一个空组 `{}`，使其退化为「空上下标」（渲染为空），而不是整条公式解析失败。
+ *
+ * 仅匹配「`_` 或 `^` 之后（跳过空格）紧跟 `}` / 另一个 `_`^` / 字符串结尾」的退化写法；
+ * 健康的 `x_{i}^{2}`、`x_ 2` 一律不动。`(?<!\\)` 避免误伤 `\_`（数学模式下的字面下划线）。
+ */
+function repairDegenerateScripts(body: string): string {
+  return body.replace(/(?<!\\)[_^](?=\s*(?:[}_^]|$))/g, m => `${m}{}`);
+}
+
 function transformMathBody(body: string): string {
-  let out = body;
+  let out = repairDegenerateScripts(body);
 
   // 1. 给需要 \limits 的算子注入：\sum_{...}^{...} → \sum\limits_{...}^{...}
   //    使用负向后查避免重复（已经有 \limits 的不再加）。
@@ -120,7 +134,7 @@ export function preprocessMathContent(input: string): string {
 
   // 1. 处理 display math $$...$$（display 模式天然 displaystyle，但 limits 还需注入）
   text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_m, body) => {
-    let b = body as string;
+    let b = repairDegenerateScripts(body as string);
     for (const op of NEEDS_LIMITS) {
       const re = new RegExp(`\\\\${op}(?!\\\\?(limits|nolimits))`, 'g');
       b = b.replace(re, `\\${op}\\limits`);

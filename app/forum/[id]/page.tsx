@@ -34,7 +34,7 @@ export default async function ForumPostPage({
       <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/80 backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/80">
         <div className="mx-auto flex h-14 max-w-2xl items-center gap-3 px-4">
           <Link href="/" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
-            <ChevronLeft size={16} /> 返回社区
+            <ChevronLeft size={16} /> 返回社群
           </Link>
           <Link href="/" className="ml-auto flex items-center gap-1.5">
             <InfinityIcon className="h-5 w-5 stroke-[1.5] text-indigo-600 dark:text-indigo-400" />

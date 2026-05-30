@@ -15,10 +15,7 @@ export default function ForumPostList({ posts, canPost = true }: ForumPostListPr
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">社区讨论区</h1>
-          <p className="mt-0.5 text-xs text-zinc-400">交流解题思路 · 分享变式 · 支持 LaTeX 公式</p>
-        </div>
+        <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">社群讨论区</h1>
         {canPost && (
           <Link
             href="/forum/new"

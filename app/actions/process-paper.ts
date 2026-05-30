@@ -129,6 +129,7 @@ Each question element (ALL 5 fields required):
 11. Preserve original mathematical logic and values exactly — repair formatting only.
 11a.【希腊字母 vs 拉丁字母】绝对不能把希腊字母 OCR 成相似的拉丁字母：α≠a, β≠b, γ≠y, ν≠v, π≠n, ρ≠p, χ≠x, ω≠w, μ≠u, σ≠o, τ≠t, ξ≠ξ；遇到希腊字母必须用 LaTeX 命令保留（\\\\alpha \\\\beta \\\\gamma \\\\theta \\\\pi \\\\sigma \\\\phi \\\\omega 等）。
 11b.【补集符号】中国教材的补集 ∁_U A 必须用 \\\\complement 命令转写，不要写成 \\\\mathsf{C} / \\\\mathbf{C} / \\\\mathbb{C} / \\\\mathcal{C} / 裸 C —— 这些都不是补集符号。正例 \\\\complement_{I} S，反例 \\\\mathsf{C}_{I} S。
+11c.【填空题的空白横线】填空题留空处（原卷的 "____" 横线）只能转写成 LaTeX 横线 \\\\underline{\\\\qquad}，且必须放在普通文本里、不要包进 $...$。绝对禁止把空白 OCR 成裸下标 / 嵌套空括号 / 散落上下标，例如 \`=_{ {{{ {_}}}}}\`、\`{_}\`、\`x_\`、\`a^{}\` 都是非法的——任何 \`_\` 或 \`^\` 后面都必须紧跟一个非空操作数（单字符或 {...}）。题目要求的数值/表达式答案放进 solution 字段，不要塞进题面的空白处。正例：content 写 "则 $a_1+a_2+\\\\cdots+a_{10}=$ \\\\underline{\\\\qquad}."，solution 写 "$80$"。
 
 ═══ Numbering & Structure Rules ═══
 12. Detect question boundaries: section headers ("一、选择题"), numbers ("1.", "（1）") etc.

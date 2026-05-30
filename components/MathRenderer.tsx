@@ -20,6 +20,9 @@ const defaultKatexOptions: KatexOptions = {
   throwOnError: false,
   strict:       'ignore',
   trust:        false,
+  // 兜底：repairDegenerateScripts 仍救不回的坏公式，用中性灰显示源码而非刺眼的红色，
+  // 让它降级为「可读文本」。错误信息仍写进 span 的 title 便于排查。
+  errorColor:   '#71717a', // zinc-500
   macros: {
     '\\R':  '\\mathbb{R}',
     '\\N':  '\\mathbb{N}',
