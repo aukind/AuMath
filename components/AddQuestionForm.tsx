@@ -1,12 +1,54 @@
 'use client';
 
-import { useState, useTransition, useCallback } from 'react';
+import { useState, useTransition, useCallback, useRef, type RefObject, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Eye, EyeOff, Loader2, Send, Save } from 'lucide-react';
 import MathRenderer from '@/components/MathRenderer';
+import AiFigureButton from '@/components/admin/AiFigureButton';
+import { ScreenshotToLatexButton } from '@/components/admin/ScreenshotToLatexButton';
+import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import { createQuestion, updateQuestion } from '@/app/actions/questions';
+import { uploadRiveAsset } from '@/app/actions/upload-rive';
 import type { QuestionForEdit } from '@/app/actions/questions';
-import type { TopicRow, QuestionType, Difficulty } from '@/types/database';
+import type { TopicRow, QuestionType, Difficulty, InteractiveSandboxConfig, SandboxControl } from '@/types/database';
+
+const DEFAULT_CONTROLS_TEMPLATE = `[
+  {
+    "input_name": "Angle",
+    "type": "number",
+    "label": "角度",
+    "default": 0,
+    "min": 0,
+    "max": 360,
+    "step": 1
+  }
+]`;
+
+// Splice `snippet` into the textarea at its current selection range and place
+// the caret right after the insertion so the next keystroke continues editing.
+function makeInserter(
+  ref: RefObject<HTMLTextAreaElement | null>,
+  value: string,
+  setValue: (v: string) => void,
+) {
+  return (snippet: string) => {
+    const el = ref.current;
+    if (!el) {
+      setValue(value + snippet);
+      return;
+    }
+    const start = el.selectionStart ?? value.length;
+    const end = el.selectionEnd ?? value.length;
+    const next = value.slice(0, start) + snippet + value.slice(end);
+    setValue(next);
+    // Restore focus + caret after React commits the new value.
+    requestAnimationFrame(() => {
+      el.focus();
+      const caret = start + snippet.length;
+      el.setSelectionRange(caret, caret);
+    });
+  };
+}
 
 const QUESTION_TYPES: { value: QuestionType; label: string }[] = [
   { value: 'calculation',     label: '解答题' },
@@ -24,6 +66,52 @@ interface Props {
 }
 
 // ── 单字段：左编辑 / 右预览 ──────────────────────────────────
+
+function SplitFieldNoLabel({
+  value,
+  onChange,
+  placeholder,
+  rows = 10,
+  textareaRef,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  rows?: number;
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-0 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm">
+      {/* 编辑区 */}
+      <div className="relative border-r border-zinc-200 dark:border-zinc-700">
+        <div className="absolute top-2 right-3 text-[0.625rem] text-zinc-300 dark:text-zinc-600 select-none pointer-events-none">
+          Markdown · LaTeX
+        </div>
+        <textarea
+          ref={textareaRef}
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          placeholder={placeholder}
+          rows={rows}
+          className="w-full bg-zinc-50/50 dark:bg-zinc-900/80 px-4 pt-7 pb-4 text-sm font-mono text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-300 dark:placeholder:text-zinc-600 resize-none focus:outline-none focus:bg-white dark:focus:bg-zinc-900 transition-colors"
+        />
+      </div>
+
+      {/* 预览区 */}
+      <div className="bg-white dark:bg-zinc-900 px-5 py-4 overflow-y-auto min-h-0">
+        {value.trim() ? (
+          <MathRenderer content={value} />
+        ) : (
+          <div className="h-full flex items-center justify-center">
+            <p className="text-xs text-zinc-300 dark:text-zinc-600 italic text-center leading-relaxed">
+              在左侧输入 LaTeX 公式<br />右侧实时渲染预览
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function SplitField({
   label,
@@ -43,34 +131,7 @@ function SplitField({
       <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-zinc-400">
         {label}
       </span>
-      <div className="grid grid-cols-2 gap-0 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm">
-        {/* 编辑区 */}
-        <div className="relative border-r border-zinc-200 dark:border-zinc-700">
-          <div className="absolute top-2 right-3 text-[0.625rem] text-zinc-300 dark:text-zinc-600 select-none pointer-events-none">
-            Markdown · LaTeX
-          </div>
-          <textarea
-            value={value}
-            onChange={e => onChange(e.target.value)}
-            placeholder={placeholder}
-            rows={rows}
-            className="w-full bg-zinc-50/50 dark:bg-zinc-900/80 px-4 pt-7 pb-4 text-sm font-mono text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-300 dark:placeholder:text-zinc-600 resize-none focus:outline-none focus:bg-white dark:focus:bg-zinc-900 transition-colors"
-          />
-        </div>
-
-        {/* 预览区 */}
-        <div className="bg-white dark:bg-zinc-900 px-5 py-4 overflow-y-auto min-h-0">
-          {value.trim() ? (
-            <MathRenderer content={value} />
-          ) : (
-            <div className="h-full flex items-center justify-center">
-              <p className="text-xs text-zinc-300 dark:text-zinc-600 italic text-center leading-relaxed">
-                在左侧输入 LaTeX 公式<br />右侧实时渲染预览
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
+      <SplitFieldNoLabel value={value} onChange={onChange} placeholder={placeholder} rows={rows} />
     </div>
   );
 }
@@ -82,11 +143,15 @@ function CollapsibleField({
   value,
   onChange,
   placeholder,
+  textareaRef,
+  headerActions,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
+  textareaRef?: RefObject<HTMLTextAreaElement | null>;
+  headerActions?: ReactNode;
 }) {
   const [showPreview, setShowPreview] = useState(false);
 
@@ -96,20 +161,24 @@ function CollapsibleField({
         <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-zinc-400">
           {label}
         </span>
-        <button
-          type="button"
-          onClick={() => setShowPreview(v => !v)}
-          className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
-        >
-          {showPreview ? <EyeOff size={12} /> : <Eye size={12} />}
-          {showPreview ? '隐藏预览' : '显示预览'}
-        </button>
+        <div className="flex items-center gap-2">
+          {headerActions}
+          <button
+            type="button"
+            onClick={() => setShowPreview(v => !v)}
+            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+          >
+            {showPreview ? <EyeOff size={12} /> : <Eye size={12} />}
+            {showPreview ? '隐藏预览' : '显示预览'}
+          </button>
+        </div>
       </div>
 
       {showPreview ? (
         <div className="grid grid-cols-2 gap-0 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm">
           <div className="border-r border-zinc-200 dark:border-zinc-700">
             <textarea
+              ref={textareaRef}
               value={value}
               onChange={e => onChange(e.target.value)}
               placeholder={placeholder}
@@ -127,6 +196,7 @@ function CollapsibleField({
         </div>
       ) : (
         <textarea
+          ref={textareaRef}
           value={value}
           onChange={e => onChange(e.target.value)}
           placeholder={placeholder}
@@ -155,6 +225,17 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
   const [source,       setSource]       = useState(initialData?.source ?? '');
   const [topicIds,     setTopicIds]     = useState<string[]>(initialData?.topic_ids ?? []);
   const [errorMsg,     setErrorMsg]     = useState<string | null>(null);
+  const [sandbox,      setSandbox]      = useState<InteractiveSandboxConfig | null>(initialData?.interactive_sandbox ?? null);
+  const [sandboxError, setSandboxError] = useState<string | null>(null);
+
+  // One textarea ref + inserter per LaTeX field. Refs let the screenshot
+  // dialog insert at the actual caret position rather than always appending.
+  const contentRef  = useRef<HTMLTextAreaElement | null>(null);
+  const answerRef   = useRef<HTMLTextAreaElement | null>(null);
+  const analysisRef = useRef<HTMLTextAreaElement | null>(null);
+  const insertContent  = makeInserter(contentRef,  content,  setContent);
+  const insertAnswer   = makeInserter(answerRef,   answer,   setAnswer);
+  const insertAnalysis = makeInserter(analysisRef, analysis, setAnalysis);
 
   const toggleTopic = useCallback((id: string) => {
     setTopicIds(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]);
@@ -175,6 +256,7 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
       source: source.trim() || null,
       topic_ids: topicIds,
       status,
+      interactive_sandbox: sandbox,
     };
 
     startTransition(async () => {
@@ -241,14 +323,25 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
       {/* ── 表单主体 ── */}
       <div className="flex-1 mx-auto max-w-7xl w-full px-4 sm:px-6 py-8 space-y-8">
 
-        {/* 题目正文：永久分屏 */}
-        <SplitField
-          label="题目正文 *"
-          value={content}
-          onChange={setContent}
-          placeholder={`支持 Markdown 与 LaTeX，例如：\n\n已知椭圆 $C:\\dfrac{x^2}{4}+y^2=1$，…\n\n**(1)** 求…\n\n**(2)** 证明…`}
-          rows={12}
-        />
+        {/* 题目正文：永久分屏 + AI 补图按钮 */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-zinc-400">
+              题目正文 *
+            </span>
+            <div className="flex items-center gap-2">
+              <ScreenshotToLatexButton onInsert={insertContent} />
+              <AiFigureButton content={content} onContentChange={setContent} />
+            </div>
+          </div>
+          <SplitFieldNoLabel
+            value={content}
+            onChange={setContent}
+            textareaRef={contentRef}
+            placeholder={`支持 Markdown 与 LaTeX，例如：\n\n已知椭圆 $C:\\dfrac{x^2}{4}+y^2=1$，…\n\n需要画图处插入占位符：\n<!--FIG:椭圆C,长轴沿x轴,焦点F1F2-->\n\n**(1)** 求…\n\n**(2)** 证明…`}
+            rows={12}
+          />
+        </div>
 
         {/* 答案 + 解析：可开启分屏预览 */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -256,12 +349,16 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
             label="标准答案 *"
             value={answer}
             onChange={setAnswer}
+            textareaRef={answerRef}
+            headerActions={<ScreenshotToLatexButton onInsert={insertAnswer} />}
             placeholder="$x=1$ 或 $\dfrac{\sqrt{2}}{2}$…"
           />
           <CollapsibleField
             label="解析"
             value={analysis}
             onChange={setAnalysis}
+            textareaRef={analysisRef}
+            headerActions={<ScreenshotToLatexButton onInsert={insertAnalysis} />}
             placeholder="**第(1)步：**\n\n由条件可得 $f'(x)=\cdots$…"
           />
         </div>
@@ -372,7 +469,204 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
             </div>
           )}
         </div>
+
+        {/* ── 交互式 Rive 沙盒（可选） ── */}
+        <SandboxConfigSection
+          value={sandbox}
+          onChange={setSandbox}
+          parseError={sandboxError}
+          onParseError={setSandboxError}
+        />
       </div>
+    </div>
+  );
+}
+
+// ── 沙盒配置子组件 ───────────────────────────────────────────
+
+function SandboxConfigSection({
+  value,
+  onChange,
+  parseError,
+  onParseError,
+}: {
+  value: InteractiveSandboxConfig | null;
+  onChange: (v: InteractiveSandboxConfig | null) => void;
+  parseError: string | null;
+  onParseError: (e: string | null) => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [controlsDraft, setControlsDraft] = useState<string>(
+    value?.controls ? JSON.stringify(value.controls, null, 2) : DEFAULT_CONTROLS_TEMPLATE,
+  );
+
+  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    const fd = new FormData();
+    fd.append('file', file);
+    const result = await uploadRiveAsset(fd);
+    setUploading(false);
+    if (!result.success || !result.url) {
+      setUploadError(result.error ?? '上传失败');
+      return;
+    }
+    onChange({
+      asset_path: result.url,
+      state_machine: value?.state_machine ?? 'State Machine 1',
+      controls: value?.controls ?? [],
+    });
+  }
+
+  function commitControls() {
+    if (!value) return;
+    try {
+      const parsed = JSON.parse(controlsDraft) as SandboxControl[];
+      if (!Array.isArray(parsed)) throw new Error('controls 必须是数组');
+      onChange({ ...value, controls: parsed });
+      onParseError(null);
+    } catch (e) {
+      onParseError(e instanceof Error ? e.message : '无法解析 JSON');
+    }
+  }
+
+  if (!value) {
+    return (
+      <div className="rounded-2xl border border-dashed border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-6 py-5">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-[0.6875rem] font-semibold uppercase tracking-widest text-zinc-400 mb-1">
+              交互式动画沙盒（可选）
+            </p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+              上传 .riv 文件即可让本题在题目卡片中嵌入可拖动的 Rive 交互动画。
+            </p>
+          </div>
+          <label
+            className={[
+              'shrink-0 inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border transition-colors cursor-pointer',
+              uploading
+                ? 'border-zinc-200 text-zinc-300 cursor-wait'
+                : 'border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40',
+            ].join(' ')}
+          >
+            {uploading ? <Loader2 size={13} className="animate-spin" /> : <Send size={13} />}
+            {uploading ? '上传中…' : '上传 .riv 文件'}
+            <input
+              type="file"
+              accept=".riv"
+              onChange={handleFile}
+              disabled={uploading}
+              className="sr-only"
+            />
+          </label>
+        </div>
+        {uploadError && <p className="mt-2 text-xs text-red-500">{uploadError}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-white dark:bg-zinc-900 shadow-sm px-6 py-5 space-y-5">
+      <div className="flex items-center justify-between">
+        <p className="text-[0.6875rem] font-semibold uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+          交互式动画沙盒
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            onChange(null);
+            onParseError(null);
+          }}
+          className="text-xs text-zinc-400 hover:text-red-500 transition-colors"
+        >
+          移除沙盒配置
+        </button>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-zinc-400">
+            .riv 资源 URL
+          </label>
+          <input
+            type="text"
+            value={value.asset_path}
+            onChange={(e) => onChange({ ...value, asset_path: e.target.value })}
+            className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 px-3 py-2 text-xs font-mono text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+          <label
+            className={[
+              'inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded border transition-colors cursor-pointer',
+              uploading
+                ? 'border-zinc-200 text-zinc-300 cursor-wait'
+                : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-indigo-300 hover:text-indigo-600',
+            ].join(' ')}
+          >
+            {uploading ? '上传中…' : '替换文件'}
+            <input
+              type="file"
+              accept=".riv"
+              onChange={handleFile}
+              disabled={uploading}
+              className="sr-only"
+            />
+          </label>
+          {uploadError && <p className="text-xs text-red-500">{uploadError}</p>}
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-zinc-400">
+            状态机名称
+          </label>
+          <input
+            type="text"
+            value={value.state_machine}
+            onChange={(e) => onChange({ ...value, state_machine: e.target.value })}
+            placeholder="State Machine 1"
+            className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 px-3 py-2 text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          />
+        </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-zinc-400">
+            控件 JSON 配置
+          </label>
+          <button
+            type="button"
+            onClick={commitControls}
+            className="text-xs px-2 py-1 rounded border border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 transition-colors"
+          >
+            应用配置
+          </button>
+        </div>
+        <textarea
+          value={controlsDraft}
+          onChange={(e) => setControlsDraft(e.target.value)}
+          rows={10}
+          className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 px-3 py-2 text-xs font-mono text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+        />
+        {parseError && <p className="text-xs text-red-500">JSON 解析错误：{parseError}</p>}
+        <p className="text-xs text-zinc-400 dark:text-zinc-500 leading-relaxed">
+          每个控件需指定 <code>input_name</code>（与 Rive 内 Input 名一致）、<code>type</code>
+          （<code>number</code> | <code>boolean</code> | <code>trigger</code>）、<code>label</code>。
+          <code>number</code> 还需 <code>min</code>、<code>max</code>、<code>default</code>。
+        </p>
+      </div>
+
+      {value.asset_path && (
+        <div className="space-y-1.5">
+          <p className="text-[0.6875rem] font-semibold uppercase tracking-widest text-zinc-400">
+            实时预览
+          </p>
+          <QuestionInteractiveSandbox config={value} />
+        </div>
+      )}
     </div>
   );
 }

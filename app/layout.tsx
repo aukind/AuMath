@@ -4,6 +4,7 @@ import "./globals.css";
 // KaTeX 字体与符号样式必须全局引入，MathRenderer 渲染的数学公式才能正确显示
 import "katex/dist/katex.min.css";
 import { ThemeProvider } from "@/components/ThemeProvider";
+import { Toaster } from "sonner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -16,8 +17,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "高阶数学题库",
-  description: "面向高考拔高训练的数学题库，支持 LaTeX 公式渲染",
+  title: "AuMath",
+  description: "打造属于你个人的数学学习网站",
 };
 
 export default function RootLayout({
@@ -34,6 +35,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
           {children}
+          <Toaster richColors position="top-right" />
         </ThemeProvider>
       </body>
     </html>

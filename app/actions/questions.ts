@@ -3,7 +3,8 @@
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
-import type { QuestionWithTopics, TopicWithChildren, TopicRow, QuestionType, Difficulty, QuestionStatus } from '@/types/database';
+import { isAdminUser } from '@/lib/utils/auth';
+import type { QuestionWithTopics, QuestionWithNumber, PaperRow, TopicWithChildren, TopicRow, QuestionType, Difficulty, QuestionStatus, InteractiveSandboxConfig } from '@/types/database';
 
 // ── 录题 ─────────────────────────────────────────────────────
 
@@ -17,29 +18,39 @@ export interface CreateQuestionInput {
   source: string | null;
   topic_ids: string[];
   status: QuestionStatus;
+  interactive_sandbox?: InteractiveSandboxConfig | null;
 }
 
 export async function createQuestion(
   input: CreateQuestionInput,
 ): Promise<{ success: boolean; error?: string; id?: string }> {
-  let supabase;
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: '请先登录' };
+
+  let admin;
   try {
-    supabase = createAdminClient();
+    admin = createAdminClient();
   } catch {
     return { success: false, error: '服务端配置错误：缺少 SUPABASE_SERVICE_ROLE_KEY' };
   }
 
-  const { data, error } = await supabase
+  const asAdmin = isAdminUser(user);
+
+  const { data, error } = await admin
     .from('questions')
     .insert({
-      content:       input.content,
-      answer:        input.answer,
-      analysis:      input.analysis,
-      question_type: input.question_type,
-      difficulty:    input.difficulty,
-      year:          input.year,
-      source:        input.source,
-      status:        input.status,
+      content:             input.content,
+      answer:              input.answer,
+      analysis:            input.analysis,
+      question_type:       input.question_type,
+      difficulty:          input.difficulty,
+      year:                input.year,
+      source:              input.source,
+      status:              input.status,
+      is_public:           asAdmin,
+      created_by:          user.id,
+      interactive_sandbox: input.interactive_sandbox ?? null,
     })
     .select('id')
     .single();
@@ -47,7 +58,7 @@ export async function createQuestion(
   if (error) return { success: false, error: error.message };
 
   if (input.topic_ids.length > 0) {
-    const { error: relError } = await supabase
+    const { error: relError } = await admin
       .from('question_topic_relations')
       .insert(input.topic_ids.map(tid => ({ question_id: data.id, topic_id: tid })));
     if (relError) return { success: false, error: relError.message };
@@ -70,6 +81,7 @@ export interface QuestionForEdit {
   source: string | null;
   status: QuestionStatus;
   topic_ids: string[];
+  interactive_sandbox: InteractiveSandboxConfig | null;
 }
 
 export async function getQuestionById(id: string): Promise<QuestionForEdit | null> {
@@ -78,23 +90,24 @@ export async function getQuestionById(id: string): Promise<QuestionForEdit | nul
 
   const { data, error } = await supabase
     .from('questions')
-    .select('id, content, answer, analysis, question_type, difficulty, year, source, status, question_topic_relations(topic_id)')
+    .select('id, content, answer, analysis, question_type, difficulty, year, source, status, interactive_sandbox, question_topic_relations(topic_id)')
     .eq('id', id)
     .single();
 
   if (error || !data) return null;
 
   return {
-    id:            data.id,
-    content:       data.content,
-    answer:        data.answer,
-    analysis:      (data as any).analysis ?? '',
-    question_type: (data as any).question_type ?? 'calculation',
-    difficulty:    data.difficulty as Difficulty,
-    year:          data.year ?? null,
-    source:        data.source ?? null,
-    status:        (data as any).status ?? 'published',
-    topic_ids:     ((data as any).question_topic_relations ?? []).map((r: any) => r.topic_id),
+    id:                  data.id,
+    content:             data.content,
+    answer:              data.answer,
+    analysis:            (data as any).analysis ?? '',
+    question_type:       (data as any).question_type ?? 'calculation',
+    difficulty:          data.difficulty as Difficulty,
+    year:                data.year ?? null,
+    source:              data.source ?? null,
+    status:              (data as any).status ?? 'published',
+    topic_ids:           ((data as any).question_topic_relations ?? []).map((r: any) => r.topic_id),
+    interactive_sandbox: ((data as any).interactive_sandbox ?? null) as InteractiveSandboxConfig | null,
   };
 }
 
@@ -112,14 +125,15 @@ export async function updateQuestion(
   const { error } = await supabase
     .from('questions')
     .update({
-      content:       input.content,
-      answer:        input.answer,
-      analysis:      input.analysis,
-      question_type: input.question_type,
-      difficulty:    input.difficulty,
-      year:          input.year,
-      source:        input.source,
-      status:        input.status,
+      content:             input.content,
+      answer:              input.answer,
+      analysis:            input.analysis,
+      question_type:       input.question_type,
+      difficulty:          input.difficulty,
+      year:                input.year,
+      source:              input.source,
+      status:              input.status,
+      interactive_sandbox: input.interactive_sandbox ?? null,
     })
     .eq('id', id);
 
@@ -141,11 +155,13 @@ export async function updateQuestion(
 }
 
 export type SortOrder = 'difficulty_asc' | 'difficulty_desc' | 'updated_at_desc';
+export type BankView  = 'public' | 'private';
 
 export async function getQuestions(
   topicId?: string,
   sort: SortOrder = 'updated_at_desc',
   limit = 20,
+  bankView: BankView = 'public',
 ): Promise<QuestionWithTopics[]> {
   let supabase;
   try {
@@ -154,19 +170,50 @@ export async function getQuestions(
     return [];
   }
 
-  // 使用 !inner 让 topicId 过滤作用于父行（question），而非仅过滤嵌套行
-  const select = topicId
-    ? `*, question_topic_relations!inner(question_id, topic_id, topics(*))`
-    : `*, question_topic_relations(question_id, topic_id, topics(*))`;
+  // 私人题库：只返回当前用户自己录入的私有题目
+  if (bankView === 'private') {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return [];
+
+    const { data, error } = await supabase
+      .from('questions')
+      .select('*, question_topic_relations(question_id, topic_id, topics(*))')
+      .eq('is_public', false)
+      .eq('created_by', user.id)
+      .order('updated_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error('[getQuestions/private]', error.message);
+      return [];
+    }
+    return (data ?? []) as unknown as QuestionWithTopics[];
+  }
+
+  // 公共题库：先从关联表查出所有 question_id，再精确查 questions
+  let matchingIds: string[] | null = null;
+  if (topicId) {
+    const { data: rels, error: relErr } = await supabase
+      .from('question_topic_relations')
+      .select('question_id')
+      .eq('topic_id', topicId);
+    if (relErr) {
+      console.error('[getQuestions] topic relations lookup:', relErr.message);
+      return [];
+    }
+    matchingIds = (rels ?? []).map((r: { question_id: string }) => r.question_id);
+    if (matchingIds.length === 0) return [];
+  }
 
   let query = supabase
     .from('questions')
-    .select(select)
+    .select('*, question_topic_relations(question_id, topic_id, topics(*))')
     .eq('status', 'published')
-    .limit(limit);
+    .eq('is_public', true)
+    .limit(matchingIds ? 200 : limit);
 
-  if (topicId) {
-    query = query.eq('question_topic_relations.topic_id', topicId);
+  if (matchingIds) {
+    query = query.in('id', matchingIds);
   }
 
   switch (sort) {
@@ -223,7 +270,7 @@ export async function getQuestionTopics(): Promise<TopicWithChildren[]> {
   const { data, error } = await supabase
     .from('topics')
     .select('*')
-    .order('sort_order', { ascending: true });
+    .order('order_index', { ascending: true });
 
   if (error) {
     console.error('[getQuestionTopics]', error.message);
@@ -231,4 +278,197 @@ export async function getQuestionTopics(): Promise<TopicWithChildren[]> {
   }
 
   return buildTopicTree((data ?? []) as TopicRow[]);
+}
+
+// ── 试卷查询 ──────────────────────────────────────────────────
+
+export async function getPapers(): Promise<PaperRow[]> {
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch {
+    return [];
+  }
+
+  type PaperRaw = { id: string; title: string; year: number | null; type: 'real' | 'mock'; grade: string | null; created_at: string; updated_at: string };
+  type PqRaw = { paper_id: string };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any;
+
+  // 分页拉全 paper_questions —— Supabase 默认 range 0-999，行数破千后会被悄悄截断，
+  // 导致部分试卷在 countMap 里缺失、PaperList 不显示题数徽章。
+  async function fetchAllPaperQuestionIds(): Promise<PqRaw[]> {
+    const PAGE = 1000;
+    const all: PqRaw[] = [];
+    for (let offset = 0; ; offset += PAGE) {
+      const { data, error } = await sb
+        .from('paper_questions')
+        .select('paper_id')
+        .range(offset, offset + PAGE - 1) as { data: PqRaw[] | null; error: { message: string } | null };
+      if (error) {
+        console.error('[getPapers] paper_questions page', offset, error.message);
+        break;
+      }
+      if (!data || data.length === 0) break;
+      all.push(...data);
+      if (data.length < PAGE) break;
+    }
+    return all;
+  }
+
+  const [papersResult, pqRows] = await Promise.all([
+    sb.from('papers')
+      .select('id, title, year, type, grade, created_at, updated_at')
+      .order('year', { ascending: false, nullsFirst: false })
+      .order('created_at', { ascending: false }) as Promise<{ data: PaperRaw[] | null; error: { message: string } | null }>,
+    fetchAllPaperQuestionIds(),
+  ]);
+
+  if (papersResult.error) {
+    console.error('[getPapers]', papersResult.error.message);
+    return [];
+  }
+
+  const countMap = new Map<string, number>();
+  for (const pq of pqRows) {
+    countMap.set(pq.paper_id, (countMap.get(pq.paper_id) ?? 0) + 1);
+  }
+
+  return (papersResult.data ?? []).map(p => ({
+    ...p,
+    total_questions: countMap.get(p.id) ?? 0,
+  })) as PaperRow[];
+}
+
+export interface PaperQuestionsResult {
+  paper: PaperRow | null;
+  questions: QuestionWithNumber[];
+}
+
+// ── 删除题目 ──────────────────────────────────────────────────
+
+export async function deleteQuestion(
+  id: string,
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: '未授权' };
+
+  let admin;
+  try { admin = createAdminClient(); } catch {
+    return { success: false, error: '服务端配置错误' };
+  }
+
+  // 权限校验：管理员可删任意题；普通用户只能删自己的私有题
+  const { data: q } = await admin.from('questions').select('created_by, is_public').eq('id', id).single();
+  if (!isAdminUser(user)) {
+    if (!q || q.is_public || q.created_by !== user.id) {
+      return { success: false, error: '无权限删除该题目' };
+    }
+  }
+
+  await admin.from('question_topic_relations').delete().eq('question_id', id);
+  await (admin as any).from('paper_questions').delete().eq('question_id', id);
+  const { error } = await admin.from('questions').delete().eq('id', id);
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath('/');
+  return { success: true };
+}
+
+// ── 拖拽归类：更新题目的知识点 ──────────────────────────────────
+
+export async function updateQuestionCategory(
+  questionId: string,
+  topicId: string,
+  categoryName: string,
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: '未授权' };
+
+  let admin;
+  try { admin = createAdminClient(); } catch {
+    return { success: false, error: '服务端配置错误' };
+  }
+
+  // 权限校验：管理员可改任意题；普通用户只能改自己的私有题
+  const { data: existing } = await admin.from('questions').select('created_by, is_public, metadata').eq('id', questionId).single();
+  if (!isAdminUser(user)) {
+    if (!existing || existing.is_public || existing.created_by !== user.id) {
+      return { success: false, error: '无权限修改该题目' };
+    }
+  }
+
+  const metadata = { ...(existing?.metadata as Record<string, unknown> ?? {}), tags: [categoryName] };
+  await admin.from('questions').update({ metadata }).eq('id', questionId);
+
+  const { error: delErr } = await admin
+    .from('question_topic_relations')
+    .delete()
+    .eq('question_id', questionId);
+  if (delErr) {
+    console.error('[updateQuestionCategory] delete:', delErr.message);
+    return { success: false, error: `删除旧关联失败：${delErr.message}` };
+  }
+
+  const { error: insErr } = await admin
+    .from('question_topic_relations')
+    .insert({ question_id: questionId, topic_id: topicId });
+  if (insErr) {
+    console.error('[updateQuestionCategory] insert:', insErr.message);
+    return { success: false, error: `写入分类失败：${insErr.message}` };
+  }
+
+  revalidatePath('/');
+  return { success: true };
+}
+
+export async function getQuestionsByPaperId(paperId: string): Promise<PaperQuestionsResult> {
+  let supabase;
+  try {
+    supabase = await createClient();
+  } catch {
+    return { paper: null, questions: [] };
+  }
+
+  const [{ data: paper, error: paperErr }, { data: rows, error: rowsErr }] = await Promise.all([
+    supabase
+      .from('papers')
+      .select('id, title, year, type, grade, created_at, updated_at')
+      .eq('id', paperId)
+      .single(),
+    // paper_questions → questions，严格按 question_number ASC 排序
+    supabase
+      .from('paper_questions')
+      .select(`
+        question_number,
+        questions (
+          *,
+          question_topic_relations (question_id, topic_id, topics(*))
+        )
+      `)
+      .eq('paper_id', paperId)
+      .order('question_number', { ascending: true }),
+  ]);
+
+  if (paperErr) {
+    console.error('[getQuestionsByPaperId] paper lookup', paperErr.message);
+    return { paper: null, questions: [] };
+  }
+
+  if (rowsErr) {
+    console.error('[getQuestionsByPaperId] questions lookup', rowsErr.message);
+    return { paper: paper as PaperRow, questions: [] };
+  }
+
+  const questions: QuestionWithNumber[] = (rows ?? [])
+    .filter((row: any) => row.questions)
+    .map((row: any) => ({
+      ...(row.questions as QuestionWithTopics),
+      question_number: row.question_number as number,
+    }));
+
+  return { paper: paper as PaperRow, questions };
 }

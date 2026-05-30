@@ -13,3 +13,8 @@
 3. 数据库设计要充分利用 PostgreSQL 的 JSONB 字段特性，以应对多变的题目属性。
 4. 组件拆分：凡是涉及状态交互（如在线讨论、点赞）的标记为 `"use client"`；静态题目渲染和目录树优先保留为 Server Components 以保证极致的首屏加载速度和 SEO。
 5. 在处理数学公式渲染时，务必处理好 LaTeX 转义字符和 KaTeX 样式加载。】
+# Math Platform Project Context
+- 核心开发者：au
+- 生产环境域名：https://aumath.com
+- 技术栈：Next.js, Tailwind, Supabase, KaTeX
+- 核心规则：涉及到生产环境的 URL 跳转，必须使用 aumath.com；所有 LaTeX 公式渲染必须严格规范化。

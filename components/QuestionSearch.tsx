@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo, useEffect } from 'react';
+import { useDraggable } from '@dnd-kit/core';
 import { Search, X, SearchX, FileText } from 'lucide-react';
 import QuestionCard from '@/components/QuestionCard';
 import PrintContainer from '@/components/PrintContainer';
@@ -9,9 +10,13 @@ import type { QuestionWithTopics } from '@/types/database';
 interface Props {
   questions: QuestionWithTopics[];
   isAdmin: boolean;
+  userId?: string;
+  onDelete?: (id: string) => void;
+  isLoggedIn?: boolean;
+  favoritedIds?: string[];
+  erroredIds?: string[];
 }
 
-/** 去掉 LaTeX 定界符和反斜杠命令，仅保留中文和字母，提升搜索准确性 */
 function stripLatex(text: string): string {
   return text
     .replace(/\$\$[\s\S]*?\$\$/g, ' ')
@@ -31,10 +36,51 @@ function matchesQuery(question: QuestionWithTopics, q: string): boolean {
   return fields.some(f => stripLatex(f).toLowerCase().includes(q));
 }
 
-export default function QuestionSearch({ questions, isAdmin }: Props) {
+function DraggableCard({
+  question,
+  isAdmin,
+  canModify,
+  onDelete,
+  isLoggedIn,
+  initialFavorited,
+  initialErrored,
+}: {
+  question: QuestionWithTopics;
+  isAdmin: boolean;
+  canModify: boolean;
+  onDelete?: (id: string) => void;
+  isLoggedIn?: boolean;
+  initialFavorited?: boolean;
+  initialErrored?: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: question.id,
+    disabled: !canModify,
+  });
+
+  return (
+    <div ref={setNodeRef}>
+      <QuestionCard
+        question={question}
+        isAdmin={isAdmin}
+        canModify={canModify}
+        onDelete={canModify ? onDelete : undefined}
+        isDragging={isDragging}
+        dragHandleProps={canModify ? { ...listeners, ...attributes } : undefined}
+        isLoggedIn={isLoggedIn}
+        initialFavorited={initialFavorited}
+        initialErrored={initialErrored}
+      />
+    </div>
+  );
+}
+
+export default function QuestionSearch({ questions, isAdmin, userId, onDelete, isLoggedIn = false, favoritedIds = [], erroredIds = [] }: Props) {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [printQuestions, setPrintQuestions] = useState<QuestionWithTopics[]>([]);
+  const [showGuide, setShowGuide] = useState(false);
+  const [pendingPrint, setPendingPrint] = useState<QuestionWithTopics[]>([]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -47,7 +93,6 @@ export default function QuestionSearch({ questions, isAdmin }: Props) {
   const allFilteredSelected =
     filtered.length > 0 && filtered.every(q => selectedIds.has(q.id));
 
-  // Wait for KaTeX to render inside the portal, then trigger print dialog
   useEffect(() => {
     if (printQuestions.length === 0) return;
     const timer = setTimeout(() => {
@@ -79,15 +124,20 @@ export default function QuestionSearch({ questions, isAdmin }: Props) {
   }
 
   function handleGeneratePDF() {
-    // Preserve the filtered display order
     const selected = filtered.filter(q => selectedIds.has(q.id));
     if (selected.length === 0) return;
-    setPrintQuestions(selected);
+    setPendingPrint(selected);
+    setShowGuide(true);
+  }
+
+  function handleConfirmPrint() {
+    setShowGuide(false);
+    setPrintQuestions(pendingPrint);
   }
 
   return (
     <div>
-      {/* Search bar + Generate PDF button */}
+      {/* Search bar */}
       <div className="flex gap-3 max-w-3xl mb-3 items-center">
         <div className="relative flex-1">
           <Search
@@ -130,7 +180,7 @@ export default function QuestionSearch({ questions, isAdmin }: Props) {
         </button>
       </div>
 
-      {/* Selection controls row */}
+      {/* Selection controls */}
       {filtered.length > 0 && (
         <div className="flex items-center gap-4 max-w-3xl mb-4 px-0.5">
           <label className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400 cursor-pointer select-none">
@@ -142,13 +192,11 @@ export default function QuestionSearch({ questions, isAdmin }: Props) {
             />
             全选当前列表（{filtered.length} 题）
           </label>
-
           {selectedCount > 0 && (
             <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
               已选 {selectedCount} 题
             </span>
           )}
-
           {isSearching && (
             <span className="ml-auto text-xs text-zinc-400">
               找到{' '}
@@ -161,7 +209,7 @@ export default function QuestionSearch({ questions, isAdmin }: Props) {
         </div>
       )}
 
-      {/* Empty search state */}
+      {/* Card list */}
       {isSearching && filtered.length === 0 ? (
         <EmptySearch query={query} />
       ) : (
@@ -177,15 +225,77 @@ export default function QuestionSearch({ questions, isAdmin }: Props) {
                 />
               </label>
               <div className="flex-1 min-w-0">
-                <QuestionCard question={q} isAdmin={isAdmin} />
+                <DraggableCard
+                  question={q}
+                  isAdmin={isAdmin}
+                  canModify={isAdmin || (!!userId && q.created_by === userId)}
+                  onDelete={onDelete}
+                  isLoggedIn={isLoggedIn}
+                  initialFavorited={favoritedIds.includes(q.id)}
+                  initialErrored={erroredIds.includes(q.id)}
+                />
               </div>
             </div>
           ))}
         </div>
       )}
 
-      {/* Print portal — hidden on screen, visible only when printing */}
       <PrintContainer questions={printQuestions} />
+
+      {/* PDF guide modal */}
+      {showGuide && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setShowGuide(false)}
+          />
+          <div className="relative bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-sm p-6 border border-zinc-200 dark:border-zinc-800">
+            <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/40 mb-4 mx-auto">
+              <FileText size={22} className="text-blue-600 dark:text-blue-400" />
+            </div>
+            <h2 className="text-center font-semibold text-zinc-900 dark:text-zinc-100 mb-1">
+              即将打开打印对话框
+            </h2>
+            <p className="text-center text-sm text-zinc-500 dark:text-zinc-400 mb-5">
+              在对话框中选择「另存为 PDF」即可保存讲义
+            </p>
+            <div className="space-y-2 mb-6 text-sm">
+              <div className="flex items-baseline gap-3 px-3 py-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/60">
+                <span className="shrink-0 w-24 text-zinc-400 text-xs">Chrome / Edge</span>
+                <span className="text-zinc-600 dark:text-zinc-300">
+                  目标打印机 → <strong className="text-zinc-800 dark:text-zinc-200">另存为 PDF</strong> → 保存
+                </span>
+              </div>
+              <div className="flex items-baseline gap-3 px-3 py-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/60">
+                <span className="shrink-0 w-24 text-zinc-400 text-xs">Safari（Mac）</span>
+                <span className="text-zinc-600 dark:text-zinc-300">
+                  左下角 <strong className="text-zinc-800 dark:text-zinc-200">PDF</strong> → 存储为 PDF
+                </span>
+              </div>
+              <div className="flex items-baseline gap-3 px-3 py-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/60">
+                <span className="shrink-0 w-24 text-zinc-400 text-xs">Firefox</span>
+                <span className="text-zinc-600 dark:text-zinc-300">
+                  打印机 → <strong className="text-zinc-800 dark:text-zinc-200">另存为 PDF</strong>
+                </span>
+              </div>
+            </div>
+            <div className="flex gap-2.5">
+              <button
+                onClick={() => setShowGuide(false)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleConfirmPrint}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all"
+              >
+                确定，继续
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
