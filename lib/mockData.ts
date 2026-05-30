@@ -127,6 +127,8 @@ $$|PA|^2+|PB|^2 = 2|PM|^2+\\frac{|AB|^2}{2}$$
     },
     created_at: '2024-03-15T08:00:00Z',
     updated_at: '2024-03-15T08:00:00Z',
+    is_public: true,
+    created_by: null,
     question_topic_relations: [
       {
         question_id: 'q-001',
@@ -216,6 +218,8 @@ $f(x)\\leq 0$ 对 $x>0$ 恒成立，即 $f$ 的最大值 $\\leq 0$。
     },
     created_at: '2024-02-20T10:00:00Z',
     updated_at: '2024-02-20T10:00:00Z',
+    is_public: true,
+    created_by: null,
     question_topic_relations: [
       {
         question_id: 'q-002',

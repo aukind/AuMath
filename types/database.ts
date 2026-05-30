@@ -20,6 +20,41 @@ export interface Variation {
   hint?: string;
 }
 
+// ── 交互式 Rive 沙盒配置 ─────────────────────────────────────
+
+/** 单个可交互控件：数值滑块 / 布尔开关 / 触发按钮 */
+export type SandboxControl =
+  | {
+      input_name: string;
+      type: 'number';
+      label: string;
+      default: number;
+      min: number;
+      max: number;
+      step?: number;
+    }
+  | {
+      input_name: string;
+      type: 'boolean';
+      label: string;
+      default: boolean;
+    }
+  | {
+      input_name: string;
+      type: 'trigger';
+      label: string;
+    };
+
+/** questions.interactive_sandbox JSONB 字段结构 */
+export interface InteractiveSandboxConfig {
+  /** .riv 文件的完整公开 URL（Supabase Storage 或任意 CDN） */
+  asset_path: string;
+  /** Rive 状态机名称，必须与文件内定义一致 */
+  state_machine: string;
+  /** 暴露给学生的控件列表，按数组顺序在 UI 中渲染 */
+  controls: SandboxControl[];
+}
+
 /** questions.metadata JSONB 字段的结构，可按需扩展 */
 export interface QuestionMetadata {
   /** 在原试卷中的题号，如 "第12题" */
@@ -30,6 +65,8 @@ export interface QuestionMetadata {
   time_limit_minutes?: number;
   /** 自由标签（补充 topics 树结构之外的灵活分类） */
   tags?: string[];
+  /** 选择题选项，如 ["A. ...", "B. ...", "C. ...", "D. ..."] */
+  options?: string[] | Record<string, string>;
   /** 相关定理，如 ["韦达定理", "判别式"] */
   related_theorems?: string[];
   /** 常见错误，用于教学提示 */
@@ -82,6 +119,12 @@ export interface QuestionRow {
   status: QuestionStatus;
   variations: Variation[];
   metadata: QuestionMetadata;
+  /** true = 公共题库（所有人可见）；false = 创建者私有 */
+  is_public: boolean;
+  /** 创建者的 auth.users.id；管理员题目可为 null */
+  created_by: string | null;
+  /** 可选：交互式 Rive 沙盒配置，NULL 表示无 */
+  interactive_sandbox?: InteractiveSandboxConfig | null;
   created_at: string;
   updated_at: string;
 }
@@ -163,4 +206,44 @@ export interface TopicWithChildren extends TopicRow {
 export interface TopicWithCount extends TopicRow {
   question_count: number;
   children: TopicWithCount[];
+}
+
+// ── 试卷相关类型 ──────────────────────────────────────────────
+
+export type PaperType  = 'real' | 'mock';
+export type PaperGrade = 'high_school_1' | 'high_school_2' | 'high_school_3';
+
+export interface PaperRow {
+  id: string;
+  title: string;
+  year: number | null;
+  /** 'real' = 高考真题；'mock' = 模拟题。migration 004 前查询的旧数据可能为 undefined */
+  type?: PaperType;
+  /** 仅模拟题有值，区分高一/高二/高三 */
+  grade?: PaperGrade | null;
+  created_at: string;
+  updated_at: string;
+  /** 题目总数，由 getPapers() 聚合计算后附加，DB 中无此列 */
+  total_questions?: number;
+}
+
+// ── 个人工作区类型 ─────────────────────────────────────────────
+
+export type WorkspaceType = 'favorites' | 'errors' | 'history';
+
+export interface WorkspaceCounts {
+  favorites: number;
+  errors: number;
+  history: number;
+}
+
+export interface PaperQuestionRow {
+  paper_id: string;
+  question_id: string;
+  question_number: number;
+}
+
+/** 带原卷题号的题目（用于整卷视图的有序渲染） */
+export interface QuestionWithNumber extends QuestionWithTopics {
+  question_number: number;
 }
