@@ -4,8 +4,7 @@ import { useState } from 'react';
 import TopicCategories from '@/components/TopicCategories';
 import PaperList from '@/components/PaperList';
 import MockPapers from '@/components/MockPapers';
-import WorkspaceSection from '@/components/WorkspaceSection';
-import type { TopicWithChildren, PaperRow, WorkspaceCounts } from '@/types/database';
+import type { TopicWithChildren, PaperRow } from '@/types/database';
 
 type Tab = 'topics' | 'real' | 'mock';
 
@@ -15,8 +14,6 @@ interface SidebarTabsProps {
   selectedTopicId?: string;
   selectedPaperId?: string;
   isAdmin?: boolean;
-  workspaceCounts?: WorkspaceCounts;
-  activeWorkspace?: string;
 }
 
 export default function SidebarTabs({
@@ -25,8 +22,6 @@ export default function SidebarTabs({
   selectedTopicId,
   selectedPaperId,
   isAdmin = false,
-  workspaceCounts,
-  activeWorkspace,
 }: SidebarTabsProps) {
   const [tab, setTab] = useState<Tab>(() => {
     if (selectedPaperId) {
@@ -41,14 +36,7 @@ export default function SidebarTabs({
 
   return (
     <div className="flex flex-col gap-3 flex-1 min-h-0">
-      {/* ── 个人工作区（三轨Tab上方） ── */}
-      <WorkspaceSection
-        counts={workspaceCounts ?? { favorites: 0, errors: 0, history: 0 }}
-        isLoggedIn={isAdmin}
-        activeWorkspace={activeWorkspace}
-      />
-
-      {/* ── 3-Tab 切换器 ── */}
+      {/* ── 3-Tab 切换器（知识点 / 真题 / 模拟题）── */}
       <div className="flex rounded-lg bg-zinc-100 dark:bg-zinc-800/80 p-0.5 gap-0.5">
         <TabButton active={tab === 'topics'} onClick={() => setTab('topics')}>知识点</TabButton>
         <TabButton active={tab === 'real'}   onClick={() => setTab('real')}>真题</TabButton>

@@ -11,14 +11,22 @@ import {
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
-import { GripVertical, PenLine, CheckCircle2, Lock, LogIn, BookOpen, BookMarked } from 'lucide-react';
+import {
+  GripVertical, PenLine, CheckCircle2, Lock, LogIn,
+  MessagesSquare, BookMarked, Star, XCircle, Clock, ChevronLeft, Plus,
+} from 'lucide-react';
 import SidebarTabs from '@/components/SidebarTabs';
 import SortSelect from '@/components/SortSelect';
 import QuestionSearch from '@/components/QuestionSearch';
 import SiteViewsBadge from '@/components/SiteViewsBadge';
+import ForumPostList from '@/components/forum/ForumPostList';
 import { deleteQuestion, updateQuestionCategory } from '@/app/actions/questions';
-import type { SortOrder, BankView } from '@/app/actions/questions';
-import type { TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceCounts, WorkspaceType } from '@/types/database';
+import type { SortOrder } from '@/app/actions/questions';
+import type { TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceType } from '@/types/database';
+import type { ForumPost } from '@/types/forum';
+
+/** 主区显示模式：社区论坛 / 我的题库 / 题目浏览（点侧边栏知识点·真题·模拟题）。 */
+export type MainView = 'forum' | 'mybank' | 'browse';
 
 interface PageLayoutProps {
   topics: TopicWithChildren[];
@@ -32,13 +40,19 @@ interface PageLayoutProps {
   pageTitle: string;
   activePaper: PaperRow | null;
   validSort: SortOrder;
-  bankView: BankView;
-  workspaceCounts: WorkspaceCounts;
-  activeWorkspace?: WorkspaceType;
+  mainView: MainView;
+  forumPosts: ForumPost[];
+  mybankTab: WorkspaceType;
   favoritedIds: string[];
   erroredIds: string[];
   siteViews: number;
 }
+
+const MYBANK_TABS: { key: WorkspaceType; label: string; icon: typeof Star }[] = [
+  { key: 'favorites', label: '我的收藏', icon: Star },
+  { key: 'errors', label: '我的错题', icon: XCircle },
+  { key: 'history', label: '最近浏览', icon: Clock },
+];
 
 export default function PageLayout({
   topics,
@@ -52,9 +66,9 @@ export default function PageLayout({
   pageTitle,
   activePaper,
   validSort,
-  bankView,
-  workspaceCounts,
-  activeWorkspace,
+  mainView,
+  forumPosts,
+  mybankTab,
   favoritedIds,
   erroredIds,
   siteViews,
@@ -89,47 +103,23 @@ export default function PageLayout({
     return () => clearTimeout(t);
   }, [toast]);
 
-  // ── DnD ─────────────────────────────────────────────────────
+  // ── DnD（仅题目浏览模式下用于管理员拖拽归类）─────────────────
   const [activeQuestion, setActiveQuestion] = useState<QuestionWithTopics | null>(null);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-  );
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
 
   function handleDragStart(event: DragStartEvent) {
-    const q = questions.find(q => q.id === event.active.id);
-    setActiveQuestion(q ?? null);
+    setActiveQuestion(questions.find(q => q.id === event.active.id) ?? null);
   }
 
   async function handleDragEnd(event: DragEndEvent) {
     setActiveQuestion(null);
     const { active, over } = event;
     if (!over) return;
-
-    const questionId = active.id as string;
-    const dropTopicId = over.id as string;
     const categoryName = (over.data.current as { name?: string })?.name;
     if (!categoryName) return;
-
-    const result = await updateQuestionCategory(questionId, dropTopicId, categoryName);
-    if (result.success) {
-      showToast(`已归类到「${categoryName}」`);
-    } else {
-      showToast(`归类失败：${result.error}`, 'error');
-    }
+    const result = await updateQuestionCategory(active.id as string, over.id as string, categoryName);
+    showToast(result.success ? `已归类到「${categoryName}」` : `归类失败：${result.error}`, result.success ? 'success' : 'error');
   }
-
-  // ── Bank switcher URL builders ───────────────────────────────
-  function bankHref(view: BankView) {
-    const params = new URLSearchParams();
-    if (view === 'private') params.set('bank', 'private');
-    if (topicId) params.set('topic', topicId);
-    if (paperId) params.set('paper', paperId);
-    const qs = params.toString();
-    return qs ? `/?${qs}` : '/';
-  }
-
-  const isPrivate = bankView === 'private';
 
   return (
     <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -143,19 +133,8 @@ export default function PageLayout({
             selectedTopicId={paperId ? undefined : topicId}
             selectedPaperId={paperId}
             isAdmin={isAdmin}
-            workspaceCounts={workspaceCounts}
-            activeWorkspace={activeWorkspace}
           />
-
           <div className="mt-auto flex flex-col gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
-            {(topicId || paperId) && (
-              <a href="/" className="block text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors">
-                ← 返回全部题目
-              </a>
-            )}
-            <a href="/forum" className="block text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors">
-              💬 社区讨论区
-            </a>
             <SiteViewsBadge initialCount={siteViews} />
           </div>
         </aside>
@@ -163,71 +142,44 @@ export default function PageLayout({
         {/* ── Main content ── */}
         <main className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 py-6">
 
-          {/* ── 公共/私人题库切换器 ── */}
-          {!paperId && !activeWorkspace && (
-            <div className="flex items-center gap-1 mb-5 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800/80 w-fit">
-              <a
-                href={bankHref('public')}
-                className={[
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150',
-                  !isPrivate
-                    ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                    : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300',
-                ].join(' ')}
-              >
-                <BookOpen size={12} />
-                公共题库
-              </a>
-              <a
-                href={bankHref('private')}
-                className={[
-                  'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150',
-                  isPrivate
-                    ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                    : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300',
-                ].join(' ')}
-              >
-                <BookMarked size={12} />
-                我的题库
-              </a>
-            </div>
-          )}
-
-          {/* 私人题库 + 未登录 → 引导登录 */}
-          {isPrivate && !isLoggedIn ? (
-            <PrivateBankGate />
+          {mainView === 'browse' ? (
+            <BrowseView
+              pageTitle={pageTitle}
+              activePaper={activePaper}
+              validSort={validSort}
+              topicId={topicId}
+              paperId={paperId}
+              questions={visibleQuestions}
+              hasTopics={topics.length > 0}
+              isAdmin={isAdmin}
+              isLoggedIn={isLoggedIn}
+              userId={userId}
+              favoritedIds={favoritedIds}
+              erroredIds={erroredIds}
+              onDelete={handleDelete}
+            />
           ) : (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
-                <div>
-                  <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
-                    {isPrivate ? '我的题库' : pageTitle}
-                  </h1>
-                  {activePaper?.year && (
-                    <span className="text-xs text-zinc-400">{activePaper.year} 年</span>
-                  )}
-                  {visibleQuestions.length > 0 && (
-                    <p className="text-xs text-zinc-400 mt-0.5">共 {visibleQuestions.length} 道题</p>
-                  )}
-                </div>
-                {!paperId && !isPrivate && <SortSelect value={validSort} topicId={topicId} />}
+              {/* ── 社区论坛 / 我的题库 切换 ── */}
+              <div className="flex items-center gap-1 mb-5 p-1 rounded-xl bg-zinc-100 dark:bg-zinc-800/80 w-fit">
+                <ModeTab href="/" active={mainView === 'forum'} icon={MessagesSquare}>社区论坛</ModeTab>
+                <ModeTab href="/?view=mybank" active={mainView === 'mybank'} icon={BookMarked}>我的题库</ModeTab>
               </div>
 
-              {visibleQuestions.length === 0 ? (
-                <EmptyState
-                  hasTopics={topics.length > 0}
-                  isAdmin={isAdmin}
-                  isPrivate={isPrivate}
-                />
+              {mainView === 'forum' ? (
+                <ForumPostList posts={forumPosts} canPost={isLoggedIn} />
+              ) : !isLoggedIn ? (
+                <MyBankGate />
               ) : (
-                <QuestionSearch
+                <MyBankView
+                  tab={mybankTab}
                   questions={visibleQuestions}
                   isAdmin={isAdmin}
                   isLoggedIn={isLoggedIn}
                   userId={userId}
-                  onDelete={handleDelete}
                   favoritedIds={favoritedIds}
                   erroredIds={erroredIds}
+                  onDelete={handleDelete}
                 />
               )}
             </>
@@ -265,27 +217,159 @@ export default function PageLayout({
   );
 }
 
-function PrivateBankGate() {
+function ModeTab({
+  href, active, icon: Icon, children,
+}: { href: string; active: boolean; icon: typeof Star; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      className={[
+        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all duration-150',
+        active
+          ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
+          : 'text-zinc-400 dark:text-zinc-500 hover:text-zinc-600 dark:hover:text-zinc-300',
+      ].join(' ')}
+    >
+      <Icon size={12} />
+      {children}
+    </a>
+  );
+}
+
+// ── 题目浏览（点侧边栏知识点 / 真题 / 模拟题）────────────────
+function BrowseView({
+  pageTitle, activePaper, validSort, topicId, paperId,
+  questions, hasTopics, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, onDelete,
+}: {
+  pageTitle: string;
+  activePaper: PaperRow | null;
+  validSort: SortOrder;
+  topicId?: string;
+  paperId?: string;
+  questions: QuestionWithTopics[];
+  hasTopics: boolean;
+  isAdmin: boolean;
+  isLoggedIn: boolean;
+  userId?: string;
+  favoritedIds: string[];
+  erroredIds: string[];
+  onDelete: (id: string) => void;
+}) {
+  return (
+    <>
+      <a href="/" className="inline-flex items-center gap-1 mb-4 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors">
+        <ChevronLeft size={13} /> 返回社区
+      </a>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
+        <div>
+          <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">{pageTitle}</h1>
+          {activePaper?.year && <span className="text-xs text-zinc-400">{activePaper.year} 年</span>}
+          {questions.length > 0 && <p className="text-xs text-zinc-400 mt-0.5">共 {questions.length} 道题</p>}
+        </div>
+        {!paperId && <SortSelect value={validSort} topicId={topicId} />}
+      </div>
+
+      {questions.length === 0 ? (
+        <EmptyBrowse hasTopics={hasTopics} isAdmin={isAdmin} />
+      ) : (
+        <QuestionSearch
+          questions={questions}
+          isAdmin={isAdmin}
+          isLoggedIn={isLoggedIn}
+          userId={userId}
+          onDelete={onDelete}
+          favoritedIds={favoritedIds}
+          erroredIds={erroredIds}
+        />
+      )}
+    </>
+  );
+}
+
+// ── 我的题库（收藏 / 错题 / 最近浏览）────────────────────────
+function MyBankView({
+  tab, questions, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, onDelete,
+}: {
+  tab: WorkspaceType;
+  questions: QuestionWithTopics[];
+  isAdmin: boolean;
+  isLoggedIn: boolean;
+  userId?: string;
+  favoritedIds: string[];
+  erroredIds: string[];
+  onDelete: (id: string) => void;
+}) {
+  const meta: Record<WorkspaceType, { title: string; empty: string }> = {
+    favorites: { title: '我的收藏', empty: '还没有收藏任何题目。浏览题目时点 ★ 即可加入收藏。' },
+    errors: { title: '我的错题', empty: '错题本是空的。做题时标记错题，方便日后复盘。' },
+    history: { title: '最近浏览', empty: '还没有浏览记录。' },
+  };
+
+  return (
+    <div>
+      {/* 子标签 + 自己录题 */}
+      <div className="flex items-center gap-1 mb-5 border-b border-zinc-200 dark:border-zinc-800">
+        {MYBANK_TABS.map(({ key, label, icon: Icon }) => (
+          <a
+            key={key}
+            href={`/?view=mybank&workspace=${key}`}
+            className={[
+              'flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
+              tab === key
+                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
+                : 'border-transparent text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300',
+            ].join(' ')}
+          >
+            <Icon size={14} /> {label}
+          </a>
+        ))}
+        {tab !== 'history' && (
+          <a
+            href={`/mybank/new?target=${tab}`}
+            className="ml-auto mb-1 inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+          >
+            <Plus size={13} /> 自己录题
+          </a>
+        )}
+      </div>
+
+      {questions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-3 py-24 text-center max-w-sm mx-auto">
+          <div className="text-4xl">{tab === 'favorites' ? '⭐' : tab === 'errors' ? '✗' : '🕒'}</div>
+          <h2 className="font-semibold text-zinc-700 dark:text-zinc-300">{meta[tab].title}为空</h2>
+          <p className="text-sm text-zinc-400 leading-relaxed">{meta[tab].empty}</p>
+        </div>
+      ) : (
+        <>
+          <p className="mb-4 text-xs text-zinc-400">共 {questions.length} 道题</p>
+          <QuestionSearch
+            questions={questions}
+            isAdmin={isAdmin}
+            isLoggedIn={isLoggedIn}
+            userId={userId}
+            onDelete={onDelete}
+            favoritedIds={favoritedIds}
+            erroredIds={erroredIds}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+function MyBankGate() {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center max-w-sm mx-auto gap-4">
       <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-zinc-100 dark:bg-zinc-800">
         <Lock size={28} className="text-zinc-400" />
       </div>
       <h2 className="font-semibold text-zinc-800 dark:text-zinc-200 text-base">需要登录</h2>
-      <p className="text-sm text-zinc-400 leading-relaxed">
-        登录后即可查看与管理你的私人题库。
-      </p>
+      <p className="text-sm text-zinc-400 leading-relaxed">登录后即可查看你的收藏、错题与浏览记录。</p>
       <div className="flex gap-2.5 mt-1">
-        <a
-          href="/login"
-          className="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-        >
+        <a href="/login" className="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors">
           <LogIn size={14} /> 立即登录
         </a>
-        <a
-          href="/signup"
-          className="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
-        >
+        <a href="/signup" className="flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
           免费注册
         </a>
       </div>
@@ -293,33 +377,7 @@ function PrivateBankGate() {
   );
 }
 
-function EmptyState({
-  hasTopics,
-  isAdmin,
-  isPrivate,
-}: {
-  hasTopics: boolean;
-  isAdmin: boolean;
-  isPrivate: boolean;
-}) {
-  if (isPrivate) {
-    return (
-      <div className="flex flex-col items-center justify-center py-24 text-center max-w-sm mx-auto gap-3">
-        <div className="text-4xl">📝</div>
-        <h2 className="font-semibold text-zinc-700 dark:text-zinc-300">私人题库为空</h2>
-        <p className="text-sm text-zinc-400 leading-relaxed">
-          还没有录入任何私人题目，点击右上角「录入题目」开始添加。
-        </p>
-        <a
-          href="/admin/add"
-          className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-        >
-          <PenLine size={14} /> 录入第一道题
-        </a>
-      </div>
-    );
-  }
-
+function EmptyBrowse({ hasTopics, isAdmin }: { hasTopics: boolean; isAdmin: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center py-24 text-center max-w-sm mx-auto gap-3">
       <div className="text-4xl">📐</div>
@@ -328,10 +386,7 @@ function EmptyState({
         {hasTopics ? '当前知识点下还没有已发布的题目。' : '题库为空。'}
       </p>
       {isAdmin && (
-        <a
-          href="/admin/add"
-          className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors"
-        >
+        <a href="/admin/add" className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition-colors">
           <PenLine size={14} /> 录入第一道题
         </a>
       )}

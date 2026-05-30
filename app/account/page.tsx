@@ -1,40 +1,24 @@
-// 论坛详情页（RSC）。服务端预取主贴/评论并取登录态，首屏直出、利于 SEO。
+// 账号管理中心（RSC）。未登录跳登录页。
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { redirect } from 'next/navigation';
 import { Toaster } from 'sonner';
 import { ChevronLeft, Infinity as InfinityIcon } from 'lucide-react';
-import ForumThread from '@/components/forum/ForumThread';
 import ThemeToggle from '@/components/ThemeToggle';
-import {
-  getForumComments,
-  getForumPost,
-  getSessionForumUser,
-} from '@/app/actions/forum';
-import type { ForumPost } from '@/types/forum';
+import AccountSettings from '@/components/account/AccountSettings';
+import { getMyAccount } from '@/app/actions/account';
 
-export default async function ForumPostPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
-  const { id } = await params;
+export const dynamic = 'force-dynamic';
 
-  const [currentUser, post] = await Promise.all([
-    getSessionForumUser(),
-    getForumPost(id).catch(() => null as ForumPost | null),
-  ]);
-
-  if (!post) notFound();
-
-  const initialComments = await getForumComments(id).catch(() => []);
+export default async function AccountPage() {
+  const account = await getMyAccount();
+  if (!account) redirect('/login?redirectTo=/account');
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      {/* 统一顶栏：始终可返回社区 / 回首页 */}
       <header className="sticky top-0 z-30 border-b border-zinc-200 bg-white/80 backdrop-blur-sm dark:border-zinc-800 dark:bg-zinc-900/80">
         <div className="mx-auto flex h-14 max-w-2xl items-center gap-3 px-4">
           <Link href="/" className="inline-flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100">
-            <ChevronLeft size={16} /> 返回社区
+            <ChevronLeft size={16} /> 返回
           </Link>
           <Link href="/" className="ml-auto flex items-center gap-1.5">
             <InfinityIcon className="h-5 w-5 stroke-[1.5] text-indigo-600 dark:text-indigo-400" />
@@ -46,15 +30,11 @@ export default async function ForumPostPage({
         </div>
       </header>
 
-      <main className="py-8">
-        <ForumThread
-          postId={id}
-          currentUser={currentUser}
-          initialPost={post}
-          initialComments={initialComments}
-        />
-        <Toaster richColors position="top-center" />
+      <main className="mx-auto max-w-2xl px-4 py-8">
+        <h1 className="mb-5 text-xl font-bold text-zinc-900 dark:text-zinc-50">账号管理</h1>
+        <AccountSettings account={account} />
       </main>
+      <Toaster richColors position="top-center" />
     </div>
   );
 }

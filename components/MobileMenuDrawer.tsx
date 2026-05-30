@@ -3,7 +3,7 @@
 import { Drawer } from 'vaul';
 import { Menu, PenLine } from 'lucide-react';
 import SidebarTabs from '@/components/SidebarTabs';
-import type { TopicWithChildren, PaperRow, WorkspaceCounts } from '@/types/database';
+import type { TopicWithChildren, PaperRow } from '@/types/database';
 
 interface MobileMenuDrawerProps {
   topics: TopicWithChildren[];
@@ -12,8 +12,6 @@ interface MobileMenuDrawerProps {
   selectedPaperId?: string;
   isAdmin: boolean;
   hasFilter: boolean;
-  workspaceCounts: WorkspaceCounts;
-  activeWorkspace?: string;
 }
 
 export default function MobileMenuDrawer({
@@ -23,8 +21,6 @@ export default function MobileMenuDrawer({
   selectedPaperId,
   isAdmin,
   hasFilter,
-  workspaceCounts,
-  activeWorkspace,
 }: MobileMenuDrawerProps) {
   return (
     <Drawer.Root direction="left">
@@ -68,9 +64,20 @@ export default function MobileMenuDrawer({
                 selectedTopicId={selectedTopicId}
                 selectedPaperId={selectedPaperId}
                 isAdmin={isAdmin}
-                workspaceCounts={workspaceCounts}
-                activeWorkspace={activeWorkspace}
               />
+
+              <a
+                href="/"
+                className="flex items-center gap-1.5 text-xs font-medium text-zinc-600 hover:text-indigo-600 dark:text-zinc-300 transition-colors"
+              >
+                💬 社区论坛
+              </a>
+              <a
+                href="/?view=mybank"
+                className="flex items-center gap-1.5 text-xs font-medium text-zinc-600 hover:text-indigo-600 dark:text-zinc-300 transition-colors"
+              >
+                📚 我的题库
+              </a>
 
               <div className="mt-auto pt-4 border-t border-zinc-100 dark:border-zinc-800 space-y-2">
                 {hasFilter && (

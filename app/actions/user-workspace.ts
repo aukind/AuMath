@@ -2,7 +2,8 @@
 
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
-import type { QuestionWithTopics, WorkspaceType, WorkspaceCounts } from '@/types/database';
+import { createQuestion } from '@/app/actions/questions';
+import type { QuestionWithTopics, WorkspaceType, WorkspaceCounts, Difficulty } from '@/types/database';
 
 // ── Toggle favorite ───────────────────────────────────────────────────────────
 
@@ -176,6 +177,49 @@ export async function getWorkspaceQuestions(type: WorkspaceType): Promise<Questi
     ((questions ?? []) as QuestionWithTopics[]).map(q => [q.id, q]),
   );
   return ids.map(id => qMap.get(id)).filter(Boolean) as QuestionWithTopics[];
+}
+
+// ── 自己录题：建一道私有题并直接归入收藏 / 错题 ─────────────────────────────────
+// 复用 createQuestion（普通用户建的题自动 is_public=false、created_by=本人），
+// 建好后插入对应工作区表，立即出现在「我的题库」对应分组里。
+
+export async function createPersonalQuestion(
+  target: 'favorites' | 'errors',
+  input: { content: string; answer: string; analysis: string; difficulty: Difficulty },
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: '请先登录' };
+
+  if (!input.content.trim() || !input.answer.trim()) {
+    return { success: false, error: '题目内容和答案不能为空' };
+  }
+
+  const res = await createQuestion({
+    content:       input.content,
+    answer:        input.answer,
+    analysis:      input.analysis,
+    question_type: 'calculation',
+    difficulty:    input.difficulty,
+    year:          null,
+    source:        null,
+    topic_ids:     [],
+    status:        'published',
+  });
+  if (!res.success || !res.id) return { success: false, error: res.error ?? '创建失败' };
+
+  const sb = supabase as any;
+  const row =
+    target === 'favorites'
+      ? { user_id: user.id, question_id: res.id }
+      : { user_id: user.id, question_id: res.id, wrong_count: 1 };
+  const { error } = await sb
+    .from(target === 'favorites' ? 'user_favorites' : 'user_errors')
+    .insert(row);
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath('/');
+  return { success: true };
 }
 
 // ── Get favorited question IDs ────────────────────────────────────────────────
