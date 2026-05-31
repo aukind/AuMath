@@ -23,6 +23,17 @@ export interface ExtractedQuestion {
   category?: string;
 }
 
+/** 答案卷里单题的答案与解析（按题号回填到题目上） */
+export interface ExtractedAnswerItem {
+  question_number: number;
+  answer:   string;
+  analysis: string;
+}
+
+export type ExtractAnswersResult =
+  | { success: true;  answers: ExtractedAnswerItem[] }
+  | { success: false; error: string };
+
 /** 一套完整试卷：元数据 + 题目列表 */
 export interface ExtractedPaperBundle {
   paper_title?: string;
@@ -186,37 +197,39 @@ ${SHARED_TRANSCRIPTION_RULES}
 
 const USER_PROMPT = '请提取图片/PDF中所有题目，按规定 JSON 格式输出。';
 
-// ── 配对模式（试题卷 + 答案卷，照抄答案与解析，仍不解题）──────────
-const SYSTEM_INSTRUCTION_PAIRED = `${PAPER_HEADER}
+// ── 配对模式：单独提取答案卷（只照抄答案与解析，仍不解题）──────────
+// 为避免「题面+答案」塞进同一次重调用导致超时/截断/Failed to fetch，
+// 配对录入拆成两个并行调用：题面走 processPaper，本 prompt 只处理答案卷。
+const SYSTEM_INSTRUCTION_ANSWERS = `${PAPER_HEADER}
 
-【输入说明 — 两份文档】本次输入按顺序包含两份 PDF：**第①份是试题卷**（只有题目），**第②份是答案卷/参考答案**（印有每题的答案与解答）。你要从①提取每道题的题面，再按**题号一一对应**到②里，把②印好的答案与解答照抄进 answer / analysis 两个字段。
+【输入说明】本次输入是**一份答案卷 / 参考答案**（印有每道题的答案与解答）。你的唯一职责是把上面**已经印好的答案与解答照抄**成结构化 JSON，按题号组织。
 
-${MULTI_PAPER_RULE}
+【最高优先级 — 你不是解题引擎】绝对禁止自行解答、推导、计算、证明任何题目。answer/analysis 只能来自答案卷上**已经印出**的文字；答案卷里没有的就留空（""），**绝不编造、绝不自己算**。
 
-【最高优先级 — 你是转写引擎，不是解题引擎】
-绝对禁止自行解答、推导、计算、证明任何题目。题面从第①份试题卷转写；答案与解析**只能从第②份答案卷照抄已经印好的内容**。**绝不允许**自行解题、推导或编造答案——若答案卷里找不到某题的答案，就把该题 answer/analysis 留空（""）。自行解题是本任务最严重的错误。
-
-${TOP_LEVEL_STRUCTURE}
-
-Each question element (ALL 6 fields required):
+Output ONLY a raw JSON object（无解释、无 markdown 围栏）：
 {
-  "question_number": 5,
-  "content": "**5.** 完整题干（按规则 14-16 排版）",
-  "options": {"A":"...","B":"...","C":"...","D":"..."} or null,
-  "category": "数列",
-  "answer": "选填题填答案卷印出的答案；大题填 \\"\\"",
-  "analysis": "答案卷里印好的解析/完整解答（大题含全部解法）；没有就 \\"\\""
+  "answers": [
+    { "question_number": 1,  "answer": "A",  "analysis": "" },
+    { "question_number": 15, "answer": "",   "analysis": "解：……（完整解答，含全部解法）" }
+  ]
 }
 
-${SHARED_TRANSCRIPTION_RULES}
-═══ 【CRITICAL】答案与解析规则（answer / analysis 一律从第②份答案卷照抄）═══
+═══ 【CRITICAL】答案与解析规则 ═══
 A1.【选填题（选择 + 填空）】answer = 答案卷印出的答案：选择题填字母（如 "A"、多选填 "AD"）；填空题填最终结果（如 "$-1$"、"$260$"，多空用「；」或换行分隔）。analysis = 答案卷若给了该题的解析就照抄，没有就填 ""。
-A2.【解答题（大题）】answer 填 ""；analysis = 答案卷里该题的**完整解答，原样照抄**（"解："起的全过程、每个小问），LaTeX/换行遵守上面所有排版规则（行内 $...$、块级 $$...$$、双反斜杠转义、表格转 GFM、忽略图形）。
-A3.【多解法必须全部录入】若某大题在答案卷里给了多种解法 / 多个证法（如「解法1/解法2」「解法一/解法二」「①②⇒③、①③⇒②、②③⇒①」等），必须把**每一种**都完整照抄进同一题的 analysis，用 \\n\\n 分段，并用「解法一：」「解法二：」等小标题分隔，绝不能只录其中一种。
-A4.【忽略答案卷的次要信息】答案卷里的【命题说明】、教材题源、高考题源、课标要求、题源背景、以及评分标准里的分值标注（如行末「…………5分」），一律**不录入** answer/analysis——只录答案本身和解答过程。
-A5.【绝不解题】再次强调：answer/analysis 只能来自第②份答案卷已经印好的文字，绝不能由你自己计算或推导得到。`;
+A2.【解答题（大题）】answer 填 ""；analysis = 答案卷里该题的**完整解答，原样照抄**（"解："起的全过程、每个小问），LaTeX/换行遵守下面所有排版规则。
+A3.【多解法必须全部录入】若某大题给了多种解法 / 多个证法（如「解法1/解法2」「解法一/解法二」「①②⇒③、①③⇒②、②③⇒①」等），必须把**每一种**都完整照抄进同一题的 analysis，用 \\n\\n 分段，并用「解法一：」「解法二：」等小标题分隔，绝不能只录其中一种。
+A4.【忽略次要信息】答案卷里的【命题说明】、教材题源、高考题源、课标要求、题源背景、以及评分标准里的分值标注（如行末「…………5分」），一律**不录入**——只录答案本身和解答过程。
+A5.【题号】question_number 用答案卷里的题号整数，与试题卷一一对应；不要漏题、不要乱序。
 
-const USER_PROMPT_PAIRED = '第①份是试题卷，第②份是答案卷。请提取①里所有题目，并按题号从②照抄对应的答案与解析（大题含全部解法），按规定 JSON 格式输出。';
+═══ LaTeX 排版与转义规则（answer / analysis 同样遵守）═══
+5. 中文/英文叙述在 math 环境外；所有变量、公式、集合必须用 LaTeX。行内用单 $，独立公式用 $$ ... $$。
+8. 表格用标准 GFM Markdown 表格（表头分隔行 |---|---| 独占一行），绝不压成一行。
+10.【JSON ESCAPING】JSON 字符串里所有 LaTeX 反斜杠必须双写：\\frac→\\\\frac、\\sqrt→\\\\sqrt、\\cdot→\\\\cdot 等；换行用字面量 \\n。
+11a.希腊字母必须用 LaTeX 命令（\\\\alpha \\\\beta \\\\theta \\\\pi 等），绝不 OCR 成相似拉丁字母。
+11b.补集用 \\\\complement；11d.两点向量用 \\\\overrightarrow{AB}。
+16.【完全忽略图形】不要描述图形、不要插占位符、不要画 SVG/ASCII；原文写「如图」就原样保留「如图」。`;
+
+const USER_PROMPT_ANSWERS = '这是答案卷/参考答案。请把每道题已印出的答案与解答（大题含全部解法）照抄成规定 JSON，忽略命题说明/题源/课标/分值，绝不自行解题。';
 
 // ── 质量评估 ───────────────────────────────────────────────────
 
@@ -459,6 +472,34 @@ async function parseAndNormalize(raw: string, keepAnswers = false): Promise<Extr
   }
 
   throw new Error('模型返回格式无法识别');
+}
+
+/**
+ * 解析答案卷模型输出 → 按题号的 answer/analysis 映射。
+ * 兼容 { answers: [...] } 与裸数组；解析失败返回空 Map（不抛，answer 降级留空）。
+ */
+function parseAnswers(raw: string): Map<number, { answer: string; analysis: string }> {
+  const map = new Map<number, { answer: string; analysis: string }>();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fixLaTeXEscapes(raw));
+  } catch (e) {
+    console.error('[parseAnswers] JSON 解析失败:', (e as Error).message, '预览:', raw.slice(0, 200).replace(/\s+/g, ' '));
+    return map;
+  }
+  const arr: unknown =
+    parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).answers)
+      ? (parsed as Record<string, unknown>).answers
+      : Array.isArray(parsed) ? parsed : [];
+  for (const item of arr as Record<string, unknown>[]) {
+    const n = typeof item.question_number === 'number' ? item.question_number : undefined;
+    if (n == null) continue;
+    map.set(n, {
+      answer:   normalizeLaTeX(String(item.answer ?? '')),
+      analysis: normalizeLaTeX(String(item.analysis ?? item.solution ?? '')),
+    });
+  }
+  return map;
 }
 
 /**
@@ -717,49 +758,42 @@ async function processPaperInner(
   }
 }
 
-// ── 配对 Server Action：试题卷 + 答案卷一起提取（照抄答案与解析）────
-export async function processPaperWithAnswers(
-  questionUrl: string,
-  answerUrl:   string,
-): Promise<ProcessPaperResult> {
+// ── 配对模式 Server Action：只提取答案卷（题面走 processPaper，二者前端并行）──
+// 拆成独立调用，避免「题面+答案」一次重调用导致 POST 过久 / Failed to fetch。
+// 答案结果是精简数组（必走 inline，不经 Storage），单独 POST 也更短。
+export async function extractAnswers(answerUrl: string): Promise<ExtractAnswersResult> {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return { success: false, error: '服务端配置缺失：GEMINI_API_KEY 未设置' };
-    const client = new GoogleGenAI({ apiKey, httpOptions: { timeout: GEMINI_TIMEOUT_MS } });
+    // 答案卷可能含整本解答，给更宽的单次超时（仍 < maxDuration 300s），避免串行兜底叠加。
+    const client = new GoogleGenAI({ apiKey, httpOptions: { timeout: 240_000 } });
 
-    // 两份文件并行取回，按「试题卷 → 答案卷」顺序作为两个 inlineData part
-    let qBuf: ArrayBuffer, qMime: SupportedMime, aBuf: ArrayBuffer, aMime: SupportedMime;
+    let buffer: ArrayBuffer, mimeType: SupportedMime;
     try {
-      const [q, a] = await Promise.all([fetchFileBuffer(questionUrl), fetchFileBuffer(answerUrl)]);
-      ({ buffer: qBuf, mimeType: qMime } = q);
-      ({ buffer: aBuf, mimeType: aMime } = a);
+      ({ buffer, mimeType } = await fetchFileBuffer(answerUrl));
     } catch (e) {
-      return { success: false, error: `文件获取失败：${(e as Error).message}` };
+      return { success: false, error: `答案文件获取失败：${(e as Error).message}` };
     }
-    const parts = [bufferToImageData(qBuf, qMime), bufferToImageData(aBuf, aMime)];
+    const part = bufferToImageData(buffer, mimeType);
 
-    const validateNonEmpty = (papers: ExtractedPaperBundle[]): ExtractedPaperBundle[] => {
-      const nonEmpty = papers.filter(p => p.questions.length > 0);
-      if (nonEmpty.length === 0)
-        throw new Error('模型返回的题目都为空（可能输出被截断或文件无法识别）');
-      return nonEmpty;
-    };
+    const toItems = (m: Map<number, { answer: string; analysis: string }>): ExtractedAnswerItem[] =>
+      Array.from(m.entries()).map(([question_number, v]) => ({ question_number, ...v }));
 
-    // 主提取：Flash + thinking 关闭；失败/截断时开 thinking 兜底
+    // 主调用 Flash + thinking 关闭；空/解析失败时开一次 thinking 兜底
     try {
-      const text   = await callModel(client, FLASH_MODEL, parts, USER_PROMPT_PAIRED, true, SYSTEM_INSTRUCTION_PAIRED);
-      const papers = validateNonEmpty(await parseAndNormalize(text, true));
-      return await packResult(papers, 'flash-paired');
+      const text = await callModel(client, FLASH_MODEL, [part], USER_PROMPT_ANSWERS, true, SYSTEM_INSTRUCTION_ANSWERS);
+      const map  = parseAnswers(text);
+      if (map.size > 0) return { success: true, answers: toItems(map) };
+      throw new Error('未解析到任何答案');
     } catch (e) {
-      console.warn('[processPaperWithAnswers] 主提取失败，启用 thinking 重试:', (e as Error).message);
-      const text   = await callModel(client, FLASH_MODEL, parts, USER_PROMPT_PAIRED, false, SYSTEM_INSTRUCTION_PAIRED);
-      const papers = validateNonEmpty(await parseAndNormalize(text, true));
-      return await packResult(papers, 'flash-paired-thinking');
+      console.warn('[extractAnswers] 主提取失败/为空，启用 thinking 重试:', (e as Error).message);
+      const text = await callModel(client, FLASH_MODEL, [part], USER_PROMPT_ANSWERS, false, SYSTEM_INSTRUCTION_ANSWERS);
+      return { success: true, answers: toItems(parseAnswers(text)) };
     }
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error('[processPaperWithAnswers] 未捕获异常:', msg);
-    return { success: false, error: `配对提取失败：${msg}` };
+    console.error('[extractAnswers] 未捕获异常:', msg);
+    return { success: false, error: `答案提取失败：${msg}` };
   }
 }
 

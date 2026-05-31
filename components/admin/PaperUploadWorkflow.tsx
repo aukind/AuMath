@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
-  processPaper, processPaperWithAnswers, createUploadUrl, createReadUrl,
+  processPaper, extractAnswers, createUploadUrl, createReadUrl,
   publishPaperBundles, detectDuplicatePapers,
   type ExtractedPaperBundle, type DuplicatePaperInfo, type DuplicateStrategy,
 } from '@/app/actions/process-paper';
@@ -337,20 +337,6 @@ function modelBadge(m?: string) {
   );
 }
 
-/** 把 ProcessPaperResult（含大结果走 Storage 的分支）归一成 papers。 */
-async function unwrapResult(
-  result: Awaited<ReturnType<typeof processPaperWithAnswers>>,
-): Promise<{ papers: ExtractedPaperBundle[]; usedModel?: string }> {
-  if (!result.success) throw new Error(result.error);
-  if ('resultUrl' in result) {
-    const resp = await fetch(result.resultUrl);
-    if (!resp.ok) throw new Error(`拉取 Storage 结果失败 (HTTP ${resp.status})`);
-    const data = await resp.json() as { papers: ExtractedPaperBundle[] };
-    return { papers: data.papers, usedModel: result.usedModel };
-  }
-  return { papers: result.papers, usedModel: result.usedModel };
-}
-
 function AiExtractPanel({
   job,
   onDone,
@@ -369,18 +355,44 @@ function AiExtractPanel({
     let total = 1;
 
     if (job.mode === 'paired') {
-      // 配对：试题卷 + 答案卷一次性提取
-      setState({ status: 'extracting', done: 0, total: 1 });
-      try {
-        const r = await unwrapResult(
-          await processPaperWithAnswers(job.questionFile.signedUrl, job.answerFile.signedUrl),
-        );
-        papers.push(...r.papers);
-        usedModel = r.usedModel;
-      } catch (e) {
-        errors.push(`${job.questionFile.fileName}：${e instanceof Error ? e.message : String(e)}`);
+      // 配对：题面（processPaper）与答案（extractAnswers）两个独立 Server Action 并行，
+      // 各自 POST 更短、结果更小，再按题号合并；答案失败则降级为仅录题目。
+      total = 2;
+      setState({ status: 'extracting', done: 0, total: 2 });
+      let completed = 0;
+      const bump = () => {
+        completed += 1;
+        setState((prev) => prev.status === 'extracting' ? { status: 'extracting', done: completed, total: 2 } : prev);
+      };
+      const [qRes, aRes] = await Promise.allSettled([
+        extractOneFile(job.questionFile).finally(bump),
+        extractAnswers(job.answerFile.signedUrl).finally(bump),
+      ]);
+
+      if (qRes.status === 'rejected') {
+        errors.push(`题目提取失败：${qRes.reason instanceof Error ? qRes.reason.message : String(qRes.reason)}`);
+      } else {
+        const qPapers = qRes.value.papers;
+        usedModel = qRes.value.usedModel;
+        // 合并答案：按题号把 answer/analysis 填回每道题
+        if (aRes.status === 'fulfilled' && aRes.value.success) {
+          const amap = new Map(aRes.value.answers.map((a) => [a.question_number, a]));
+          for (const p of qPapers) for (const q of p.questions) {
+            if (q.question_number != null && amap.has(q.question_number)) {
+              const a = amap.get(q.question_number)!;
+              q.answer   = a.answer;
+              q.analysis = a.analysis;
+            }
+          }
+          usedModel = `${usedModel ?? 'flash'}·配对`;
+        } else {
+          const amsg = aRes.status === 'rejected'
+            ? (aRes.reason instanceof Error ? aRes.reason.message : String(aRes.reason))
+            : (aRes.value.success ? '' : aRes.value.error);
+          toast.error(`答案未提取成功，已仅录题目（可在校对页补答案）：${amsg}`.slice(0, 160));
+        }
+        papers.push(...qPapers);
       }
-      setState((prev) => prev.status === 'extracting' ? { status: 'extracting', done: 1, total: 1 } : prev);
     } else {
       // 仅题目：所有文件并行提取（每个 processPaper 都是独立的 Server Action 实例，各享 maxDuration）
       total = job.files.length;
@@ -439,7 +451,9 @@ function AiExtractPanel({
     if (errors.length) {
       toast.error(`${errors.length} 个文件提取失败，其余已完成`);
     }
-    const badge = total > 1 ? `${usedModel ?? 'flash'}·${total}文件` : usedModel;
+    const badge = (job.mode === 'questions-only' && total > 1)
+      ? `${usedModel ?? 'flash'}·${total}文件`
+      : usedModel;
     setState({ status: 'done', papers, usedModel: badge });
   }, [job]);
 
