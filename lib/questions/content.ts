@@ -4,18 +4,21 @@
 // 但模型偶尔不遵守，把 "(A)…(B)…" 或 "A. …\nB. …"（分隔符甚至是被错误转义的字面量 \n）
 // 也写进 content，导致题干与选项卡片重复。这里用确定性正则在入库时砍掉，模型再不听话也不影响。
 
-/**
- * content 末尾的选项枚举尾巴：以 A 标记开头、其后出现 B 标记，直到结尾。
- * 标记形如 (A) / A. / A、 / A．（含小写）；分隔符含真实换行、空白或字面量反斜杠-n（"\\n"）。
- */
-export const OPTION_TAIL_RE =
-  /(?:\\n|\s)*\(?[Aa]\s*[.)、．][\s\S]*?\(?[Bb]\s*[.)、．][\s\S]*$/;
+// 括号式选项尾巴：(A)…(B)…到结尾。括号包裹单个字母是明确的选项信号，行内即可安全剥离。
+export const PAREN_OPTION_TAIL_RE = /\s*\(\s*[Aa]\s*\)[\s\S]*?\(\s*[Bb]\s*\)[\s\S]*$/;
+
+// 行首式选项尾巴：A. … B. … 到结尾，且 A、B 标记各自必须位于「行首」
+// （前面是真实换行或被错误转义的字面量反斜杠-n "\\n"）。标记仅认 . ． )，
+// **刻意不认顿号「、」**，以免误伤句中的 "A、B、C" 点列、"$A$、$B$" 等表述。
+export const LINE_OPTION_TAIL_RE =
+  /(?:\\n|[\n\r])\s*[Aa]\s*[.．)][\s\S]*?(?:\\n|[\n\r])\s*[Bb]\s*[.．)][\s\S]*$/;
 
 /**
  * 当题目已有独立选项（≥2）时，剥掉 content 末尾重复的选项枚举。
- * 无选项或匹配不到则原样返回。纯字符串函数，前后端通用。
+ * 仅剥两种明确信号：括号式 (A)…(B)… / 行首式 \nA. … \nB. …。
+ * 句中的顿号点列（如 "A、B、C"）不会被误伤。无选项或匹配不到则原样返回。纯字符串函数，前后端通用。
  */
 export function stripInlineOptionTail(content: string, hasOptions: boolean): string {
   if (!content || !hasOptions) return content;
-  return content.replace(OPTION_TAIL_RE, '').trimEnd();
+  return content.replace(PAREN_OPTION_TAIL_RE, '').replace(LINE_OPTION_TAIL_RE, '').trimEnd();
 }
