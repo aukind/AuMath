@@ -6,6 +6,7 @@ import { getForumPosts } from '@/app/actions/forum';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
 import { logout } from '@/app/actions/auth';
+import Link from 'next/link';
 import PageLayout, { type MainView } from '@/components/PageLayout';
 import { Infinity, PenLine, LogOut, LayoutDashboard, UserCog } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
@@ -106,12 +107,12 @@ export default async function HomePage({
             hasFilter={mainView === 'browse'}
           />
 
-          <a href="/" className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2">
             <Infinity className="w-5 h-5 stroke-[1.5] text-indigo-600 dark:text-indigo-400" />
             <span className="font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 dark:from-indigo-400 dark:to-purple-400 text-sm">
               AuMath
             </span>
-          </a>
+          </Link>
 
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />

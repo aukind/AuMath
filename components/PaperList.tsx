@@ -1,7 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { Search, FileText } from 'lucide-react';
+import Link from 'next/link';
+import { Search, FileText, Loader2 } from 'lucide-react';
+import { useSoftNav, isPlainLeftClick } from '@/components/ui/useSoftNav';
 import type { PaperRow } from '@/types/database';
 
 interface PaperListProps {
@@ -27,6 +29,7 @@ function groupByYear(papers: PaperRow[]): Array<{ year: string; items: PaperRow[
 
 export default function PaperList({ papers, selectedPaperId }: PaperListProps) {
   const [query, setQuery] = useState('');
+  const { navigate, isPending, pendingHref } = useSoftNav();
 
   const filtered = query.trim()
     ? papers.filter(p => p.title.toLowerCase().includes(query.toLowerCase()))
@@ -68,22 +71,35 @@ export default function PaperList({ papers, selectedPaperId }: PaperListProps) {
               <div className="space-y-0.5">
                 {items.map(paper => {
                   const isSelected = paper.id === selectedPaperId;
+                  const href = isSelected ? '/' : `/?paper=${paper.id}`;
+                  const isLoading = isPending && pendingHref === href;
+                  const active = isSelected || isLoading;
                   return (
-                    <a
+                    <Link
                       key={paper.id}
-                      href={isSelected ? '/' : `/?paper=${paper.id}`}
+                      href={href}
                       title={paper.title}
+                      aria-current={active ? 'page' : undefined}
+                      onClick={(e) => {
+                        if (!isPlainLeftClick(e)) return;
+                        e.preventDefault();
+                        navigate(href);
+                      }}
                       className={[
                         'group flex items-center gap-2 rounded-lg py-1.5 pl-2.5 pr-2 text-[0.8125rem] transition-colors',
-                        isSelected
+                        active
                           ? 'bg-violet-50 dark:bg-violet-950/40 text-violet-700 dark:text-violet-300'
                           : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800',
                       ].join(' ')}
                     >
-                      <FileText
-                        size={11}
-                        className="shrink-0 opacity-40 group-hover:opacity-60 transition-opacity"
-                      />
+                      {isLoading ? (
+                        <Loader2 size={11} className="shrink-0 animate-spin" />
+                      ) : (
+                        <FileText
+                          size={11}
+                          className="shrink-0 opacity-40 group-hover:opacity-60 transition-opacity"
+                        />
+                      )}
                       <span className="flex-1 truncate leading-snug text-xs">
                         {paper.title}
                       </span>
@@ -92,7 +108,7 @@ export default function PaperList({ papers, selectedPaperId }: PaperListProps) {
                           {paper.total_questions}题
                         </span>
                       )}
-                    </a>
+                    </Link>
                   );
                 })}
               </div>

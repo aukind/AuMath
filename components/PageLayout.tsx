@@ -1,6 +1,8 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useId, useState, useCallback, useEffect } from 'react';
+import Link from 'next/link';
+import { motion, LayoutGroup } from 'framer-motion';
 import {
   DndContext,
   DragOverlay,
@@ -13,7 +15,7 @@ import {
 } from '@dnd-kit/core';
 import {
   GripVertical, PenLine, CheckCircle2, Lock, LogIn,
-  MessagesSquare, BookMarked, Star, XCircle, Clock, ChevronLeft, Plus,
+  MessagesSquare, BookMarked, Star, XCircle, Clock, ChevronLeft, Plus, Loader2,
 } from 'lucide-react';
 import SidebarTabs from '@/components/SidebarTabs';
 import SortSelect from '@/components/SortSelect';
@@ -21,6 +23,7 @@ import QuestionSearch from '@/components/QuestionSearch';
 import SiteViewsBadge from '@/components/SiteViewsBadge';
 import ForumPostList from '@/components/forum/ForumPostList';
 import DashboardWorkspace from '@/components/dashboard/DashboardWorkspace';
+import { useSoftNav, isPlainLeftClick } from '@/components/ui/useSoftNav';
 import type { TabItem } from '@/components/ui/AnimatedTabs';
 import { deleteQuestion, updateQuestionCategory } from '@/app/actions/questions';
 import type { SortOrder } from '@/app/actions/questions';
@@ -249,11 +252,23 @@ function BrowseView({
   erroredIds: string[];
   onDelete: (id: string) => void;
 }) {
+  const { navigate, isPending } = useSoftNav();
   return (
     <>
-      <a href="/" className="inline-flex items-center gap-1 mb-4 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors">
-        <ChevronLeft size={13} /> 返回社区
-      </a>
+      <Link
+        href="/"
+        onClick={(e) => {
+          if (!isPlainLeftClick(e)) return;
+          e.preventDefault();
+          navigate('/');
+        }}
+        className="inline-flex items-center gap-1 mb-4 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+      >
+        {isPending
+          ? <Loader2 size={13} className="animate-spin" />
+          : <ChevronLeft size={13} />}
+        返回社区
+      </Link>
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">{pageTitle}</h1>
@@ -299,33 +314,59 @@ function MyBankView({
     history: { title: '最近浏览', empty: '还没有浏览记录。' },
   };
 
+  const { navigate, isPending, pendingHref } = useSoftNav();
+  const underlineId = useId();
+
   return (
     <div>
-      {/* 子标签 + 自己录题 */}
-      <div className="flex items-center gap-1 mb-5 border-b border-zinc-200 dark:border-zinc-800">
-        {MYBANK_TABS.map(({ key, label, icon: Icon }) => (
-          <a
-            key={key}
-            href={`/?view=mybank&workspace=${key}`}
-            className={[
-              'flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors',
-              tab === key
-                ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                : 'border-transparent text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300',
-            ].join(' ')}
-          >
-            <Icon size={14} /> {label}
-          </a>
-        ))}
-        {tab !== 'history' && (
-          <a
-            href={`/mybank/new?target=${tab}`}
-            className="ml-auto mb-1 inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
-          >
-            <Plus size={13} /> 自己录题
-          </a>
-        )}
-      </div>
+      {/* 子标签 + 自己录题 —— 软导航 + framer-motion 滑动下划线 */}
+      <LayoutGroup id={underlineId}>
+        <div className="flex items-center gap-1 mb-5 border-b border-zinc-200 dark:border-zinc-800">
+          {MYBANK_TABS.map(({ key, label, icon: Icon }) => {
+            const href = `/?view=mybank&workspace=${key}`;
+            const isLoading = isPending && pendingHref === href;
+            // 乐观激活：导航期间只认 pendingHref（下划线点击即滑过去），否则认服务端确认的 tab
+            const active = isPending ? pendingHref === href : tab === key;
+            return (
+              <Link
+                key={key}
+                href={href}
+                aria-current={active ? 'page' : undefined}
+                onClick={(e) => {
+                  if (!isPlainLeftClick(e)) return;
+                  e.preventDefault();
+                  navigate(href);
+                }}
+                className={[
+                  'relative flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors',
+                  active
+                    ? 'text-indigo-600 dark:text-indigo-400'
+                    : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300',
+                ].join(' ')}
+              >
+                {isLoading ? <Loader2 size={14} className="animate-spin" /> : <Icon size={14} />}
+                {label}
+                {active && (
+                  <motion.span
+                    aria-hidden
+                    layoutId={`${underlineId}-underline`}
+                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                    className="absolute -bottom-px left-0 right-0 h-0.5 rounded-full bg-indigo-500"
+                  />
+                )}
+              </Link>
+            );
+          })}
+          {tab !== 'history' && (
+            <Link
+              href={`/mybank/new?target=${tab}`}
+              className="ml-auto mb-1 inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
+            >
+              <Plus size={13} /> 自己录题
+            </Link>
+          )}
+        </div>
+      </LayoutGroup>
 
       {questions.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 py-24 text-center max-w-sm mx-auto">
