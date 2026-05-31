@@ -1,6 +1,6 @@
 // 全站搜索（RSC）。?q= 触发题目+帖子搜索。公开可见。
 import Link from 'next/link';
-import { ChevronLeft, Infinity as InfinityIcon, FileQuestion } from 'lucide-react';
+import { ChevronLeft, Infinity as InfinityIcon, FileQuestion, Users } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import SearchBox from '@/components/SearchBox';
 import QuestionCard from '@/components/QuestionCard';
@@ -12,6 +12,19 @@ import { createClient } from '@/lib/supabase/server';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '搜索 · AuMath' };
 
+// 用户结果头像：有图用图，否则渐变占位（与公开主页同款风格）。
+function UserAvatar({ name, url }: { name: string; url?: string }) {
+  if (url) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={url} alt={name} className="h-9 w-9 shrink-0 rounded-full object-cover" />;
+  }
+  return (
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-sm font-bold text-white">
+      {name.slice(0, 1).toUpperCase()}
+    </span>
+  );
+}
+
 export default async function SearchPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
   const { q } = await searchParams;
   const query = (q ?? '').trim();
@@ -19,13 +32,13 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const supabase = await createClient();
   const [{ data: { user } }, result, favoritedIds, erroredIds, myRatings] = await Promise.all([
     supabase.auth.getUser(),
-    query ? searchAll(query) : Promise.resolve({ questions: [], posts: [] }),
+    query ? searchAll(query) : Promise.resolve({ questions: [], posts: [], users: [] }),
     getFavoritedQuestionIds(),
     getErroredQuestionIds(),
     getMyDifficultyRatings(),
   ]);
 
-  const total = result.questions.length + result.posts.length;
+  const total = result.questions.length + result.posts.length + result.users.length;
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -55,6 +68,33 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
           </div>
         ) : (
           <>
+            {/* 用户结果 */}
+            {result.users.length > 0 && (
+              <section className="space-y-2">
+                <h2 className="flex items-center gap-1.5 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  <Users size={15} className="text-indigo-500" /> 用户 · {result.users.length}
+                </h2>
+                <ul className="space-y-2">
+                  {result.users.map((u) => (
+                    <li key={u.userId}>
+                      <Link
+                        href={`/u/${u.userId}`}
+                        className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 transition-colors hover:border-indigo-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-indigo-700"
+                      >
+                        <UserAvatar name={u.username} url={u.avatarUrl} />
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-zinc-900 dark:text-zinc-100">{u.username}</p>
+                          {u.userNo !== null && (
+                            <p className="text-xs text-zinc-400">UID: <span className="tabular-nums">{u.userNo}</span></p>
+                          )}
+                        </div>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
             {/* 帖子结果 */}
             {result.posts.length > 0 && (
               <section className="space-y-2">

@@ -108,7 +108,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfileDat
   let profile: ProfileRow | undefined;
   try {
     const { data } = await from<ProfileRow>('profiles')
-      .select('id, username, avatar_url, role')
+      .select('id, username, avatar_url, role, user_no')
       .eq('id', userId);
     profile = (data ?? [])[0];
   } catch {
@@ -126,6 +126,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfileDat
         '我',
       avatar_url: null,
       role: isAdminUser(user) ? 'admin' : 'user',
+      user_no: null,
     };
   }
   if (!profile) return null;
@@ -148,6 +149,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfileDat
   return {
     userId,
     username: profile.username?.trim() || '数学学习者',
+    userNo: profile.user_no ?? null,
     avatarUrl: profile.avatar_url ?? undefined,
     role: profile.role === 'admin' ? 'admin' : 'user',
     stats: {
@@ -296,6 +298,7 @@ interface ProfileRow {
   username: string | null;
   avatar_url: string | null;
   role: string | null;
+  user_no: number | null;
 }
 
 interface CommentLite {

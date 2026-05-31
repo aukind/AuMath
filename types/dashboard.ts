@@ -54,6 +54,8 @@ export interface PublicProfileStats {
 export interface PublicProfileData {
   userId: string;
   username: string;
+  /** 数字 UID（按注册时间递增，从 0 起）；profiles 无该行时为 null */
+  userNo: number | null;
   avatarUrl?: string;
   role: 'admin' | 'user';
   stats: PublicProfileStats;

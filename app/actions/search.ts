@@ -18,9 +18,17 @@ export interface PostHit {
   authorName: string;
 }
 
+export interface UserHit {
+  userId: string;
+  username: string;
+  userNo: number | null;
+  avatarUrl?: string;
+}
+
 export interface SearchResult {
   questions: QuestionWithTopics[];
   posts: PostHit[];
+  users: UserHit[];
 }
 
 const LIMIT = 20;
@@ -45,16 +53,51 @@ function toPostHit(p: any): PostHit {
 
 export async function searchAll(query: string): Promise<SearchResult> {
   const safe = (query ?? '').replace(/[%,()]/g, ' ').trim();
-  if (safe.length < 1) return { questions: [], posts: [] };
+  if (safe.length < 1) return { questions: [], posts: [], users: [] };
 
   const supabase = await createClient();
   const sb = supabase as any;
 
-  const [questions, posts] = await Promise.all([
+  const [questions, posts, users] = await Promise.all([
     searchQuestions(sb, safe),
     searchPosts(sb, safe),
+    searchUsers(sb, safe),
   ]);
-  return { questions, posts };
+  return { questions, posts, users };
+}
+
+// 按 UID（纯数字精确匹配）或用户名（子串）找人。
+// user_no 列未迁移 / 表异常时静默降级为 []，不连累题目与帖子结果。
+async function searchUsers(sb: any, q: string): Promise<UserHit[]> {
+  try {
+    let rows: any[] = [];
+    // 纯数字优先按 UID 精确命中
+    if (/^\d+$/.test(q)) {
+      const { data } = await sb
+        .from('profiles')
+        .select('id, username, avatar_url, user_no')
+        .eq('user_no', Number(q))
+        .limit(LIMIT);
+      rows = data ?? [];
+    }
+    // 用户名子串匹配（数字 UID 无命中时也回退到此，便于按用户名找人）
+    if (!rows.length) {
+      const { data } = await sb
+        .from('profiles')
+        .select('id, username, avatar_url, user_no')
+        .ilike('username', `%${q}%`)
+        .limit(LIMIT);
+      rows = data ?? [];
+    }
+    return rows.map((p): UserHit => ({
+      userId: p.id,
+      username: p.username?.trim() || '数学学习者',
+      userNo: p.user_no ?? null,
+      avatarUrl: p.avatar_url ?? undefined,
+    }));
+  } catch {
+    return [];
+  }
 }
 
 async function searchQuestions(sb: any, q: string): Promise<QuestionWithTopics[]> {
