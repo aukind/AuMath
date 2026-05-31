@@ -1,9 +1,21 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag, unstable_cache } from 'next/cache';
+import { createClient as createSupabaseJsClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isAdminUser } from '@/lib/utils/auth';
+
+/** 无 cookie 的匿名只读客户端，专供 unstable_cache 缓存公共数据（试卷/分类，RLS 公开可读）。
+ *  unstable_cache 内不能访问 cookies/headers，故不能用 server.ts 的 createClient。
+ *  公共环境变量必定存在，不会失败。 */
+function createPublicClient() {
+  return createSupabaseJsClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { auth: { persistSession: false } },
+  );
+}
 import type { QuestionWithTopics, QuestionWithNumber, PaperRow, TopicWithChildren, TopicRow, QuestionType, Difficulty, QuestionStatus, InteractiveSandboxConfig } from '@/types/database';
 
 // ── 录题 ─────────────────────────────────────────────────────
@@ -259,42 +271,39 @@ function buildTopicTree(flat: TopicRow[]): TopicWithChildren[] {
   return roots;
 }
 
+// 题目分类树 —— 与用户无关、极少变。用 unstable_cache 缓存，避免每次导航/切卷都重查数据库。
+// 失效：tag 'topics'（见各 mutation 处）或 1 小时 TTL 兜底。
+const getTopicsCached = unstable_cache(
+  async (): Promise<TopicWithChildren[]> => {
+    const { data, error } = await createPublicClient()
+      .from('topics')
+      .select('*')
+      .order('order_index', { ascending: true });
+    if (error) {
+      console.error('[getQuestionTopics]', error.message);
+      return [];
+    }
+    return buildTopicTree((data ?? []) as TopicRow[]);
+  },
+  ['question-topics'],
+  { tags: ['topics'], revalidate: 3600 },
+);
+
 export async function getQuestionTopics(): Promise<TopicWithChildren[]> {
-  let supabase;
-  try {
-    supabase = await createClient();
-  } catch {
-    return [];
-  }
-
-  const { data, error } = await supabase
-    .from('topics')
-    .select('*')
-    .order('order_index', { ascending: true });
-
-  if (error) {
-    console.error('[getQuestionTopics]', error.message);
-    return [];
-  }
-
-  return buildTopicTree((data ?? []) as TopicRow[]);
+  return getTopicsCached();
 }
 
 // ── 试卷查询 ──────────────────────────────────────────────────
 
-export async function getPapers(): Promise<PaperRow[]> {
-  let supabase;
-  try {
-    supabase = await createClient();
-  } catch {
-    return [];
-  }
+// 试卷列表（含每卷题数徽章）—— 与用户无关。题数需要翻页扫描整张 paper_questions（可能上千行），
+// 是切卷「转圈圈」的主要成本，故用 unstable_cache 缓存；失效靠 tag 'papers' 或 1 小时 TTL。
+const getPapersCached = unstable_cache(
+  async (): Promise<PaperRow[]> => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = createPublicClient() as any;
 
   type PaperRaw = { id: string; title: string; year: number | null; type: 'real' | 'mock'; grade: string | null; created_at: string; updated_at: string };
   type PqRaw = { paper_id: string };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb = supabase as any;
 
   // 分页拉全 paper_questions —— Supabase 默认 range 0-999，行数破千后会被悄悄截断，
   // 导致部分试卷在 countMap 里缺失、PaperList 不显示题数徽章。
@@ -339,6 +348,13 @@ export async function getPapers(): Promise<PaperRow[]> {
     ...p,
     total_questions: countMap.get(p.id) ?? 0,
   })) as PaperRow[];
+  },
+  ['papers-list'],
+  { tags: ['papers'], revalidate: 3600 },
+);
+
+export async function getPapers(): Promise<PaperRow[]> {
+  return getPapersCached();
 }
 
 export interface PaperQuestionsResult {
@@ -374,6 +390,7 @@ export async function deleteQuestion(
   if (error) return { success: false, error: error.message };
 
   revalidatePath('/');
+  revalidateTag('papers', 'max'); // 删题可能级联减少某卷题数 → 刷新试卷列表缓存（'max' 为 Next16 即时失效写法）
   return { success: true };
 }
 

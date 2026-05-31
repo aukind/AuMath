@@ -1,7 +1,7 @@
 'use server';
 
 import { GoogleGenAI } from '@google/genai';
-import { revalidatePath } from 'next/cache';
+import { revalidatePath, revalidateTag } from 'next/cache';
 import { normalizeLaTeX } from '@/lib/normalizeLatex';
 import { stripInlineOptionTail } from '@/lib/questions/content';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -129,7 +129,8 @@ Each question element (ALL 5 fields required):
     Newlines in JSON strings use literal \\n (two characters: backslash + n).
 11. Preserve original mathematical logic and values exactly — repair formatting only.
 11a.【希腊字母 vs 拉丁字母】绝对不能把希腊字母 OCR 成相似的拉丁字母：α≠a, β≠b, γ≠y, ν≠v, π≠n, ρ≠p, χ≠x, ω≠w, μ≠u, σ≠o, τ≠t, ξ≠ξ；遇到希腊字母必须用 LaTeX 命令保留（\\\\alpha \\\\beta \\\\gamma \\\\theta \\\\pi \\\\sigma \\\\phi \\\\omega 等）。
-11b.【补集符号】中国教材的补集 ∁_U A 必须用 \\\\complement 命令转写，不要写成 \\\\mathsf{C} / \\\\mathbf{C} / \\\\mathbb{C} / \\\\mathcal{C} / 裸 C —— 这些都不是补集符号。正例 \\\\complement_{I} S，反例 \\\\mathsf{C}_{I} S。
+11b.【补集符号】中国教材的补集 ∁_U A 必须用 \\\\complement 命令转写，不要写成 \\\\mathsf{C} / \\\\mathbf{C} / \\\\mathbb{C} / \\\\mathcal{C} / 裸 C —— 这些都不是补集符号。正例 \\\\complement_{I} S，反例 \\\\mathsf{C}_{I} S。补集符号同样必须包在 $...$ 内（如 $\\\\complement_{I} S$），绝不能裸写在普通文本里。
+11d.【向量符号】由两点确定的向量必须用「长箭头」\\\\overrightarrow{AB}（贯穿两个字母），绝对不要用 \\\\vec{AB}——\\\\vec 的短帽箭头只压在末字母上，两点向量看着很别扭。仅当是单个向量名（如向量 a）时才用 \\\\vec{a} 或 \\\\boldsymbol{a}。正例 $\\\\overrightarrow{MP}\\\\cdot\\\\overrightarrow{MN}$，反例 $\\\\vec{MP}\\\\cdot\\\\vec{MN}$。
 11c.【填空题的空白横线】填空题留空处（原卷的 "____" 横线）只能转写成 LaTeX 横线 \\\\underline{\\\\qquad}，且必须放在普通文本里、不要包进 $...$。绝对禁止把空白 OCR 成裸下标 / 嵌套空括号 / 散落上下标，例如 \`=_{ {{{ {_}}}}}\`、\`{_}\`、\`x_\`、\`a^{}\` 都是非法的——任何 \`_\` 或 \`^\` 后面都必须紧跟一个非空操作数（单字符或 {...}）。题目要求的数值/表达式答案放进 solution 字段，不要塞进题面的空白处。正例：content 写 "则 $a_1+a_2+\\\\cdots+a_{10}=$ \\\\underline{\\\\qquad}."，solution 写 "$80$"。
 
 ═══ Numbering & Structure Rules ═══
@@ -153,6 +154,8 @@ Each question element (ALL 5 fields required):
 
 17. options: object {"A":"…","B":"…"} for choice questions; null for fill/essay/proof.
 17a.【选择题选项不要重复】对于选择题，options 字段已经承载了 (A)/(B)/(C)/(D)，**content 字段绝不能再把 "(A)..(B)..(C)..(D).." 复述一遍**。content 末尾应止于题干主句的句号/问号，紧接着的 (A) 起的选项块只填进 options 对象。错误示范：content="**5.** ...的距离是 (A) 1/2 (B) √3/2 (C) 1 (D) √3"。正确：content="**5.** ...的距离是"，options={"A":"$\\\\dfrac{1}{2}$","B":"$\\\\dfrac{\\\\sqrt{3}}{2}$","C":"$1$","D":"$\\\\sqrt{3}$"}。
+17b.【选项内公式同样必须包 $】options 每个选项里的所有数学符号/公式，与题干同等标准——必须用 $...$ 包裹，绝不能把 \\\\rho、\\\\cos\\\\theta、\\\\dfrac{1}{2}、\\\\complement 等裸命令写在选项文本里。错误：{"A":"极坐标方程 \\\\rho=\\\\cos\\\\theta 的图形"}；正确：{"A":"$\\\\rho=\\\\cos\\\\theta$ 与 $\\\\rho\\\\cos\\\\theta=\\\\dfrac{1}{2}$ 的交点"}。
+17c.【选项必须是真实且互不相同的备选项，禁止复述题干】options 必须填原卷中 (A)(B)(C)(D) 各自**不同**的备选内容。**绝对禁止**把题干原话、或题干里的同一段公式，当作每个选项的内容逐字复述（例如 A、B 两项内容雷同、且都等于题干那句话——这是 OCR 失败/幻觉的典型表现）。如果实在无法辨认某题的选项，**宁可把 options 设为 null**，也不要编造或复述题干来凑数。
 18. solution: map from "解析"/"答案" sections if present; otherwise "".`;
 
 const USER_PROMPT = '请提取图片/PDF中所有题目，按规定 JSON 格式输出。';
@@ -747,7 +750,11 @@ export async function publishQuestions(
     }
   }
 
-  if (savedCount > 0) revalidatePath('/');
+  if (savedCount > 0) {
+    revalidatePath('/');
+    revalidateTag('papers', 'max'); // 新卷/新题 → 刷新缓存的试卷列表（含题数徽章）；'max' 为 Next16 即时失效写法
+    revalidateTag('topics', 'max');
+  }
 
   return { success: true, results, savedCount, paper_id };
 }
@@ -853,6 +860,7 @@ export async function deletePaperWithQuestions(
   if (paperErr) return { success: false, error: `删除试卷失败：${paperErr.message}` };
 
   revalidatePath('/');
+  revalidateTag('papers', 'max'); // 删卷 → 刷新缓存的试卷列表（'max' 为 Next16 即时失效写法）
   return { success: true, deletedQuestions: questionIds.length };
 }
 

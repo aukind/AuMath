@@ -11,7 +11,10 @@
  * 该预处理是字符串级别的，**只在数学分隔符内部** 应用变换，绝不修改普通文本。
  */
 
-const NEEDS_LIMITS = ['sum', 'prod', 'int', 'lim', 'limsup', 'liminf', 'bigcup', 'bigcap', 'bigoplus', 'bigotimes', 'iint', 'iiint', 'oint', 'coprod'];
+// 需要把上下限放到符号正上/正下的算子（高考排版标准）。
+// 刻意不含积分族 \int \iint \iiint \oint —— 定积分 ∫_a^b 的上下限按惯例写在符号「右侧」，
+// 强行 \limits 会把它排成像求和那样上下堆叠，反而不符合高考排版。
+const NEEDS_LIMITS = ['sum', 'prod', 'lim', 'limsup', 'liminf', 'bigcup', 'bigcap', 'bigoplus', 'bigotimes', 'coprod'];
 
 /**
  * 把 Gemini 各种"伪补集"统一改回 \complement：
