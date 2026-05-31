@@ -32,11 +32,18 @@ const DualPaneEditor = dynamic(
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type UploadState =
-  | { status: 'idle' }
-  | { status: 'uploading' }
-  | { status: 'done'; storagePath: string; signedUrl: string; fileType: 'pdf' | 'image'; fileName: string }
-  | { status: 'error'; message: string };
+interface UploadedFile {
+  storagePath: string;
+  signedUrl:   string;
+  fileType:    'pdf' | 'image';
+  fileName:    string;
+}
+
+// 每个文件在 Dropzone 内的上传状态（多文件并行）
+type FileUploadStatus =
+  | { name: string; status: 'uploading' }
+  | { name: string; status: 'done'; file: UploadedFile }
+  | { name: string; status: 'error'; message: string };
 
 type WorkflowStep = 1 | 2 | 3;
 
@@ -101,11 +108,11 @@ function StepIndicator({ current }: { current: WorkflowStep }) {
 // ── Upload Success Banner ──────────────────────────────────────────────────────
 
 function UploadSuccess({
-  state,
+  files,
   onReset,
   onNext,
 }: {
-  state: Extract<UploadState, { status: 'done' }>;
+  files: UploadedFile[];
   onReset: () => void;
   onNext: () => void;
 }) {
@@ -113,13 +120,14 @@ function UploadSuccess({
     <div className="flex flex-col items-center gap-6 py-8">
       <CheckCircle2 className="h-14 w-14 text-green-500" />
       <div className="text-center">
-        <p className="font-semibold text-foreground">上传成功</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {state.fileType === 'pdf' ? '📄' : '🖼️'} {state.fileName}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground/60 font-mono break-all max-w-xs">
-          {state.storagePath}
-        </p>
+        <p className="font-semibold text-foreground">上传成功 · {files.length} 个文件</p>
+        <ul className="mt-2 space-y-1 text-sm text-muted-foreground max-w-md mx-auto">
+          {files.map((f) => (
+            <li key={f.storagePath} className="truncate">
+              {f.fileType === 'pdf' ? '📄' : '🖼️'} {f.fileName}
+            </li>
+          ))}
+        </ul>
       </div>
       <div className="flex gap-3">
         <button
@@ -133,7 +141,7 @@ function UploadSuccess({
           onClick={onNext}
           className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
         >
-          下一步：AI 提取
+          下一步：AI 提取（{files.length} 个文件）
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
@@ -143,78 +151,77 @@ function UploadSuccess({
 
 // ── Dropzone ──────────────────────────────────────────────────────────────────
 
+/** 上传单个文件：签名 URL → 直传 Storage → 生成读取 URL。失败抛错。 */
+async function uploadOneFile(file: File): Promise<UploadedFile> {
+  // 1. 服务端生成签名上传 URL（admin client，无需 RLS）
+  const urlResult = await createUploadUrl(file.name);
+  if (!urlResult.success) throw new Error(urlResult.error);
+
+  // 2. 客户端直接 PUT 到 Supabase Storage（绕过 Vercel 4.5 MB 限制）
+  const uploadRes = await fetch(urlResult.signedUrl, {
+    method: 'PUT',
+    body: file,
+    headers: { 'Content-Type': file.type },
+  });
+  if (!uploadRes.ok) throw new Error(`上传失败 (HTTP ${uploadRes.status})，请重试`);
+
+  // 3. 服务端生成签名读取 URL（供 AI 提取使用）
+  const readResult = await createReadUrl(urlResult.path);
+  if (!readResult.success) throw new Error(`读取 URL 生成失败：${readResult.error}`);
+
+  return {
+    storagePath: urlResult.path,
+    signedUrl:   readResult.signedUrl,
+    fileType:    file.type === 'application/pdf' ? 'pdf' : 'image',
+    fileName:    file.name,
+  };
+}
+
 function PaperDropzone({
   onUploadDone,
 }: {
-  onUploadDone: (state: Extract<UploadState, { status: 'done' }>) => void;
+  onUploadDone: (files: UploadedFile[]) => void;
 }) {
-  const [uploadState, setUploadState] = useState<UploadState>({ status: 'idle' });
+  const [statuses, setStatuses] = useState<FileUploadStatus[]>([]);
+  const [busy, setBusy] = useState(false);
 
-  const handleUpload = useCallback(async (file: File) => {
-    setUploadState({ status: 'uploading' });
-    try {
-      // 1. 服务端生成签名上传 URL（admin client，无需 RLS）
-      const urlResult = await createUploadUrl(file.name);
-      if (!urlResult.success) {
-        setUploadState({ status: 'error', message: urlResult.error });
-        toast.error(`上传失败：${urlResult.error}`);
-        return;
-      }
+  const onDrop = useCallback(async (accepted: File[]) => {
+    if (!accepted.length) return;
+    setBusy(true);
+    setStatuses(accepted.map((f) => ({ name: f.name, status: 'uploading' as const })));
 
-      // 2. 客户端直接 PUT 到 Supabase Storage（绕过 Vercel 4.5 MB 限制）
-      const uploadRes = await fetch(urlResult.signedUrl, {
-        method: 'PUT',
-        body: file,
-        headers: { 'Content-Type': file.type },
-      });
-      if (!uploadRes.ok) {
-        const msg = `上传失败 (HTTP ${uploadRes.status})，请重试`;
-        setUploadState({ status: 'error', message: msg });
-        toast.error(msg);
-        return;
-      }
+    // 所有文件并行上传，逐个完成时更新各自状态
+    const results = await Promise.all(
+      accepted.map(async (file, i): Promise<UploadedFile | null> => {
+        try {
+          const uploaded = await uploadOneFile(file);
+          setStatuses((prev) => prev.map((s, idx) =>
+            idx === i ? { name: file.name, status: 'done', file: uploaded } : s));
+          return uploaded;
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          setStatuses((prev) => prev.map((s, idx) =>
+            idx === i ? { name: file.name, status: 'error', message } : s));
+          toast.error(`${file.name} 上传失败：${message}`);
+          return null;
+        }
+      }),
+    );
 
-      // 3. 服务端生成签名读取 URL（供 AI 提取使用）
-      const readResult = await createReadUrl(urlResult.path);
-      if (!readResult.success) {
-        setUploadState({ status: 'error', message: readResult.error });
-        toast.error(`读取 URL 生成失败：${readResult.error}`);
-        return;
-      }
-
-      const fileType: 'pdf' | 'image' = file.type === 'application/pdf' ? 'pdf' : 'image';
-      const doneState: Extract<UploadState, { status: 'done' }> = {
-        status: 'done',
-        storagePath: urlResult.path,
-        signedUrl: readResult.signedUrl,
-        fileType,
-        fileName: file.name,
-      };
-      setUploadState(doneState);
-      onUploadDone(doneState);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setUploadState({ status: 'error', message: `上传异常：${msg}` });
-      toast.error(`文件上传失败：${msg}`);
-    }
+    setBusy(false);
+    const ok = results.filter((r): r is UploadedFile => r !== null);
+    if (ok.length) onUploadDone(ok);
   }, [onUploadDone]);
-
-  const onDrop = useCallback(
-    (accepted: File[]) => {
-      if (accepted[0]) handleUpload(accepted[0]);
-    },
-    [handleUpload],
-  );
 
   const { getRootProps, getInputProps, isDragActive, isDragReject } = useDropzone({
     onDrop,
     accept: ACCEPT,
     maxSize: MAX_BYTES,
-    maxFiles: 1,
-    disabled: uploadState.status === 'uploading',
+    multiple: true,
+    disabled: busy,
     onDropRejected: (rejections) => {
       const msg = rejections[0]?.errors[0]?.message ?? '文件格式或大小不符合要求';
-      setUploadState({ status: 'error', message: msg });
+      toast.error(msg);
     },
   });
 
@@ -225,7 +232,7 @@ function PaperDropzone({
       : isDragReject
         ? 'border-destructive bg-destructive/5'
         : 'border-border hover:border-primary/40 hover:bg-muted/20',
-    uploadState.status === 'uploading' ? 'pointer-events-none opacity-60' : '',
+    busy ? 'pointer-events-none opacity-60' : '',
   ].join(' ');
 
   return (
@@ -233,10 +240,12 @@ function PaperDropzone({
       <div {...getRootProps()} className={zoneClass}>
         <input {...getInputProps()} />
 
-        {uploadState.status === 'uploading' ? (
+        {busy ? (
           <>
             <Loader2 className="h-12 w-12 text-primary animate-spin" />
-            <p className="text-sm text-muted-foreground">正在上传到 Supabase Storage…</p>
+            <p className="text-sm text-muted-foreground">
+              正在并行上传 {statuses.length} 个文件到 Supabase Storage…
+            </p>
             <p className="text-xs text-muted-foreground/60">文件不经过 Vercel 服务器，直传云端</p>
           </>
         ) : (
@@ -247,10 +256,10 @@ function PaperDropzone({
             </div>
             <div className="text-center">
               <p className="font-medium text-foreground">
-                {isDragActive ? '松开以上传' : '拖拽文件到此处，或点击选择'}
+                {isDragActive ? '松开以上传' : '拖拽文件到此处，或点击选择（支持多选）'}
               </p>
               <p className="mt-1.5 text-xs text-muted-foreground">
-                支持 PDF、JPG、PNG、WebP · 单文件最大 50 MB
+                支持 PDF、JPG、PNG、WebP · 单文件最大 50 MB · 可一次拖入多套试卷并行处理
               </p>
             </div>
             <div className="flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs text-muted-foreground">
@@ -261,11 +270,24 @@ function PaperDropzone({
         )}
       </div>
 
-      {uploadState.status === 'error' && (
-        <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          {uploadState.message}
-        </div>
+      {/* 每个文件的上传进度/结果 */}
+      {statuses.length > 0 && (
+        <ul className="space-y-1.5">
+          {statuses.map((s, i) => (
+            <li
+              key={`${s.name}-${i}`}
+              className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+            >
+              {s.status === 'uploading' && <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-primary" />}
+              {s.status === 'done' && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-500" />}
+              {s.status === 'error' && <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />}
+              <span className="truncate text-foreground">{s.name}</span>
+              {s.status === 'error' && (
+                <span className="ml-auto shrink-0 text-xs text-destructive">{s.message}</span>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
@@ -275,9 +297,23 @@ function PaperDropzone({
 
 type ExtractionState =
   | { status: 'idle' }
-  | { status: 'extracting'; hint: string }
+  | { status: 'extracting'; done: number; total: number }
   | { status: 'done'; papers: ExtractedPaperBundle[]; usedModel?: string }
   | { status: 'error'; message: string };
+
+/** 对单个上传文件跑 AI 提取，返回其中所有试卷。结果过大时从 Storage 拉回。 */
+async function extractOneFile(u: UploadedFile): Promise<{ papers: ExtractedPaperBundle[]; usedModel?: string }> {
+  const result = await processPaper(u.signedUrl, u.fileType);
+  if (!result.success) throw new Error(result.error);
+  // 体积大时服务端把结果写到 Storage，前端 fetch 拿回——绕开 Vercel 函数 4.5MB 响应上限
+  if ('resultUrl' in result) {
+    const resp = await fetch(result.resultUrl);
+    if (!resp.ok) throw new Error(`拉取 Storage 结果失败 (HTTP ${resp.status})`);
+    const data = await resp.json() as { papers: ExtractedPaperBundle[] };
+    return { papers: data.papers, usedModel: result.usedModel };
+  }
+  return { papers: result.papers, usedModel: result.usedModel };
+}
 
 function modelBadge(m?: string) {
   if (!m) return null;
@@ -294,60 +330,81 @@ function modelBadge(m?: string) {
 }
 
 function AiExtractPanel({
-  uploadResult,
+  uploadResults,
   onDone,
   onBack,
 }: {
-  uploadResult: Extract<UploadState, { status: 'done' }>;
+  uploadResults: UploadedFile[];
   onDone: (papers: ExtractedPaperBundle[]) => void;
   onBack: () => void;
 }) {
   const [state, setState] = useState<ExtractionState>({ status: 'idle' });
 
   const runExtraction = useCallback(async () => {
-    setState({ status: 'extracting', hint: uploadResult.fileType === 'pdf' ? '正在用 Gemini 2.5 Flash 极速提取文字与 LaTeX（已剥离 SVG 生成，单次 5-15 秒）…' : '正在识别图片…' });
-    try {
-      const result = await processPaper(uploadResult.signedUrl, uploadResult.fileType);
-      if (!result.success) {
-        setState({ status: 'error', message: result.error });
-        toast.error(`AI 提取失败：${result.error}`);
-        return;
-      }
-      // 体积大时服务端把结果写到 Storage，前端 fetch 拿回——绕开 Vercel 函数 4.5MB 响应上限
-      if ('resultUrl' in result) {
-        setState({ status: 'extracting', hint: `结果较大（${result.paperCount} 套 / ${result.questionCount} 题），从 Storage 拉取…` });
-        const resp = await fetch(result.resultUrl);
-        if (!resp.ok) throw new Error(`拉取 Storage 结果失败 (HTTP ${resp.status})`);
-        const data = await resp.json() as { papers: ExtractedPaperBundle[] };
-        setState({ status: 'done', papers: data.papers, usedModel: result.usedModel });
+    const total = uploadResults.length;
+    setState({ status: 'extracting', done: 0, total });
+
+    let completed = 0;
+    // 所有文件并行提取（每个 processPaper 都是独立的 Server Action 实例，各享 maxDuration）
+    const settled = await Promise.allSettled(
+      uploadResults.map(async (u) => {
+        try {
+          return await extractOneFile(u);
+        } finally {
+          completed += 1;
+          setState((prev) => prev.status === 'extracting'
+            ? { status: 'extracting', done: completed, total }
+            : prev);
+        }
+      }),
+    );
+
+    const papers: ExtractedPaperBundle[] = [];
+    const errors: string[] = [];
+    let usedModel: string | undefined;
+    for (let i = 0; i < settled.length; i++) {
+      const r = settled[i];
+      if (r.status === 'fulfilled') {
+        papers.push(...r.value.papers);
+        usedModel ??= r.value.usedModel;
       } else {
-        setState({ status: 'done', papers: result.papers, usedModel: result.usedModel });
+        const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        errors.push(`${uploadResults[i].fileName}：${msg}`);
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // Stale Server Action：服务端已部署新版本，旧 ID 找不到 → 自动刷新
-      if (/Server Action .* was not found/i.test(msg)) {
-        toast.error('版本不一致：服务端已更新，正在自动刷新页面…', { duration: 2000 });
-        setTimeout(() => window.location.reload(), 800);
-        return;
-      }
-      const isTimeoutLike = /Failed to fetch|NetworkError|timeout|aborted/i.test(msg);
-      const isPayloadIssue = /unexpected response|Body exceeded|Payload Too Large|413/i.test(msg);
-      const isQuotaExhausted = /RESOURCE_EXHAUSTED|prepayment|depleted|billing/i.test(msg);
-      const isProxyDown = /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(msg);
+    }
+
+    // Stale Server Action：服务端已部署新版本，旧 ID 找不到 → 自动刷新
+    if (errors.some((e) => /Server Action .* was not found/i.test(e))) {
+      toast.error('版本不一致：服务端已更新，正在自动刷新页面…', { duration: 2000 });
+      setTimeout(() => window.location.reload(), 800);
+      return;
+    }
+
+    // 全部失败 → 给出友好诊断
+    if (papers.length === 0) {
+      const joined = errors.join('\n') || '未提取到任何题目';
+      const isQuotaExhausted = /RESOURCE_EXHAUSTED|prepayment|depleted|billing/i.test(joined);
+      const isProxyDown = /fetch failed|ECONNREFUSED|ENOTFOUND/i.test(joined);
+      const isTimeoutLike = /Failed to fetch|NetworkError|timeout|aborted/i.test(joined);
       const friendly = isQuotaExhausted
-        ? `Gemini API 余额 / 配额耗尽（${msg.slice(0, 200)}…）。\n\n解决方法：\n① 到 https://ai.studio/projects 给当前项目充值\n② 或到 https://aistudio.google.com/apikey 创建新的免费 key，换掉 .env.local 里的 GEMINI_API_KEY 后重启 dev\n③ 免费 tier 有每分钟 / 每天的配额，过一会儿可能自动恢复`
+        ? `Gemini API 余额 / 配额耗尽。\n\n解决方法：\n① 到 https://ai.studio/projects 给当前项目充值\n② 或到 https://aistudio.google.com/apikey 创建新的免费 key，换掉 .env.local 里的 GEMINI_API_KEY 后重启 dev\n③ 免费 tier 有每分钟 / 每天的配额，过一会儿可能自动恢复\n\n原始错误：\n${joined}`
         : isProxyDown
-        ? `代理或网络不可达（${msg}）。\n\n检查：\n① Clash Verge / ClashX 是否在运行\n② .env.local 里的 HTTPS_PROXY 端口（默认 7897）是否和代理软件的实际端口一致\n③ \`scutil --proxy | grep HTTPPort\` 看真实端口`
-        : isPayloadIssue
-        ? `服务端返回异常（${msg}）。\n\n最可能的原因：\n• 提取出的题目太多 / SVG 太复杂，JSON 响应体积超过 Server Action 上限\n• 服务端函数中途崩溃\n\n解决方法：\n① **Cmd+Shift+R 强制刷新**（确保拿到带 15MB 上限的最新版）\n② 如果刷新后还不行：把 PDF 拆成 2-3 套试卷一份分批上传\n③ 或先点「重试提取」，分块路径每块小、容易过`
+        ? `代理或网络不可达。\n\n检查：\n① Clash Verge / ClashX 是否在运行\n② .env.local 里的 HTTPS_PROXY 端口（默认 7897）是否和代理软件实际端口一致\n\n原始错误：\n${joined}`
         : isTimeoutLike
-        ? `网络中断或处理超时（${msg}）。\n\n建议：\n① **Cmd+Shift+R 强制刷新**\n② 或把 PDF 拆小后重传`
-        : `请求异常：${msg}`;
+        ? `网络中断或处理超时。\n\n建议：\n① **Cmd+Shift+R 强制刷新**\n② 或把 PDF 拆小后重传\n\n原始错误：\n${joined}`
+        : joined;
       setState({ status: 'error', message: friendly });
       toast.error('AI 提取失败，详情见下方说明');
+      return;
     }
-  }, [uploadResult]);
+
+    // 部分失败 → 提示失败的文件，其余正常进入下一步
+    if (errors.length) {
+      toast.error(`${errors.length} 个文件提取失败，其余已完成`);
+    }
+    const badge = total > 1 ? `${usedModel ?? 'flash'}·${total}文件` : usedModel;
+    setState({ status: 'done', papers, usedModel: badge });
+  }, [uploadResults]);
 
   useEffect(() => { runExtraction(); }, [runExtraction]);
 
@@ -360,7 +417,11 @@ function AiExtractPanel({
             <Sparkles className="absolute -top-1 -right-1 h-4 w-4 text-yellow-500" />
           </div>
           <div className="text-center">
-            <p className="font-medium text-foreground">{state.hint}</p>
+            <p className="font-medium text-foreground">
+              {state.total > 1
+                ? `正在并行提取 ${state.total} 个文件（已完成 ${state.done}/${state.total}）…`
+                : '正在用 Gemini 2.5 Flash 极速转写文字与 LaTeX（仅转写题面，不自行解题）…'}
+            </p>
             <p className="mt-1 text-xs text-muted-foreground">AI 正在识别 LaTeX 公式并通过 AST 管线清洗…</p>
           </div>
         </div>
@@ -645,7 +706,7 @@ const DRAFT_KEY = 'aumath_paper_draft_v2';
 
 export default function PaperUploadWorkflow() {
   const [step, setStep] = useState<WorkflowStep>(1);
-  const [uploadResult, setUploadResult] = useState<Extract<UploadState, { status: 'done' }> | null>(null);
+  const [uploadResults, setUploadResults] = useState<UploadedFile[]>([]);
   const [extractedPapers, setExtractedPapers] = useState<ExtractedPaperBundle[]>([]);
 
   // 恢复草稿
@@ -661,12 +722,12 @@ export default function PaperUploadWorkflow() {
     } catch {}
   }, []);
 
-  const handleUploadDone = useCallback((state: Extract<UploadState, { status: 'done' }>) => {
-    setUploadResult(state);
+  const handleUploadDone = useCallback((files: UploadedFile[]) => {
+    setUploadResults(files);
   }, []);
 
   const handleReset = useCallback(() => {
-    setUploadResult(null);
+    setUploadResults([]);
     setExtractedPapers([]);
     setStep(1);
     try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
@@ -688,8 +749,8 @@ export default function PaperUploadWorkflow() {
       {step === 1 && (
         <section className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="mb-4 text-sm font-semibold text-foreground">第一步：上传试卷文件</h2>
-          {uploadResult ? (
-            <UploadSuccess state={uploadResult} onReset={handleReset} onNext={handleNextStep} />
+          {uploadResults.length > 0 ? (
+            <UploadSuccess files={uploadResults} onReset={handleReset} onNext={handleNextStep} />
           ) : (
             <PaperDropzone onUploadDone={handleUploadDone} />
           )}
@@ -697,11 +758,11 @@ export default function PaperUploadWorkflow() {
       )}
 
       {/* Step 2: AI Extraction */}
-      {step === 2 && uploadResult && (
+      {step === 2 && uploadResults.length > 0 && (
         <section className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="mb-4 text-sm font-semibold text-foreground">第二步：AI 视觉提取</h2>
           <AiExtractPanel
-            uploadResult={uploadResult}
+            uploadResults={uploadResults}
             onDone={handleExtractionDone}
             onBack={handleReset}
           />

@@ -83,6 +83,9 @@ You are an advanced OCR repair, mathematical typesetting, and knowledge-classifi
   • 试卷头/试卷尾的"考试时间 120 分钟"、"满分 150 分"等元信息再次出现
 每识别到一个新边界，就在 "papers" 数组里追加一个新对象。**绝不能** 把不同试卷的题目堆在同一个 paper 对象里，宁可错分多份也不能合并。
 
+【最高优先级 — 你是转写引擎，不是解题引擎】
+绝对禁止自行解答、推导、计算、证明任何题目。你唯一的职责是把卷面上**已经存在**的文字、公式、选项原样转写下来。解答题/大题**绝不能**写出任何解题过程、步骤、推导或最终结果——除非卷面本身直接印着答案（见下方 solution 规则）。自行解题是本任务最严重的错误：既拖慢速度又制造幻觉。
+
 Output ONLY a raw JSON object. No explanations, no reasoning, no Markdown fencing. Top-level structure:
 {
   "papers": [
@@ -105,7 +108,7 @@ Each question element (ALL 5 fields required):
   "question_number": 5,
   "content": "**5.** 完整题干（按规则 14-16 排版）",
   "options": {"A":"...","B":"...","C":"...","D":"..."} or null,
-  "solution": "标准答案（选择题填字母，其余填完整解答）",
+  "solution": "仅当卷面【直接印有】答案/参考答案/答案栏时照抄（选择题抄印出的字母；填空/解答题抄印出的最终答案）；卷面没印答案就填 \"\"。【绝对禁止自行解题、推导或计算】",
   "category": "数列"
 }
 
@@ -165,7 +168,8 @@ Each question element (ALL 5 fields required):
 17a.【选择题选项不要重复】对于选择题，options 字段已经承载了 (A)/(B)/(C)/(D)，**content 字段绝不能再把 "(A)..(B)..(C)..(D).." 复述一遍**。content 末尾应止于题干主句的句号/问号，紧接着的 (A) 起的选项块只填进 options 对象。错误示范：content="**5.** ...的距离是 (A) 1/2 (B) √3/2 (C) 1 (D) √3"。正确：content="**5.** ...的距离是"，options={"A":"$\\\\dfrac{1}{2}$","B":"$\\\\dfrac{\\\\sqrt{3}}{2}$","C":"$1$","D":"$\\\\sqrt{3}$"}。
 17b.【选项内公式同样必须包 $】options 每个选项里的所有数学符号/公式，与题干同等标准——必须用 $...$ 包裹，绝不能把 \\\\rho、\\\\cos\\\\theta、\\\\dfrac{1}{2}、\\\\complement 等裸命令写在选项文本里。错误：{"A":"极坐标方程 \\\\rho=\\\\cos\\\\theta 的图形"}；正确：{"A":"$\\\\rho=\\\\cos\\\\theta$ 与 $\\\\rho\\\\cos\\\\theta=\\\\dfrac{1}{2}$ 的交点"}。
 17c.【选项必须是真实且互不相同的备选项，禁止复述题干】options 必须填原卷中 (A)(B)(C)(D) 各自**不同**的备选内容。**绝对禁止**把题干原话、或题干里的同一段公式，当作每个选项的内容逐字复述（例如 A、B 两项内容雷同、且都等于题干那句话——这是 OCR 失败/幻觉的典型表现）。如果实在无法辨认某题的选项，**宁可把 options 设为 null**，也不要编造或复述题干来凑数。
-18. solution: map from "解析"/"答案" sections if present; otherwise "".`;
+18. solution: ONLY copy an answer that is literally printed on the paper（卷面已印的「答案」/「参考答案」/「答案栏」）。选择题抄印出的字母；填空/解答题抄印出的最终答案。
+    若卷面没有印答案，solution 必须是空字符串 ""。**NEVER solve, derive, compute, or prove anything yourself** —— 哪怕题目很简单也绝不自行作答。`;
 
 const USER_PROMPT = '请提取图片/PDF中所有题目，按规定 JSON 格式输出。';
 
