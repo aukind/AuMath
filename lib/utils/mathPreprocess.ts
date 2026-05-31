@@ -86,6 +86,93 @@ function repairDegenerateScripts(body: string): string {
   return body.replace(/(?<!\\)[_^](?=\s*(?:[}_^]|$))/g, m => `${m}{}`);
 }
 
+// 填空横线类宏：这些命令出现在「普通文本里」（$...$ 之外）时一定是漏网的 LaTeX——
+// remark-math 只渲染 $...$ 内的内容，于是它们会以字面量（如 "\underline{\qquad}"）漏到题面上。
+// 历史上录题 prompt（规则 11c）刻意要求把填空横线 \underline{\qquad} 写在文本里、不包 $...$，
+// 导致全库填空题横线集体漏字面量。wrapOrphanBlanks 把这些游离横线统一补回 $...$。
+const BLANK_MACROS = new Set([
+  'underline', 'rule', 'hspace', 'quad', 'qquad', 'dotfill', 'hrulefill', 'underbar',
+]);
+
+/** 从 s[i]（应为 '{'）开始吃掉一个配平的花括号组，返回闭合 '}' 之后的下标；不配平则返回 null。 */
+function consumeBraceGroup(s: string, i: number): number | null {
+  if (s[i] !== '{') return null;
+  let depth = 0;
+  for (let j = i; j < s.length; j++) {
+    const c = s[j];
+    if (c === '\\') { j++; continue; } // 跳过被转义的字符（含 \{ \} \\）
+    if (c === '{') depth++;
+    else if (c === '}') { depth--; if (depth === 0) return j + 1; }
+  }
+  return null; // 花括号不配平——放弃，保持原样
+}
+
+/**
+ * 若 s 从下标 i（此处必为反斜杠）起是一个「填空横线宏」，返回它（含其参数、相邻横线串）的结束下标，
+ * 否则返回 null。支持 \underline{...}（含嵌套）、\rule{..}{..}、\hspace{..}、裸 \quad/\qquad 等，
+ * 并把紧邻的多个横线宏与空白合并进同一段（如 \quad\quad、\underline{\qquad}\ \quad）。
+ */
+function matchBlankCommand(s: string, i: number): number | null {
+  let lastEnd = -1; // 最后一个横线宏（含参数）的结束下标——不含其后的连接空白
+  for (;;) {
+    // 跳过段内连接处的空白（仅用于探测下一个横线宏，不并入包裹范围）
+    while (i < s.length && /\s/.test(s[i])) i++;
+    if (s[i] !== '\\') break;
+    const nameMatch = /^\\([a-zA-Z]+)/.exec(s.slice(i));
+    if (!nameMatch || !BLANK_MACROS.has(nameMatch[1])) break;
+    let j = i + nameMatch[0].length;
+    if (s[j] === '*') j++; // \hspace* 等
+    // 吃掉紧随其后的若干配平花括号参数（\underline{...}、\rule{..}{..}）
+    for (;;) {
+      let k = j;
+      while (k < s.length && /\s/.test(s[k])) k++;
+      if (s[k] !== '{') break;
+      const end = consumeBraceGroup(s, k);
+      if (end === null) return lastEnd > 0 ? lastEnd : null; // 参数不配平——止于上一个完整横线
+      j = end;
+    }
+    i = lastEnd = j;
+  }
+  return lastEnd > 0 ? lastEnd : null;
+}
+
+/**
+ * 把游离在普通文本里的填空横线 LaTeX（最典型 \underline{\qquad}）补上 $...$ 包裹，使其能被 KaTeX 渲染。
+ * 字符级扫描，跳过已有的 $...$ / $$...$$ 数学区，绝不二次包裹或改动公式内/纯中文文本。
+ */
+function wrapOrphanBlanks(input: string): string {
+  let out = '';
+  let i = 0;
+  const n = input.length;
+  while (i < n) {
+    const ch = input[i];
+    // 转义美元符 \$ —— 原样保留，不当作数学区起点
+    if (ch === '\\' && input[i + 1] === '$') { out += '\\$'; i += 2; continue; }
+    // 进入数学区：原样复制到匹配的闭合分隔符，期间不做任何包裹
+    if (ch === '$') {
+      const dd = input[i + 1] === '$';
+      const startMath = i;
+      i += dd ? 2 : 1;
+      while (i < n) {
+        if (input[i] === '\\' && i + 1 < n) { i += 2; continue; }
+        if (dd ? input[i] === '$' && input[i + 1] === '$' : input[i] === '$') break;
+        i++;
+      }
+      i += dd ? 2 : 1;
+      out += input.slice(startMath, Math.min(i, n));
+      continue;
+    }
+    // 文本区：遇到反斜杠时尝试识别填空横线宏并整体包进 $...$
+    if (ch === '\\') {
+      const end = matchBlankCommand(input, i);
+      if (end !== null) { out += `$${input.slice(i, end)}$`; i = end; continue; }
+    }
+    out += ch;
+    i++;
+  }
+  return out;
+}
+
 function transformMathBody(body: string): string {
   let out = repairDegenerateScripts(body);
 
@@ -131,6 +218,10 @@ export function preprocessMathContent(input: string): string {
   text = text
     .replace(/\\\(/g, '$').replace(/\\\)/g, '$')
     .replace(/\\\[/g, '$$$$').replace(/\\\]/g, '$$$$');
+
+  // 0.5 把游离在文本里的填空横线（\underline{\qquad} 等）补回 $...$，否则会以字面量漏到题面。
+  //     必须在 $$/$ 处理之前做，且本身会跳过已有数学区，不会二次包裹。
+  text = wrapOrphanBlanks(text);
 
   // 1. 处理 display math $$...$$（display 模式天然 displaystyle，但 limits 还需注入）
   text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_m, body) => {

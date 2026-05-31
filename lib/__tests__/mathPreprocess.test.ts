@@ -48,3 +48,54 @@ describe("repairDegenerateScripts (via preprocessMathContent)", () => {
     assertAllRender(preprocessMathContent("$$y =_{ {_}}$$"));
   });
 });
+
+describe("wrapOrphanBlanks (via preprocessMathContent)", () => {
+  it("wraps a bare \\underline{\\qquad} fill-in blank sitting in prose", () => {
+    // 2003 广东卷 第13题 —— 横线漏成字面量的真实案例
+    const out = preprocessMathContent("不等式 $\\sqrt{4x-x^2}<x$ 的解集是 \\underline{\\qquad}.");
+    // 横线被补进 $...$，不再以字面量出现在文本里
+    expect(out).toMatch(/\$\\underline\{\\qquad\}\$/);
+    // 题干里原有的公式没有被破坏
+    expect(out).toContain("\\sqrt{4x-x^2}");
+    assertAllRender(out);
+  });
+
+  it("wraps a trailing blank after an inline formula (第14题)", () => {
+    const out = preprocessMathContent(
+      "$(x^2-\\frac{1}{x})^9$ 的展开式中 $x$ 系数是 \\underline{\\qquad}.",
+    );
+    expect(out).toMatch(/\$\\underline\{\\qquad\}\$/);
+    assertAllRender(out);
+  });
+
+  it("handles nested braces like \\underline{\\hspace{2em}}", () => {
+    const out = preprocessMathContent("结果是 \\underline{\\hspace{2em}}。");
+    expect(out).toMatch(/\$\\underline\{\\hspace\{2em\}\}\$/);
+    assertAllRender(out);
+  });
+
+  it("wraps bare \\qquad / merges adjacent blank macros", () => {
+    const out = preprocessMathContent("答案 \\quad\\quad 。");
+    expect(out).toMatch(/\$\\quad\\quad\$/);
+    assertAllRender(out);
+  });
+
+  it("does NOT double-wrap a blank already inside math", () => {
+    const out = preprocessMathContent("则 $a_{10}=\\underline{\\qquad}$.");
+    // 仍是单层 $...$，没有出现 $$ 或重复的 $
+    expect(out).not.toMatch(/\$\$/);
+    expect(out).toContain("\\underline{\\qquad}");
+    assertAllRender(out);
+  });
+
+  it("leaves a normal $...$ formula untouched", () => {
+    const out = preprocessMathContent("设 $f(x)=x^2+1$ 在 $\\mathbb{R}$ 上递增。");
+    expect(out).toContain("f(x)=x^2+1");
+    assertAllRender(out);
+  });
+
+  it("does not invent math from plain Chinese prose (no backslash → no change)", () => {
+    const raw = "已知点 A、B、C 三点共线，求证它们的关系。";
+    expect(preprocessMathContent(raw)).toBe(raw);
+  });
+});
