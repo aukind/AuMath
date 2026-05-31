@@ -6,6 +6,7 @@ import SearchBox from '@/components/SearchBox';
 import QuestionCard from '@/components/QuestionCard';
 import { searchAll } from '@/app/actions/search';
 import { getFavoritedQuestionIds, getErroredQuestionIds } from '@/app/actions/user-workspace';
+import { getMyDifficultyRatings } from '@/app/actions/difficulty';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -16,11 +17,12 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   const query = (q ?? '').trim();
 
   const supabase = await createClient();
-  const [{ data: { user } }, result, favoritedIds, erroredIds] = await Promise.all([
+  const [{ data: { user } }, result, favoritedIds, erroredIds, myRatings] = await Promise.all([
     supabase.auth.getUser(),
     query ? searchAll(query) : Promise.resolve({ questions: [], posts: [] }),
     getFavoritedQuestionIds(),
     getErroredQuestionIds(),
+    getMyDifficultyRatings(),
   ]);
 
   const total = result.questions.length + result.posts.length;
@@ -87,6 +89,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                       isLoggedIn={!!user}
                       initialFavorited={favoritedIds.includes(qq.id)}
                       initialErrored={erroredIds.includes(qq.id)}
+                      initialMyRating={myRatings[qq.id] ?? null}
                     />
                   ))}
                 </div>

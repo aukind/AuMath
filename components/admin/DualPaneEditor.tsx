@@ -124,19 +124,6 @@ function BatchMetaForm({
   return (
     <div className="flex flex-wrap gap-3 rounded-lg border bg-muted/30 px-4 py-3">
       <label className="flex items-center gap-2 text-sm">
-        <span className="text-muted-foreground shrink-0">难度</span>
-        <select
-          value={meta.difficulty}
-          onChange={e => onChange({ ...meta, difficulty: Number(e.target.value) as PublishBatchMeta['difficulty'] })}
-          className="rounded border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-primary"
-        >
-          {[1, 2, 3, 4, 5].map(d => (
-            <option key={d} value={d}>{'★'.repeat(d)}{'☆'.repeat(5 - d)}</option>
-          ))}
-        </select>
-      </label>
-
-      <label className="flex items-center gap-2 text-sm">
         <span className="text-muted-foreground shrink-0">年份</span>
         <input
           type="number"
@@ -227,7 +214,6 @@ export default function DualPaneEditor({
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [meta, setMeta] = useState<PublishBatchMeta>({
-    difficulty:  3,
     year:        initialPaperYear ?? new Date().getFullYear(),
     source:      initialPaperTitle ?? '',
     paper_type:  initialPaperType ?? 'real',

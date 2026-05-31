@@ -5,7 +5,6 @@ import { revalidatePath, revalidateTag } from 'next/cache';
 import { normalizeLaTeX } from '@/lib/normalizeLatex';
 import { stripInlineOptionTail } from '@/lib/questions/content';
 import { createAdminClient } from '@/lib/supabase/admin';
-import type { Difficulty } from '@/types/database';
 
 // ── 导出类型 ───────────────────────────────────────────────────
 
@@ -36,7 +35,7 @@ export type ProcessPaperResult =
   | { success: false; error: string };
 
 export interface PublishBatchMeta {
-  difficulty:   Difficulty;
+  // 难度已退役为群众评分（见 question_difficulty_ratings）；录题不再设整卷难度，入库默认 3。
   year:         number | null;
   source:       string;
   paper_type?:  'real' | 'mock';
@@ -678,7 +677,7 @@ export async function publishQuestions(
           answer:        q.answer,
           analysis:      '',
           question_type,
-          difficulty:    meta.difficulty,
+          difficulty:    3, // 已退役字段，留默认中等；展示用群众评分
           year:          meta.year,
           source:        meta.source || null,
           status:        'published',
@@ -866,17 +865,9 @@ export async function deletePaperWithQuestions(
 
 export async function publishPaperBundles(
   bundles:    ExtractedPaperBundle[],
-  difficulty: Difficulty | Difficulty[],
   strategy:   DuplicateStrategy = 'skip',
 ): Promise<PublishBundlesResult> {
   if (!bundles.length) return { success: false, error: '没有可发布的试卷' };
-
-  // 标准化为数组：单值则全套用同一难度
-  const difficulties: Difficulty[] = Array.isArray(difficulty)
-    ? (difficulty.length === bundles.length
-        ? difficulty
-        : bundles.map((_, i) => difficulty[i] ?? difficulty[difficulty.length - 1] ?? 2))
-    : bundles.map(() => difficulty);
 
   // 预检重名
   const dupResult = await detectDuplicatePapers(bundles);
@@ -902,7 +893,6 @@ export async function publishPaperBundles(
     }
 
     const meta: PublishBatchMeta = {
-      difficulty:  difficulties[i],
       year:        bundle.paper_year ?? null,
       source:      bundle.paper_title ?? '',
       paper_type:  bundle.paper_type,

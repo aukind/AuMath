@@ -7,7 +7,6 @@ import {
   publishPaperBundles, detectDuplicatePapers,
   type ExtractedPaperBundle, type DuplicatePaperInfo, type DuplicateStrategy,
 } from '@/app/actions/process-paper';
-import type { Difficulty } from '@/types/database';
 import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
 import {
@@ -432,14 +431,6 @@ function AiExtractPanel({
 
 // ── Step 3b: 多卷批量发布面板 ──────────────────────────────────────────────────
 
-const DIFFICULTY_OPTIONS: { value: Difficulty; label: string }[] = [
-  { value: 1, label: '⭐ 基础' },
-  { value: 2, label: '⭐⭐ 中等' },
-  { value: 3, label: '⭐⭐⭐ 较难' },
-  { value: 4, label: '⭐⭐⭐⭐ 困难' },
-  { value: 5, label: '⭐⭐⭐⭐⭐ 极难' },
-];
-
 type BulkPublishState =
   | { status: 'idle' }
   | { status: 'publishing' }
@@ -452,22 +443,11 @@ function MultiBulkPublisher({
   papers: ExtractedPaperBundle[];
   onReset: () => void;
 }) {
-  // 每套试卷独立难度，默认 2（中等）
-  const [perPaperDifficulty, setPerPaperDifficulty] = useState<Difficulty[]>(papers.map(() => 2));
   const [publishState, setPublishState] = useState<BulkPublishState>({ status: 'idle' });
   const [activePapers, setActivePapers] = useState<boolean[]>(papers.map(() => true));
-  const [dupModal, setDupModal] = useState<{ duplicates: DuplicatePaperInfo[]; selected: ExtractedPaperBundle[]; selectedDifficulties: Difficulty[] } | null>(null);
+  const [dupModal, setDupModal] = useState<{ duplicates: DuplicatePaperInfo[]; selected: ExtractedPaperBundle[] } | null>(null);
 
   const selectedPapers = papers.filter((_, i) => activePapers[i]);
-  const selectedDifficulties = perPaperDifficulty.filter((_, i) => activePapers[i]);
-
-  const setOneDifficulty = useCallback((i: number, d: Difficulty) => {
-    setPerPaperDifficulty(prev => prev.map((v, idx) => idx === i ? d : v));
-  }, []);
-
-  const setAllDifficulties = useCallback((d: Difficulty) => {
-    setPerPaperDifficulty(prev => prev.map(() => d));
-  }, []);
 
   const handleStaleAction = useCallback((msg: string): boolean => {
     if (/Server Action .* was not found/i.test(msg)) {
@@ -478,10 +458,10 @@ function MultiBulkPublisher({
     return false;
   }, []);
 
-  const runPublish = useCallback(async (selected: ExtractedPaperBundle[], difficulties: Difficulty[], strategy: DuplicateStrategy) => {
+  const runPublish = useCallback(async (selected: ExtractedPaperBundle[], strategy: DuplicateStrategy) => {
     setPublishState({ status: 'publishing' });
     try {
-      const result = await publishPaperBundles(selected, difficulties, strategy);
+      const result = await publishPaperBundles(selected, strategy);
       if (!result.success) {
         toast.error(`发布失败：${result.error}`);
         setPublishState({ status: 'idle' });
@@ -509,7 +489,7 @@ function MultiBulkPublisher({
     try {
       const detect = await detectDuplicatePapers(selectedPapers);
       if (detect.success && detect.duplicates.length > 0) {
-        setDupModal({ duplicates: detect.duplicates, selected: selectedPapers, selectedDifficulties });
+        setDupModal({ duplicates: detect.duplicates, selected: selectedPapers });
         setPublishState({ status: 'idle' });
         return;
       }
@@ -518,8 +498,8 @@ function MultiBulkPublisher({
       if (handleStaleAction(msg)) return;
       console.warn('[detectDuplicatePapers] failed:', msg);
     }
-    await runPublish(selectedPapers, selectedDifficulties, 'skip');
-  }, [selectedPapers, selectedDifficulties, runPublish, handleStaleAction]);
+    await runPublish(selectedPapers, 'skip');
+  }, [selectedPapers, runPublish, handleStaleAction]);
 
   if (publishState.status === 'done') {
     return (
@@ -540,25 +520,7 @@ function MultiBulkPublisher({
 
   return (
     <div className="space-y-5">
-      {/* 批量难度快捷设置 */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <span className="text-sm text-muted-foreground shrink-0">批量套用难度</span>
-        <div className="flex gap-2 flex-wrap">
-          {DIFFICULTY_OPTIONS.map(opt => (
-            <button
-              key={opt.value}
-              onClick={() => setAllDifficulties(opt.value)}
-              title={`将所有试卷难度统一设为${opt.label}`}
-              className="rounded-md border px-3 py-1 text-xs hover:bg-muted text-muted-foreground transition-colors"
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-        <span className="text-xs text-muted-foreground italic ml-auto">每套可在下方独立调整</span>
-      </div>
-
-      {/* 试卷勾选列表 + 每套独立难度 */}
+      {/* 试卷勾选列表（难度改为发布后由用户众包评分，这里不再设置） */}
       <ul className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
         {papers.map((paper, i) => (
           <li key={i} className={['rounded-lg border p-4 transition-colors', activePapers[i] ? 'bg-muted/30' : 'opacity-50'].join(' ')}>
@@ -585,25 +547,6 @@ function MultiBulkPublisher({
                 <p className="mt-1 text-xs text-muted-foreground line-clamp-1 font-mono">
                   {paper.questions[0]?.content ?? ''}
                 </p>
-                {/* 每套独立难度选择器 */}
-                <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground mr-1">难度</span>
-                  {DIFFICULTY_OPTIONS.map(opt => (
-                    <button
-                      key={opt.value}
-                      disabled={!activePapers[i]}
-                      onClick={() => setOneDifficulty(i, opt.value)}
-                      className={[
-                        'rounded border px-2 py-0.5 text-[11px] transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
-                        perPaperDifficulty[i] === opt.value
-                          ? 'border-primary bg-primary text-primary-foreground font-semibold'
-                          : 'hover:bg-muted text-muted-foreground',
-                      ].join(' ')}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
               </div>
             </div>
           </li>
@@ -631,8 +574,8 @@ function MultiBulkPublisher({
         <DuplicateConfirmModal
           duplicates={dupModal.duplicates}
           onClose={() => setDupModal(null)}
-          onSkip={() => { const m = dupModal; setDupModal(null); runPublish(m.selected, m.selectedDifficulties, 'skip'); }}
-          onReplace={() => { const m = dupModal; setDupModal(null); runPublish(m.selected, m.selectedDifficulties, 'replace'); }}
+          onSkip={() => { const m = dupModal; setDupModal(null); runPublish(m.selected, 'skip'); }}
+          onReplace={() => { const m = dupModal; setDupModal(null); runPublish(m.selected, 'replace'); }}
         />
       )}
     </div>

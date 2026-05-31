@@ -5,6 +5,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import QuestionCard from '@/components/QuestionCard';
 import { getDailyQuestion } from '@/app/actions/daily';
 import { getFavoritedQuestionIds, getErroredQuestionIds } from '@/app/actions/user-workspace';
+import { getMyDifficultyRatings } from '@/app/actions/difficulty';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -15,11 +16,12 @@ export const metadata = {
 
 export default async function DailyPage() {
   const supabase = await createClient();
-  const [{ data: { user } }, daily, favoritedIds, erroredIds] = await Promise.all([
+  const [{ data: { user } }, daily, favoritedIds, erroredIds, myRatings] = await Promise.all([
     supabase.auth.getUser(),
     getDailyQuestion(),
     getFavoritedQuestionIds(),
     getErroredQuestionIds(),
+    getMyDifficultyRatings(),
   ]);
 
   const { question, date: today } = daily;
@@ -56,6 +58,7 @@ export default async function DailyPage() {
             isLoggedIn={!!user}
             initialFavorited={favoritedIds.includes(question.id)}
             initialErrored={erroredIds.includes(question.id)}
+            initialMyRating={myRatings[question.id] ?? null}
           />
         ) : (
           <div className="rounded-xl border border-dashed border-zinc-300 px-6 py-16 text-center text-sm text-zinc-400 dark:border-zinc-700">

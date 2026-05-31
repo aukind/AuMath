@@ -50,6 +50,7 @@ interface PageLayoutProps {
   mybankTab: WorkspaceType;
   favoritedIds: string[];
   erroredIds: string[];
+  myRatings: Record<string, number>;
   siteViews: number;
 }
 
@@ -82,6 +83,7 @@ export default function PageLayout({
   mybankTab,
   favoritedIds,
   erroredIds,
+  myRatings,
   siteViews,
 }: PageLayoutProps) {
   // ── Optimistic delete ────────────────────────────────────────
@@ -173,6 +175,7 @@ export default function PageLayout({
               userId={userId}
               favoritedIds={favoritedIds}
               erroredIds={erroredIds}
+              myRatings={myRatings}
               onDelete={handleDelete}
             />
           ) : (
@@ -192,6 +195,7 @@ export default function PageLayout({
                     userId={userId}
                     favoritedIds={favoritedIds}
                     erroredIds={erroredIds}
+                    myRatings={myRatings}
                     onDelete={handleDelete}
                   />
                 ) : (
@@ -236,7 +240,7 @@ export default function PageLayout({
 // ── 题目浏览（点侧边栏知识点 / 真题 / 模拟题）────────────────
 function BrowseView({
   pageTitle, activePaper, validSort, topicId, paperId,
-  questions, hasTopics, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, onDelete,
+  questions, hasTopics, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, myRatings, onDelete,
 }: {
   pageTitle: string;
   activePaper: PaperRow | null;
@@ -250,6 +254,7 @@ function BrowseView({
   userId?: string;
   favoritedIds: string[];
   erroredIds: string[];
+  myRatings: Record<string, number>;
   onDelete: (id: string) => void;
 }) {
   const { navigate, isPending } = useSoftNav();
@@ -289,6 +294,7 @@ function BrowseView({
           onDelete={onDelete}
           favoritedIds={favoritedIds}
           erroredIds={erroredIds}
+          myRatings={myRatings}
         />
       )}
     </>
@@ -297,7 +303,7 @@ function BrowseView({
 
 // ── 我的题库（收藏 / 错题 / 最近浏览）────────────────────────
 function MyBankView({
-  tab, questions, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, onDelete,
+  tab, questions, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, myRatings, onDelete,
 }: {
   tab: WorkspaceType;
   questions: QuestionWithTopics[];
@@ -306,6 +312,7 @@ function MyBankView({
   userId?: string;
   favoritedIds: string[];
   erroredIds: string[];
+  myRatings: Record<string, number>;
   onDelete: (id: string) => void;
 }) {
   const meta: Record<WorkspaceType, { title: string; empty: string }> = {

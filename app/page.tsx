@@ -1,6 +1,7 @@
 import { getQuestions, getQuestionTopics, getPapers, getQuestionsByPaperId } from '@/app/actions/questions';
 import type { PaperQuestionsResult, SortOrder } from '@/app/actions/questions';
 import { getFavoritedQuestionIds, getErroredQuestionIds, getWorkspaceQuestions } from '@/app/actions/user-workspace';
+import { getMyDifficultyRatings } from '@/app/actions/difficulty';
 import { getSiteViews } from '@/app/actions/site-stats';
 import { getForumPosts } from '@/app/actions/forum';
 import { getMyAccount } from '@/app/actions/account';
@@ -52,6 +53,7 @@ export default async function HomePage({
     forumPosts,
     favoritedIds,
     erroredIds,
+    myRatings,
     siteViews,
     account,
     unreadCount,
@@ -75,6 +77,7 @@ export default async function HomePage({
       : Promise.resolve<ForumPost[]>([]),
     getFavoritedQuestionIds(),
     getErroredQuestionIds(),
+    getMyDifficultyRatings(),
     getSiteViews(),
     getMyAccount(),
     getUnreadNotificationCount(),
@@ -180,6 +183,7 @@ export default async function HomePage({
         mybankTab={mybankTab}
         favoritedIds={favoritedIds}
         erroredIds={erroredIds}
+        myRatings={myRatings}
         siteViews={siteViews}
       />
 

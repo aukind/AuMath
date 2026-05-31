@@ -15,6 +15,7 @@ interface Props {
   isLoggedIn?: boolean;
   favoritedIds?: string[];
   erroredIds?: string[];
+  myRatings?: Record<string, number>;
 }
 
 function stripLatex(text: string): string {
@@ -44,6 +45,7 @@ function DraggableCard({
   isLoggedIn,
   initialFavorited,
   initialErrored,
+  initialMyRating,
 }: {
   question: QuestionWithTopics;
   isAdmin: boolean;
@@ -52,6 +54,7 @@ function DraggableCard({
   isLoggedIn?: boolean;
   initialFavorited?: boolean;
   initialErrored?: boolean;
+  initialMyRating?: number | null;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: question.id,
@@ -70,12 +73,13 @@ function DraggableCard({
         isLoggedIn={isLoggedIn}
         initialFavorited={initialFavorited}
         initialErrored={initialErrored}
+        initialMyRating={initialMyRating}
       />
     </div>
   );
 }
 
-export default function QuestionSearch({ questions, isAdmin, userId, onDelete, isLoggedIn = false, favoritedIds = [], erroredIds = [] }: Props) {
+export default function QuestionSearch({ questions, isAdmin, userId, onDelete, isLoggedIn = false, favoritedIds = [], erroredIds = [], myRatings = {} }: Props) {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [printQuestions, setPrintQuestions] = useState<QuestionWithTopics[]>([]);
@@ -233,6 +237,7 @@ export default function QuestionSearch({ questions, isAdmin, userId, onDelete, i
                   isLoggedIn={isLoggedIn}
                   initialFavorited={favoritedIds.includes(q.id)}
                   initialErrored={erroredIds.includes(q.id)}
+                  initialMyRating={myRatings[q.id] ?? null}
                 />
               </div>
             </div>

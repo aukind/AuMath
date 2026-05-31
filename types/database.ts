@@ -125,6 +125,10 @@ export interface QuestionRow {
   created_by: string | null;
   /** 可选：交互式 Rive 沙盒配置，NULL 表示无 */
   interactive_sandbox?: InteractiveSandboxConfig | null;
+  /** 众包难度评分聚合（迁移 014）。rating_avg 为生成列；迁移前可能为 undefined。 */
+  rating_count?: number;
+  rating_sum?: number;
+  rating_avg?: number;
   created_at: string;
   updated_at: string;
 }

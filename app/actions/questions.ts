@@ -25,12 +25,29 @@ export interface CreateQuestionInput {
   answer: string;
   analysis: string;
   question_type: QuestionType;
-  difficulty: Difficulty;
+  /** 已退役：难度改为群众评分（question_difficulty_ratings）。新建题默认 3，编辑时不再改它。 */
+  difficulty?: Difficulty;
   year: number | null;
   source: string | null;
   topic_ids: string[];
   status: QuestionStatus;
   interactive_sandbox?: InteractiveSandboxConfig | null;
+  /** 选择题选项（每项形如 "A. ..."，标签写在字符串里，与录题入库格式一致）。非选择题留空。 */
+  options?: string[] | null;
+}
+
+/** 把存储里的 metadata.options（数组或 {A,B,..} 对象）规整为可编辑的字符串数组。 */
+function optionsToStringArray(raw: unknown): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw === 'object')
+    return Object.entries(raw as Record<string, unknown>).map(([k, v]) => `${k}. ${v}`);
+  return [];
+}
+
+/** 清洗待保存的选项：去首尾空白、丢弃空项。 */
+function cleanOptions(options: string[] | null | undefined): string[] {
+  return (options ?? []).map(s => s.trim()).filter(Boolean);
 }
 
 export async function createQuestion(
@@ -49,6 +66,7 @@ export async function createQuestion(
 
   const asAdmin = isAdminUser(user);
 
+  const opts = cleanOptions(input.options);
   const { data, error } = await admin
     .from('questions')
     .insert({
@@ -56,13 +74,14 @@ export async function createQuestion(
       answer:              input.answer,
       analysis:            input.analysis,
       question_type:       input.question_type,
-      difficulty:          input.difficulty,
+      difficulty:          input.difficulty ?? 3, // 已退役字段，留默认值；展示用群众评分
       year:                input.year,
       source:              input.source,
       status:              input.status,
       is_public:           asAdmin,
       created_by:          user.id,
       interactive_sandbox: input.interactive_sandbox ?? null,
+      metadata:            opts.length ? { options: opts } : {},
     })
     .select('id')
     .single();
@@ -94,6 +113,8 @@ export interface QuestionForEdit {
   status: QuestionStatus;
   topic_ids: string[];
   interactive_sandbox: InteractiveSandboxConfig | null;
+  /** 选择题选项（每项形如 "A. ..."），从 metadata.options 规整而来 */
+  options: string[];
 }
 
 export async function getQuestionById(id: string): Promise<QuestionForEdit | null> {
@@ -102,7 +123,7 @@ export async function getQuestionById(id: string): Promise<QuestionForEdit | nul
 
   const { data, error } = await supabase
     .from('questions')
-    .select('id, content, answer, analysis, question_type, difficulty, year, source, status, interactive_sandbox, question_topic_relations(topic_id)')
+    .select('id, content, answer, analysis, question_type, difficulty, year, source, status, metadata, interactive_sandbox, question_topic_relations(topic_id)')
     .eq('id', id)
     .single();
 
@@ -120,6 +141,7 @@ export async function getQuestionById(id: string): Promise<QuestionForEdit | nul
     status:              (data as any).status ?? 'published',
     topic_ids:           ((data as any).question_topic_relations ?? []).map((r: any) => r.topic_id),
     interactive_sandbox: ((data as any).interactive_sandbox ?? null) as InteractiveSandboxConfig | null,
+    options:             optionsToStringArray((data as any).metadata?.options),
   };
 }
 
@@ -134,6 +156,15 @@ export async function updateQuestion(
     return { success: false, error: '服务端配置错误：缺少 SUPABASE_SERVICE_ROLE_KEY' };
   }
 
+  // 合并 metadata：保留既有的 tags/exam_number 等键，只覆写 options。
+  const { data: existing } = await supabase
+    .from('questions').select('metadata').eq('id', id).single();
+  const metadata: Record<string, unknown> = { ...((existing as any)?.metadata ?? {}) };
+  const opts = cleanOptions(input.options);
+  if (opts.length) metadata.options = opts;
+  else delete metadata.options;
+
+  // 注意：不再更新 difficulty（已退役为群众评分），保留数据库原值。
   const { error } = await supabase
     .from('questions')
     .update({
@@ -141,11 +172,11 @@ export async function updateQuestion(
       answer:              input.answer,
       analysis:            input.analysis,
       question_type:       input.question_type,
-      difficulty:          input.difficulty,
       year:                input.year,
       source:              input.source,
       status:              input.status,
       interactive_sandbox: input.interactive_sandbox ?? null,
+      metadata,
     })
     .eq('id', id);
 
@@ -229,11 +260,12 @@ export async function getQuestions(
   }
 
   switch (sort) {
+    // 难度排序改用群众评分均值 rating_avg（迁移 014 后存在）；nullsFirst:false 让未评分的排末尾。
     case 'difficulty_asc':
-      query = query.order('difficulty', { ascending: true });
+      query = query.order('rating_avg', { ascending: true, nullsFirst: false });
       break;
     case 'difficulty_desc':
-      query = query.order('difficulty', { ascending: false });
+      query = query.order('rating_avg', { ascending: false, nullsFirst: false });
       break;
     default:
       query = query.order('updated_at', { ascending: false });

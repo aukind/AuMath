@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useCallback, useRef, type RefObject, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Eye, EyeOff, Loader2, Send, Save } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Loader2, Send, Save, X } from 'lucide-react';
 import MathRenderer from '@/components/MathRenderer';
 import AiFigureButton from '@/components/admin/AiFigureButton';
 import { ScreenshotToLatexButton } from '@/components/admin/ScreenshotToLatexButton';
@@ -10,7 +10,7 @@ import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox'
 import { createQuestion, updateQuestion } from '@/app/actions/questions';
 import { uploadRiveAsset } from '@/app/actions/upload-rive';
 import type { QuestionForEdit } from '@/app/actions/questions';
-import type { TopicRow, QuestionType, Difficulty, InteractiveSandboxConfig, SandboxControl } from '@/types/database';
+import type { TopicRow, QuestionType, InteractiveSandboxConfig, SandboxControl } from '@/types/database';
 
 const DEFAULT_CONTROLS_TEMPLATE = `[
   {
@@ -56,8 +56,6 @@ const QUESTION_TYPES: { value: QuestionType; label: string }[] = [
   { value: 'fill_in_blank',   label: '填空题' },
   { value: 'multiple_choice', label: '选择题' },
 ];
-
-const DIFFICULTY_LABELS = ['', '基础', '进阶', '中等', '拔高', '竞赛'];
 
 interface Props {
   topics: Pick<TopicRow, 'id' | 'name' | 'parent_id'>[];
@@ -220,7 +218,7 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
   const [answer,       setAnswer]       = useState(initialData?.answer       ?? '');
   const [analysis,     setAnalysis]     = useState(initialData?.analysis     ?? '');
   const [questionType, setQuestionType] = useState<QuestionType>(initialData?.question_type ?? 'calculation');
-  const [difficulty,   setDifficulty]   = useState<Difficulty>(initialData?.difficulty ?? 3);
+  const [options,      setOptions]      = useState<string[]>(initialData?.options ?? []);
   const [year,         setYear]         = useState(initialData?.year ? String(initialData.year) : String(new Date().getFullYear()));
   const [source,       setSource]       = useState(initialData?.source ?? '');
   const [topicIds,     setTopicIds]     = useState<string[]>(initialData?.topic_ids ?? []);
@@ -251,12 +249,12 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
       answer,
       analysis,
       question_type: questionType,
-      difficulty,
       year:   year ? parseInt(year, 10) : null,
       source: source.trim() || null,
       topic_ids: topicIds,
       status,
       interactive_sandbox: sandbox,
+      options,
     };
 
     startTransition(async () => {
@@ -363,9 +361,12 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
           />
         </div>
 
+        {/* ── 选项（选择题）—— 每行一个选项，支持 LaTeX，实时预览 ── */}
+        <OptionsEditor options={options} onChange={setOptions} />
+
         {/* ── 元数据行 ── */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm px-6 py-5 space-y-5">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-5">
 
             {/* 题型 */}
             <div className="space-y-1.5">
@@ -381,30 +382,6 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
                   <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
               </select>
-            </div>
-
-            {/* 难度 */}
-            <div className="space-y-1.5">
-              <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-zinc-400">
-                难度等级
-              </label>
-              <div className="flex items-center gap-0.5 h-9">
-                {([1, 2, 3, 4, 5] as Difficulty[]).map(d => (
-                  <button
-                    key={d}
-                    type="button"
-                    onClick={() => setDifficulty(d)}
-                    className={`text-xl leading-none transition-colors ${
-                      d <= difficulty
-                        ? 'text-amber-400 hover:text-amber-500'
-                        : 'text-zinc-200 dark:text-zinc-700 hover:text-amber-300'
-                    }`}
-                  >
-                    ★
-                  </button>
-                ))}
-                <span className="ml-2 text-xs text-zinc-400">{DIFFICULTY_LABELS[difficulty]}</span>
-              </div>
             </div>
 
             {/* 年份 */}
@@ -478,6 +455,79 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
           onParseError={setSandboxError}
         />
       </div>
+    </div>
+  );
+}
+
+// ── 选项编辑子组件（选择题）──────────────────────────────────
+
+const OPTION_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+
+function OptionsEditor({
+  options,
+  onChange,
+}: {
+  options: string[];
+  onChange: (next: string[]) => void;
+}) {
+  // 新增选项时，自动以 "X. " 起头（与录题入库格式一致，标签写在字符串里）。
+  const addOption = () => {
+    const label = OPTION_LABELS[options.length] ?? '';
+    onChange([...options, label ? `${label}. ` : '']);
+  };
+  const setOne = (i: number, v: string) =>
+    onChange(options.map((o, idx) => (idx === i ? v : o)));
+  const removeOne = (i: number) => onChange(options.filter((_, idx) => idx !== i));
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-zinc-400">
+          选项（选择题填写，其余题型留空）
+        </span>
+        <button
+          type="button"
+          onClick={addOption}
+          className="text-xs px-2.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+        >
+          + 添加选项
+        </button>
+      </div>
+
+      {options.length === 0 ? (
+        <p className="text-xs text-zinc-300 dark:text-zinc-600 italic">
+          非选择题无需选项；点「添加选项」即可逐个录入（支持 $LaTeX$）。
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {options.map((opt, i) => (
+            <div key={i} className="flex items-start gap-2">
+              <div className="flex-1 grid grid-cols-2 gap-0 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm">
+                <textarea
+                  value={opt}
+                  onChange={e => setOne(i, e.target.value)}
+                  placeholder={`选项 ${OPTION_LABELS[i] ?? ''}，例如 ${OPTION_LABELS[i] ?? 'A'}. $\\dfrac{1}{2}$`}
+                  rows={2}
+                  className="w-full bg-zinc-50/50 dark:bg-zinc-900/80 px-3 py-2 text-sm font-mono text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-300 dark:placeholder:text-zinc-600 resize-none border-r border-zinc-200 dark:border-zinc-700 focus:outline-none focus:bg-white dark:focus:bg-zinc-900 transition-colors"
+                />
+                <div className="bg-white dark:bg-zinc-900 px-3 py-2 overflow-x-auto text-sm">
+                  {opt.trim()
+                    ? <MathRenderer content={opt} />
+                    : <span className="text-xs text-zinc-300 dark:text-zinc-600 italic">预览…</span>}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => removeOne(i)}
+                title="删除该选项"
+                className="mt-1.5 flex items-center justify-center w-7 h-7 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:text-red-500 hover:border-red-300 dark:hover:border-red-700 transition-colors shrink-0"
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

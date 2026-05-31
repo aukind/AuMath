@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react';
 import { ChevronDown, GripVertical, Layers, Pencil, Star, Trash2, X } from 'lucide-react';
 import MathRenderer from '@/components/MathRenderer';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
+import DifficultyRating from '@/components/DifficultyRating';
 import { toggleFavorite, markError, removeError, recordView } from '@/app/actions/user-workspace';
 import { stripInlineOptionTail } from '@/lib/questions/content';
 import type { QuestionWithTopics } from '@/types/database';
@@ -19,6 +20,8 @@ interface QuestionCardProps {
   isLoggedIn?: boolean;
   initialFavorited?: boolean;
   initialErrored?: boolean;
+  /** 当前用户对该题的难度评分（1–5），未评为 null */
+  initialMyRating?: number | null;
 }
 
 function normalizeOptions(raw: unknown): string[] {
@@ -32,7 +35,7 @@ function normalizeOptions(raw: unknown): string[] {
   return [];
 }
 
-export default function QuestionCard({ question, isAdmin = false, canModify, onDelete, isDragging = false, dragHandleProps, isLoggedIn = false, initialFavorited = false, initialErrored = false }: QuestionCardProps) {
+export default function QuestionCard({ question, isAdmin = false, canModify, onDelete, isDragging = false, dragHandleProps, isLoggedIn = false, initialFavorited = false, initialErrored = false, initialMyRating = null }: QuestionCardProps) {
   const effectiveCanModify = canModify ?? isAdmin;
   const [solutionOpen, setSolutionOpen] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -132,9 +135,21 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
           {primaryTopic && (
             <span className="text-xs text-zinc-400 dark:text-zinc-500 truncate">· {primaryTopic.name}</span>
           )}
+
+          {/* 众包难度评分 —— 靠右 */}
+          <div className="ml-auto">
+            <DifficultyRating
+              questionId={question.id}
+              initialAvg={Number(question.rating_avg ?? 0)}
+              initialCount={question.rating_count ?? 0}
+              initialMyRating={initialMyRating}
+              isLoggedIn={isLoggedIn}
+            />
+          </div>
+
           {/* 管理员编辑/删除 —— hover 显示，靠右 */}
           {(isAdmin || (effectiveCanModify && onDelete)) && (
-            <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0">
+            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity duration-150 shrink-0">
               {isAdmin && (
                 <a
                   href={`/admin/edit/${question.id}`}
