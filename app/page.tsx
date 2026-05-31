@@ -3,6 +3,7 @@ import type { PaperQuestionsResult, SortOrder } from '@/app/actions/questions';
 import { getFavoritedQuestionIds, getErroredQuestionIds, getWorkspaceQuestions } from '@/app/actions/user-workspace';
 import { getSiteViews } from '@/app/actions/site-stats';
 import { getForumPosts } from '@/app/actions/forum';
+import { getMyAccount } from '@/app/actions/account';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
 import Link from 'next/link';
@@ -50,6 +51,7 @@ export default async function HomePage({
     favoritedIds,
     erroredIds,
     siteViews,
+    account,
   ] = await Promise.all([
     supabase.auth.getUser(),
     getQuestionTopics(),
@@ -71,15 +73,19 @@ export default async function HomePage({
     getFavoritedQuestionIds(),
     getErroredQuestionIds(),
     getSiteViews(),
+    getMyAccount(),
   ]);
 
   const isAdmin = isAdminUser(user);
   const isLoggedIn = !!user;
   const userId = user?.id;
+  // 顶栏用户名/头像取自 profiles（getMyAccount），而非 auth metadata——后者改名后不会更新。
   const username =
+    account?.username ||
     (user?.user_metadata?.username as string | undefined)?.trim() ||
     user?.email?.split('@')[0] ||
     '我';
+  const avatarUrl = account?.avatarUrl ?? undefined;
 
   // 非 browse 时统一携带 workspaceQuestions，供「我的题库」常驻 slot 使用（论坛 slot 用 forumPosts）。
   const questions = mainView === 'browse'
@@ -127,7 +133,7 @@ export default async function HomePage({
                     <PenLine size={13} /> <span className="hidden sm:inline">AI 录题</span>
                   </Link>
                 )}
-                <AccountMenu username={username} userId={userId} isAdmin={isAdmin} />
+                <AccountMenu username={username} userId={userId} isAdmin={isAdmin} avatarUrl={avatarUrl} />
               </>
             ) : (
               <Link href="/login" className="flex items-center justify-center min-w-[44px] min-h-[44px] px-3 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
