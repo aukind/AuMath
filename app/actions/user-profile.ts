@@ -36,7 +36,8 @@ export async function getUserProfile(): Promise<UserProfileData | null> {
   const joinDate = user.created_at ?? new Date().toISOString();
 
   // user_* / forum_* 表未在 Database 泛型中声明，用最小链式查询类型（见底部 FromFn）替代 any。
-  const from = supabase.from as unknown as FromFn;
+  // 必须绑定 this：直接取 supabase.from 会丢失 this，调用时内部读 this.rest 抛错（被 catch 后整页降级为 0）。
+  const from = supabase.from.bind(supabase) as unknown as FromFn;
 
   try {
     const [{ count: solvedCount }, { data: historyRows }, forumReputation] = await Promise.all([
@@ -97,7 +98,8 @@ export async function getUserProfile(): Promise<UserProfileData | null> {
 export async function getPublicProfile(userId: string): Promise<PublicProfileData | null> {
   if (!userId) return null;
   const supabase = await createClient();
-  const from = supabase.from as unknown as FromFn;
+  // 必须绑定 this：直接取 supabase.from 会丢失 this，调用时内部读 this.rest 抛错（被 catch 后整页降级为 0）。
+  const from = supabase.from.bind(supabase) as unknown as FromFn;
 
   const { data: { user } } = await supabase.auth.getUser();
   const isSelf = user?.id === userId;
