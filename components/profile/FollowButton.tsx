@@ -32,10 +32,15 @@ export default function FollowButton({ targetId, initialFollowing, isLoggedIn }:
     start(async () => {
       try {
         const r = await toggleFollow(targetId);
-        setFollowing(r.following);
-      } catch (e) {
+        if (r.ok) {
+          setFollowing(!!r.following);
+        } else {
+          setFollowing(!next); // 回滚
+          toast.error(r.error ?? '操作失败');
+        }
+      } catch {
         setFollowing(!next); // 回滚
-        toast.error(e instanceof Error ? e.message : '操作失败');
+        toast.error('操作失败，请稍后再试');
       }
     });
   };

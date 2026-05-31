@@ -46,8 +46,7 @@ export default function HeavyContentContainer({
             role="tabpanel"
             aria-labelledby={`tab-${id}`}
             aria-hidden={!visible}
-            // @ts-expect-error inert 在 React 19 中受支持，类型声明仍偏保守
-            inert={visible ? undefined : ''}
+            inert={!visible}
             tabIndex={visible ? 0 : -1}
             className={visible ? 'outline-none' : 'hidden'}
           >

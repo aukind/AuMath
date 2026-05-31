@@ -25,40 +25,64 @@ export interface FollowedUser {
   followedAt: string;
 }
 
-/** 关注 / 取消关注（按当前状态切换）。返回切换后的关注态。 */
-export async function toggleFollow(targetId: string): Promise<{ following: boolean }> {
+export interface ToggleFollowResult {
+  ok: boolean;
+  /** 切换后的关注态（ok 时有效） */
+  following?: boolean;
+  /** 失败时的可读原因 */
+  error?: string;
+}
+
+/**
+ * 关注 / 取消关注（按当前状态切换）。
+ *
+ * 关键：**不抛错，改为返回结果对象**。Next 在生产会把 Server Action 抛出的错误脱敏成
+ * 「An error occurred in the Server Components render…」的通用文案，UI 拿不到真实原因；
+ * 而返回值不会被脱敏，因此把失败原因放进 result.error 才能给出可读提示。
+ */
+export async function toggleFollow(targetId: string): Promise<ToggleFollowResult> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  if (!user) throw new Error('请先登录');
-  if (user.id === targetId) throw new Error('不能关注自己');
+  if (!user) return { ok: false, error: '请先登录' };
+  if (user.id === targetId) return { ok: false, error: '不能关注自己' };
 
-  const sb = supabase as any;
-  const { data: existing } = await sb
-    .from('user_follows')
-    .select('follower_id')
-    .eq('follower_id', user.id)
-    .eq('following_id', targetId)
-    .maybeSingle();
-
-  if (existing) {
-    const { error } = await sb
+  try {
+    const sb = supabase as any;
+    const { data: existing } = await sb
       .from('user_follows')
-      .delete()
+      .select('follower_id')
       .eq('follower_id', user.id)
-      .eq('following_id', targetId);
-    if (error) throw new Error('取消关注失败：' + error.message);
-  } else {
-    const { error } = await sb
-      .from('user_follows')
-      .insert({ follower_id: user.id, following_id: targetId });
-    if (error) throw new Error('关注失败：' + error.message);
-  }
+      .eq('following_id', targetId)
+      .maybeSingle();
 
-  revalidatePath(`/u/${targetId}`);
-  revalidatePath('/following');
-  return { following: !existing };
+    if (existing) {
+      const { error } = await sb
+        .from('user_follows')
+        .delete()
+        .eq('follower_id', user.id)
+        .eq('following_id', targetId);
+      if (error) throw error;
+    } else {
+      const { error } = await sb
+        .from('user_follows')
+        .insert({ follower_id: user.id, following_id: targetId });
+      if (error) throw error;
+    }
+
+    revalidatePath(`/u/${targetId}`);
+    revalidatePath('/following');
+    return { ok: true, following: !existing };
+  } catch (e: any) {
+    // 表未建（迁移 011 未应用）会得到 PGRST205；给出明确可读提示而非通用报错。
+    const missingTable =
+      e?.code === 'PGRST205' || (typeof e?.message === 'string' && e.message.includes('user_follows'));
+    return {
+      ok: false,
+      error: missingTable ? '关注功能尚未启用，请稍后再试' : '操作失败，请稍后再试',
+    };
+  }
 }
 
 /** 当前登录用户是否已关注 targetId。未登录 / 自己 / 表缺失 → false。 */
