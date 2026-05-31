@@ -86,61 +86,67 @@ function repairDegenerateScripts(body: string): string {
   return body.replace(/(?<!\\)[_^](?=\s*(?:[}_^]|$))/g, m => `${m}{}`);
 }
 
-// 填空横线类宏：这些命令出现在「普通文本里」（$...$ 之外）时一定是漏网的 LaTeX——
-// remark-math 只渲染 $...$ 内的内容，于是它们会以字面量（如 "\underline{\qquad}"）漏到题面上。
-// 历史上录题 prompt（规则 11c）刻意要求把填空横线 \underline{\qquad} 写在文本里、不包 $...$，
-// 导致全库填空题横线集体漏字面量。wrapOrphanBlanks 把这些游离横线统一补回 $...$。
-const BLANK_MACROS = new Set([
-  'underline', 'rule', 'hspace', 'quad', 'qquad', 'dotfill', 'hrulefill', 'underbar',
-]);
+// 漏包的 LaTeX：命令出现在「普通文本里」（$...$ 之外）时一定渲染不出——remark-math 只渲染
+// $...$ 内的内容，于是它们会以字面量（"\underline{\qquad}"、"\rho=\cos\theta"）漏到题面上，
+// 补集 ∁ 则退化成方块。常见来源：① 旧规则要求把填空横线写在文本里不包 $；② 模型在选项里漏包 $。
+// wrapOrphanLatex 把这些游离 LaTeX 统一补回 $...$。
 
-/** 从 s[i]（应为 '{'）开始吃掉一个配平的花括号组，返回闭合 '}' 之后的下标；不配平则返回 null。 */
-function consumeBraceGroup(s: string, i: number): number | null {
-  if (s[i] !== '{') return null;
+/** CJK 字符（含中日韩标点、全角符号、中文引号）——游离公式段在文本里的天然边界。
+ *  注意：补集符 ∁(U+2201)、省略号等数学符号不在此列，会被纳入公式段。 */
+function isCJK(ch: string): boolean {
+  return /[‘’“”　-〿㐀-䶿一-鿿豈-﫿︰-﹏＀-￯]/.test(ch);
+}
+
+/** 游离公式的触发起点：反斜杠 + ≥2 字母的命令（排除字面量 \n \t \r），或补集符 ∁。
+ *  纯中文 / markdown 文本里不存在反斜杠命令，故不会被误触发。 */
+function isOrphanTriggerStart(s: string, i: number): boolean {
+  if (s[i] === '∁') return true;
+  return s[i] === '\\' && /[a-zA-Z]/.test(s[i + 1] ?? '') && /[a-zA-Z]/.test(s[i + 2] ?? '');
+}
+
+/** 尾随的句末标点 / 空白（中英文）——包裹时剥到 $...$ 之外，避免句号逗号被渲染进数学模式。 */
+const TRAILING_PUNCT = /[.,;:!?．。，、；：！？\s]+$/;
+
+/**
+ * 从 s[i]（游离公式触发点）起，按花括号深度感知地吃掉一段「行内数学表达式」：
+ * 深度 0 时遇到 CJK / 换行 / `$` 即停止；花括号内允许 CJK（如 \text{中文}）。
+ * 返回结束下标与「是否确含数学触发」——只有确含 ≥2 字母命令或 ∁ 才值得包裹。
+ */
+function scanMathRun(s: string, i: number): { end: number; hasTrigger: boolean } {
+  const n = s.length;
   let depth = 0;
-  for (let j = i; j < s.length; j++) {
-    const c = s[j];
-    if (c === '\\') { j++; continue; } // 跳过被转义的字符（含 \{ \} \\）
-    if (c === '{') depth++;
-    else if (c === '}') { depth--; if (depth === 0) return j + 1; }
-  }
-  return null; // 花括号不配平——放弃，保持原样
-}
-
-/**
- * 若 s 从下标 i（此处必为反斜杠）起是一个「填空横线宏」，返回它（含其参数、相邻横线串）的结束下标，
- * 否则返回 null。支持 \underline{...}（含嵌套）、\rule{..}{..}、\hspace{..}、裸 \quad/\qquad 等，
- * 并把紧邻的多个横线宏与空白合并进同一段（如 \quad\quad、\underline{\qquad}\ \quad）。
- */
-function matchBlankCommand(s: string, i: number): number | null {
-  let lastEnd = -1; // 最后一个横线宏（含参数）的结束下标——不含其后的连接空白
-  for (;;) {
-    // 跳过段内连接处的空白（仅用于探测下一个横线宏，不并入包裹范围）
-    while (i < s.length && /\s/.test(s[i])) i++;
-    if (s[i] !== '\\') break;
-    const nameMatch = /^\\([a-zA-Z]+)/.exec(s.slice(i));
-    if (!nameMatch || !BLANK_MACROS.has(nameMatch[1])) break;
-    let j = i + nameMatch[0].length;
-    if (s[j] === '*') j++; // \hspace* 等
-    // 吃掉紧随其后的若干配平花括号参数（\underline{...}、\rule{..}{..}）
-    for (;;) {
-      let k = j;
-      while (k < s.length && /\s/.test(s[k])) k++;
-      if (s[k] !== '{') break;
-      const end = consumeBraceGroup(s, k);
-      if (end === null) return lastEnd > 0 ? lastEnd : null; // 参数不配平——止于上一个完整横线
-      j = end;
+  let hasTrigger = false;
+  while (i < n) {
+    const ch = s[i];
+    if (ch === '\\') {
+      const m = /^\\([a-zA-Z]+)/.exec(s.slice(i));
+      if (m) {
+        if (m[1].length >= 2) hasTrigger = true;
+        i += m[0].length;
+        continue;
+      }
+      i += 2; // \ 后接非字母（\{ \} \, \\）——连同其后字符一起吃，避免转义括号扰乱深度
+      continue;
     }
-    i = lastEnd = j;
+    if (ch === '∁') { hasTrigger = true; i++; continue; }
+    if (ch === '{') { depth++; i++; continue; }
+    if (ch === '}') { if (depth === 0) break; depth--; i++; continue; }
+    if (ch === '$' || ch === '\n' || ch === '\r') break;
+    if (depth === 0 && isCJK(ch)) break;
+    i++;
   }
-  return lastEnd > 0 ? lastEnd : null;
+  return { end: i, hasTrigger };
 }
 
 /**
- * 把游离在普通文本里的填空横线 LaTeX（最典型 \underline{\qquad}）补上 $...$ 包裹，使其能被 KaTeX 渲染。
- * 字符级扫描，跳过已有的 $...$ / $$...$$ 数学区，绝不二次包裹或改动公式内/纯中文文本。
+ * 把游离在普通文本里（$...$ 之外）的 LaTeX 补上 $...$ 包裹，使其能被 KaTeX 渲染。
+ * 覆盖：填空横线 \underline{\qquad}、漏包的公式片段 \rho=\cos\theta、补集 ∁/\complement 等。
+ *
+ * 字符级扫描：跳过已有数学区（不二次包裹）；仅在遇到「≥2 字母反斜杠命令 / ∁」时才启动一段
+ * 括号深度感知、以 CJK/换行 为边界的数学段，且要求该段确含触发才包裹——因此纯中文、
+ * markdown（**粗体**、表格、图片链接）、字面量 \n 等都不会被误包。首尾空白与句末标点剥到 $ 外。
  */
-function wrapOrphanBlanks(input: string): string {
+function wrapOrphanLatex(input: string): string {
   let out = '';
   let i = 0;
   const n = input.length;
@@ -148,7 +154,7 @@ function wrapOrphanBlanks(input: string): string {
     const ch = input[i];
     // 转义美元符 \$ —— 原样保留，不当作数学区起点
     if (ch === '\\' && input[i + 1] === '$') { out += '\\$'; i += 2; continue; }
-    // 进入数学区：原样复制到匹配的闭合分隔符，期间不做任何包裹
+    // 进入已有数学区：原样复制到匹配的闭合分隔符
     if (ch === '$') {
       const dd = input[i + 1] === '$';
       const startMath = i;
@@ -162,10 +168,19 @@ function wrapOrphanBlanks(input: string): string {
       out += input.slice(startMath, Math.min(i, n));
       continue;
     }
-    // 文本区：遇到反斜杠时尝试识别填空横线宏并整体包进 $...$
-    if (ch === '\\') {
-      const end = matchBlankCommand(input, i);
-      if (end !== null) { out += `$${input.slice(i, end)}$`; i = end; continue; }
+    // 文本区：遇到命令/∁ 起点 → 扫描一段数学表达式并包裹（句末标点剥到 $ 外）
+    if (isOrphanTriggerStart(input, i)) {
+      const { end, hasTrigger } = scanMathRun(input, i);
+      if (hasTrigger && end > i) {
+        const raw = input.slice(i, end);
+        const trail = TRAILING_PUNCT.exec(raw)?.[0] ?? '';
+        const core = trail ? raw.slice(0, raw.length - trail.length) : raw;
+        if (core) {
+          out += `$${core}$${trail}`;
+          i = end;
+          continue;
+        }
+      }
     }
     out += ch;
     i++;
@@ -173,15 +188,30 @@ function wrapOrphanBlanks(input: string): string {
   return out;
 }
 
+/**
+ * 把两点（多字母）向量 \vec{AB} 归一为 \overrightarrow{AB}——高考排版里两点确定的向量
+ * 必须用「贯穿两个字母的长箭头」\overrightarrow，\vec 的短帽箭头只压在末字母上、很别扭。
+ * 仅当 \vec 的参数是 2 个及以上拉丁字母（如 MP、AB）时改写；单字母向量 \vec{a} 保持不动。
+ * \overrightarrow{...} 已是长箭头，不重复处理。
+ */
+function normalizeVectors(body: string): string {
+  return body.replace(/\\vec\s*\{\s*([A-Za-z]{2,})\s*\}/g, '\\overrightarrow{$1}');
+}
+
 function transformMathBody(body: string): string {
   let out = repairDegenerateScripts(body);
 
   // 1. 给需要 \limits 的算子注入：\sum_{...}^{...} → \sum\limits_{...}^{...}
-  //    使用负向后查避免重复（已经有 \limits 的不再加）。
+  //    负向先行查避免重复：① 后面已是 \limits/\nolimits 的不再加；
+  //    ② **关键**：算子名后必须紧跟非字母——否则 \lim 会匹配到 \limits 的前缀，
+  //    把 \sum\limits 毁成 \sum\lim\limitsits（题20 的乱码根因）。
   for (const op of NEEDS_LIMITS) {
-    const re = new RegExp(`\\\\${op}(?!\\\\?(limits|nolimits))`, 'g');
+    const re = new RegExp(`\\\\${op}(?![a-zA-Z])(?!\\\\?(?:limits|nolimits))`, 'g');
     out = out.replace(re, `\\${op}\\limits`);
   }
+
+  // 1.5 两点向量 \vec{AB} → \overrightarrow{AB}
+  out = normalizeVectors(out);
 
   // 2. 行内分数注入 \displaystyle（仅一两个 \frac 时，避免压扁）
   //    粗略策略：如果包含 \frac 且公式总长度 < 100，就前置 \displaystyle。
@@ -219,20 +249,16 @@ export function preprocessMathContent(input: string): string {
     .replace(/\\\(/g, '$').replace(/\\\)/g, '$')
     .replace(/\\\[/g, '$$$$').replace(/\\\]/g, '$$$$');
 
-  // 0.5 把游离在文本里的填空横线（\underline{\qquad} 等）补回 $...$，否则会以字面量漏到题面。
+  // 0.5 把游离在文本里的 LaTeX（填空横线、漏包的公式片段、补集 ∁ 等）补回 $...$，否则漏成字面量。
   //     必须在 $$/$ 处理之前做，且本身会跳过已有数学区，不会二次包裹。
-  text = wrapOrphanBlanks(text);
+  text = wrapOrphanLatex(text);
 
-  // 1. 处理 display math $$...$$（display 模式天然 displaystyle，但 limits 还需注入）
-  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_m, body) => {
-    let b = repairDegenerateScripts(body as string);
-    for (const op of NEEDS_LIMITS) {
-      const re = new RegExp(`\\\\${op}(?!\\\\?(limits|nolimits))`, 'g');
-      b = b.replace(re, `\\${op}\\limits`);
-    }
-    b = normalizeComplement(b);
-    return `$$${b}$$`;
-  });
+  // 1. 处理 display math $$...$$ —— 与行内共用 transformMathBody，避免重复实现（以及重复的
+  //    \lim 误吃 bug）。display 模式天然 displaystyle，transformMathBody 多注入的 \displaystyle
+  //    前缀在此处冗余但无害。
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (_m, body) =>
+    `$$${transformMathBody(body as string)}$$`,
+  );
 
   // 2. 处理 inline math $...$
   text = text.replace(/(?<!\$)\$([^$\n]+?)\$(?!\$)/g, (_m, body) => {

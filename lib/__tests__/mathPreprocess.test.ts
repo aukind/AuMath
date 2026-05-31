@@ -49,7 +49,46 @@ describe("repairDegenerateScripts (via preprocessMathContent)", () => {
   });
 });
 
-describe("wrapOrphanBlanks (via preprocessMathContent)", () => {
+describe("limits injection + vectors (via preprocessMathContent)", () => {
+  it("does NOT corrupt \\limits when injecting (the \\sum\\lim\\limitsits bug)", () => {
+    // 题20：\lim 曾匹配到 \limits 前缀 → \sum\limits 被毁成 \sum\lim\limitsits
+    const out = preprocessMathContent("$\\sum\\limits_{i=1}^{n} V_i$");
+    expect(out).toContain("\\sum\\limits_{i=1}^{n}");
+    expect(out).not.toMatch(/\\limitsits/);
+    assertAllRender(out);
+  });
+
+  it("injects \\limits on a bare \\sum exactly once (idempotent, no corruption)", () => {
+    const out = preprocessMathContent("$\\sum_{i=1}^{n} V_i$");
+    expect(out).toContain("\\sum\\limits_{i=1}^{n}");
+    expect(out).not.toMatch(/\\limitsits/);
+    assertAllRender(out);
+  });
+
+  it("does not corrupt \\limits inside display math either", () => {
+    const out = preprocessMathContent("$$\\sum\\limits_{i=1}^n a_i$$");
+    expect(out).not.toMatch(/\\limitsits/);
+    assertAllRender(out);
+  });
+
+  it("rewrites two-point vectors \\vec{MP} → \\overrightarrow{MP}", () => {
+    // 题22：两点向量必须用贯穿两字母的长箭头
+    const out = preprocessMathContent("$\\vec{MP}\\cdot\\vec{MN}$");
+    expect(out).toContain("\\overrightarrow{MP}");
+    expect(out).toContain("\\overrightarrow{MN}");
+    expect(out).not.toMatch(/\\vec\{MP\}/);
+    assertAllRender(out);
+  });
+
+  it("leaves single-letter vectors \\vec{a} as a short hat", () => {
+    const out = preprocessMathContent("$\\vec{a}+\\vec{b}$");
+    expect(out).toContain("\\vec{a}");
+    expect(out).not.toMatch(/overrightarrow/);
+    assertAllRender(out);
+  });
+});
+
+describe("wrapOrphanLatex (via preprocessMathContent)", () => {
   it("wraps a bare \\underline{\\qquad} fill-in blank sitting in prose", () => {
     // 2003 广东卷 第13题 —— 横线漏成字面量的真实案例
     const out = preprocessMathContent("不等式 $\\sqrt{4x-x^2}<x$ 的解集是 \\underline{\\qquad}.");
@@ -97,5 +136,40 @@ describe("wrapOrphanBlanks (via preprocessMathContent)", () => {
   it("does not invent math from plain Chinese prose (no backslash → no change)", () => {
     const raw = "已知点 A、B、C 三点共线，求证它们的关系。";
     expect(preprocessMathContent(raw)).toBe(raw);
+  });
+
+  it("wraps orphaned formula fragments in an option (题10 \\rho=\\cos\\theta)", () => {
+    const out = preprocessMathContent(
+      "极坐标方程 \\rho = \\cos\\theta 与 \\rho\\cos\\theta = \\dfrac{1}{2} 的图形 A",
+    );
+    expect(out).toContain("$\\rho = \\cos\\theta$");
+    expect(out).toContain("$\\rho\\cos\\theta = \\dfrac{1}{2}$");
+    // 中文「与」「的图形 A」保持在公式外
+    expect(out).toContain("$ 与 $");
+    expect(out).toMatch(/\$ 的图形 A$/);
+    assertAllRender(out);
+  });
+
+  it("wraps an orphaned complement (∁ unicode) and normalises it", () => {
+    const out = preprocessMathContent("则 ∁_I B 是补集");
+    expect(out).toContain("$\\complement_I B$"); // ∁ 入数学模式后被归一为 \complement
+    assertAllRender(out);
+  });
+
+  it("wraps an orphaned \\complement command form", () => {
+    const out = preprocessMathContent("结果为 \\complement_{U} A 。");
+    expect(out).toMatch(/\$\\complement_\{U\} A\$/);
+    assertAllRender(out);
+  });
+
+  it("does not touch a literal escaped \\n / markdown bold in prose", () => {
+    const raw = "**5.** 设 $f(x)$ 满足条件\\n\\n(1) 求值";
+    expect(preprocessMathContent(raw)).toBe(raw);
+  });
+
+  it("keeps \\text{中文} together inside a wrapped run (brace-aware CJK)", () => {
+    const out = preprocessMathContent("当 \\text{当且仅当} a>0 时成立");
+    expect(out).toContain("\\text{当且仅当}");
+    assertAllRender(out);
   });
 });
