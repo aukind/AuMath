@@ -6,6 +6,7 @@ import { getQuestionsByPaperId } from '@/app/actions/questions';
 import { ArrowLeft, Pencil } from 'lucide-react';
 import MathRenderer from '@/components/MathRenderer';
 import PaperDetailActions from '@/components/admin/PaperDetailActions';
+import EditPaperButton from '@/components/admin/EditPaperButton';
 import PaperQuestionRowActions from '@/components/admin/PaperQuestionRowActions';
 
 export const dynamic = 'force-dynamic';
@@ -47,7 +48,10 @@ export default async function PaperDetailPage({
                 点击右侧"编辑"或"删除"按钮校对每道题
               </p>
             </div>
-            <PaperDetailActions paperId={paper.id} title={paper.title} />
+            <div className="flex items-center gap-2 shrink-0">
+              <EditPaperButton paper={paper} />
+              <PaperDetailActions paperId={paper.id} title={paper.title} />
+            </div>
           </div>
         </header>
 
@@ -67,9 +71,11 @@ export default async function PaperDetailPage({
                     <span className="font-mono text-zinc-400">
                       #{q.question_number ?? '?'}
                     </span>
-                    <span className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[10px] text-zinc-600 dark:text-zinc-300">
-                      难度 {q.difficulty}
-                    </span>
+                    {(q.rating_count ?? 0) > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/40 text-[10px] text-amber-600 dark:text-amber-400">
+                        难度 {Number(q.rating_avg ?? 0).toFixed(1)}★ · {q.rating_count}人
+                      </span>
+                    )}
                     {q.metadata?.tags && typeof q.metadata.tags === 'string' && (
                       <span className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[10px] text-zinc-600 dark:text-zinc-300">
                         {q.metadata.tags}

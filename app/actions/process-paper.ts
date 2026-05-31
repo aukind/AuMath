@@ -5,6 +5,8 @@ import { revalidatePath, revalidateTag } from 'next/cache';
 import { normalizeLaTeX } from '@/lib/normalizeLatex';
 import { stripInlineOptionTail } from '@/lib/questions/content';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { createClient } from '@/lib/supabase/server';
+import { isAdminUser } from '@/lib/utils/auth';
 
 // ── 导出类型 ───────────────────────────────────────────────────
 
@@ -869,6 +871,58 @@ export async function deletePaperWithQuestions(
   revalidatePath('/');
   revalidateTag('papers', 'max'); // 删卷 → 刷新缓存的试卷列表（'max' 为 Next16 即时失效写法）
   return { success: true, deletedQuestions: questionIds.length };
+}
+
+export interface UpdatePaperInput {
+  title: string;
+  year:  number | null;
+  type:  'real' | 'mock';
+  grade: 'high_school_1' | 'high_school_2' | 'high_school_3' | null;
+}
+
+/**
+ * 编辑试卷信息（仅管理员）：标题 / 年份 / 类型 / 学段。
+ * 标题与年份同时同步到该卷所有题目的 source/year（卡片展示用的是 question.source，需保持一致）。
+ */
+export async function updatePaper(
+  paperId: string,
+  input:   UpdatePaperInput,
+): Promise<{ success: boolean; error?: string }> {
+  const ssr = await createClient();
+  const { data: { user } } = await ssr.auth.getUser();
+  if (!isAdminUser(user)) return { success: false, error: '无权限' };
+
+  const title = input.title.trim();
+  if (!title) return { success: false, error: '试卷标题不能为空' };
+
+  let admin;
+  try { admin = createAdminClient(); } catch {
+    return { success: false, error: '服务端配置缺失：SUPABASE_SERVICE_ROLE_KEY 未设置' };
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = admin as any;
+
+  const { error: paperErr } = await sb.from('papers').update({
+    title,
+    year:  input.year,
+    type:  input.type,
+    grade: input.type === 'mock' ? input.grade : null,
+  }).eq('id', paperId);
+  if (paperErr) return { success: false, error: `更新失败：${paperErr.message}` };
+
+  // 同步题目的 source / year（卡片来源徽章读的是 question.source）
+  const { data: pqRows } = await sb
+    .from('paper_questions').select('question_id').eq('paper_id', paperId);
+  const questionIds = (pqRows ?? []).map((r: { question_id: string }) => r.question_id);
+  if (questionIds.length > 0) {
+    await sb.from('questions').update({ source: title, year: input.year }).in('id', questionIds);
+  }
+
+  revalidatePath('/');
+  revalidatePath('/admin/papers');
+  revalidatePath(`/admin/papers/${paperId}`);
+  revalidateTag('papers', 'max');
+  return { success: true };
 }
 
 export async function publishPaperBundles(

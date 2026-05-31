@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { FileText, ChevronDown, Loader2 } from 'lucide-react';
+import { FileText, ChevronDown, Loader2, Search } from 'lucide-react';
 import { useSoftNav, isPlainLeftClick } from '@/components/ui/useSoftNav';
 import type { PaperRow, PaperGrade } from '@/types/database';
 
@@ -28,16 +28,38 @@ export default function MockPapers({ papers, selectedPaperId }: MockPapersProps)
   })();
 
   const [openGrade, setOpenGrade] = useState<PaperGrade | null>(defaultOpen);
+  const [query, setQuery] = useState('');
 
   if (papers.length === 0) {
     return <p className="text-xs text-zinc-400 px-1 py-2">暂无模拟题</p>;
   }
 
+  const q = query.trim().toLowerCase();
+  const filtered = q ? papers.filter(p => p.title.toLowerCase().includes(q)) : papers;
+
   return (
-    <nav className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-2">
+      {/* 搜索框 —— 与真题列表一致，可跨学段按卷名搜索 */}
+      <div className="relative">
+        <Search size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+        <input
+          type="text"
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="搜索模拟卷…"
+          className="w-full pl-7 pr-3 py-1.5 text-xs rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60 text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-violet-400 dark:focus:ring-violet-600 transition-all"
+        />
+      </div>
+
+      {q && filtered.length === 0 ? (
+        <p className="text-xs text-zinc-400 px-1 py-2">无匹配结果</p>
+      ) : (
+      <nav className="flex flex-col gap-0.5">
       {GRADES.map(({ key, label }) => {
-        const items = papers.filter(p => p.grade === key);
-        const isOpen = openGrade === key;
+        const items = filtered.filter(p => p.grade === key);
+        // 搜索时：有匹配的学段自动展开、无匹配的隐藏；非搜索时按手风琴折叠。
+        if (q && items.length === 0) return null;
+        const isOpen = q ? true : openGrade === key;
 
         return (
           <div key={key}>
@@ -112,6 +134,8 @@ export default function MockPapers({ papers, selectedPaperId }: MockPapersProps)
           </div>
         );
       })}
-    </nav>
+      </nav>
+      )}
+    </div>
   );
 }
