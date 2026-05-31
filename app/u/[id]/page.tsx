@@ -79,12 +79,12 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
               )}
             </div>
             <p className="mt-1 flex items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
-              <span>
+              <Link href={`/u/${profile.userId}/following`} className="hover:text-zinc-800 dark:hover:text-zinc-200">
                 <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{counts.following}</span> 关注
-              </span>
-              <span>
+              </Link>
+              <Link href={`/u/${profile.userId}/followers`} className="hover:text-zinc-800 dark:hover:text-zinc-200">
                 <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{counts.followers}</span> 粉丝
-              </span>
+              </Link>
             </p>
           </div>
           {isSelf ? (

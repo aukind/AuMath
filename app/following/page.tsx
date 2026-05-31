@@ -2,10 +2,11 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Toaster } from 'sonner';
-import { ChevronLeft, Infinity as InfinityIcon, Users, Compass } from 'lucide-react';
+import { ChevronLeft, Infinity as InfinityIcon, Users, Compass, Activity, MessageSquarePlus } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import FollowButton from '@/components/profile/FollowButton';
-import { getMyFollowing } from '@/app/actions/follows';
+import { formatRelativeTime } from '@/lib/utils/datetime';
+import { getMyFollowing, getFollowingFeed } from '@/app/actions/follows';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -30,7 +31,7 @@ export default async function FollowingPage() {
   } = await supabase.auth.getUser();
   if (!user) redirect('/login?redirectTo=/following');
 
-  const following = await getMyFollowing();
+  const [following, feed] = await Promise.all([getMyFollowing(), getFollowingFeed()]);
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -72,8 +73,38 @@ export default async function FollowingPage() {
             </Link>
           </div>
         ) : (
-          <ul className="space-y-2">
-            {following.map((u) => (
+          <div className="space-y-8">
+            {/* 关注动态：关注的人最近发的帖子 */}
+            {feed.length > 0 && (
+              <section className="space-y-3">
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                  <Activity size={15} className="text-indigo-500" /> 关注动态
+                </h2>
+                <ul className="space-y-2">
+                  {feed.map((p) => (
+                    <li key={p.id}>
+                      <Link
+                        href={`/forum/${p.id}`}
+                        className="block rounded-xl border border-zinc-200 bg-white px-4 py-3 transition-colors hover:border-indigo-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-indigo-700"
+                      >
+                        <div className="flex items-center gap-1.5 text-xs text-zinc-400">
+                          <MessageSquarePlus size={12} className="text-indigo-400" />
+                          <span className="font-medium text-zinc-600 dark:text-zinc-300">{p.author.username}</span>
+                          <span>发帖 · {formatRelativeTime(p.createdAt)}</span>
+                        </div>
+                        <p className="mt-1 truncate font-medium text-zinc-900 dark:text-zinc-100">{p.title}</p>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+
+            {/* 我关注的人（可取关） */}
+            <section className="space-y-3">
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">我关注的人</h2>
+              <ul className="space-y-2">
+                {following.map((u) => (
               <li
                 key={u.id}
                 className="flex items-center gap-3 rounded-xl border border-zinc-200 bg-white px-4 py-3 dark:border-zinc-800 dark:bg-zinc-900"
@@ -91,8 +122,10 @@ export default async function FollowingPage() {
                 </Link>
                 <FollowButton targetId={u.id} initialFollowing isLoggedIn />
               </li>
-            ))}
-          </ul>
+                ))}
+              </ul>
+            </section>
+          </div>
         )}
       </main>
       <Toaster richColors position="top-center" />

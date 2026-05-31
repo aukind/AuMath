@@ -133,46 +133,139 @@ export async function getFollowCounts(userId: string): Promise<FollowCounts> {
   return { followers, following };
 }
 
-/** 当前登录用户「我的关注」列表（按关注时间倒序）。两步查询规避双 FK 嵌入歧义。 */
+/** 把 user_follows 边 + profiles 拼成用户列表（两步查询规避双 FK 嵌入歧义）。 */
+async function resolveProfiles(
+  sb: any,
+  rows: { id: string; created_at: string }[],
+): Promise<FollowedUser[]> {
+  if (!rows.length) return [];
+  const ids = rows.map((r) => r.id);
+  const { data: profiles } = await sb.from('profiles').select('id, username, avatar_url, role').in('id', ids);
+  const pMap = new Map<string, any>((profiles ?? []).map((p: any) => [p.id, p]));
+  return rows
+    .map((r): FollowedUser | null => {
+      const p = pMap.get(r.id);
+      if (!p) return null;
+      return {
+        id: p.id,
+        username: p.username?.trim() || '用户',
+        avatarUrl: p.avatar_url ?? undefined,
+        role: p.role === 'admin' ? 'admin' : 'user',
+        followedAt: r.created_at,
+      };
+    })
+    .filter((x): x is FollowedUser => x !== null);
+}
+
+/** 某用户「关注的人」（following）列表，按关注时间倒序。表缺失 → []。 */
+export async function getFollowingOf(userId: string): Promise<FollowedUser[]> {
+  if (!userId) return [];
+  const supabase = await createClient();
+  try {
+    const sb = supabase as any;
+    const { data: edges } = await sb
+      .from('user_follows')
+      .select('following_id, created_at')
+      .eq('follower_id', userId)
+      .order('created_at', { ascending: false });
+    return resolveProfiles(sb, (edges ?? []).map((e: any) => ({ id: e.following_id, created_at: e.created_at })));
+  } catch {
+    return [];
+  }
+}
+
+/** 某用户的粉丝（followers）列表，按关注时间倒序。表缺失 → []。 */
+export async function getFollowers(userId: string): Promise<FollowedUser[]> {
+  if (!userId) return [];
+  const supabase = await createClient();
+  try {
+    const sb = supabase as any;
+    const { data: edges } = await sb
+      .from('user_follows')
+      .select('follower_id, created_at')
+      .eq('following_id', userId)
+      .order('created_at', { ascending: false });
+    return resolveProfiles(sb, (edges ?? []).map((e: any) => ({ id: e.follower_id, created_at: e.created_at })));
+  } catch {
+    return [];
+  }
+}
+
+/** 当前登录用户「我的关注」列表（管理用，含取关）。 */
 export async function getMyFollowing(): Promise<FollowedUser[]> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return [];
+  return getFollowingOf(user.id);
+}
 
+/** 当前用户关注的人的 id 集合（用于在列表里给每个人渲染正确的关注/已关注态）。 */
+export async function getMyFollowingIds(): Promise<string[]> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
   try {
     const sb = supabase as any;
-    const { data: edges } = await sb
-      .from('user_follows')
-      .select('following_id, created_at')
-      .eq('follower_id', user.id)
-      .order('created_at', { ascending: false });
+    const { data } = await sb.from('user_follows').select('following_id').eq('follower_id', user.id);
+    return (data ?? []).map((r: any) => r.following_id);
+  } catch {
+    return [];
+  }
+}
 
-    const rows: { following_id: string; created_at: string }[] = edges ?? [];
+export interface FollowingFeedPost {
+  id: string;
+  title: string;
+  createdAt: string;
+  tags: string[];
+  author: { id: string; username: string; avatarUrl?: string };
+}
+
+/** 「关注动态」：我关注的人最近发布的帖子。表缺失 → []。 */
+export async function getFollowingFeed(limit = 15): Promise<FollowingFeedPost[]> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+  try {
+    const sb = supabase as any;
+    const { data: edges } = await sb.from('user_follows').select('following_id').eq('follower_id', user.id);
+    const ids = (edges ?? []).map((e: any) => e.following_id);
+    if (!ids.length) return [];
+
+    const { data: posts } = await sb
+      .from('forum_posts')
+      .select('id, title, created_at, tags, author_id')
+      .in('author_id', ids)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    const rows: any[] = posts ?? [];
     if (!rows.length) return [];
 
-    const ids = rows.map((r) => r.following_id);
-    const { data: profiles } = await sb
-      .from('profiles')
-      .select('id, username, avatar_url, role')
-      .in('id', ids);
-
+    const authorIds = [...new Set(rows.map((p) => p.author_id))];
+    const { data: profiles } = await sb.from('profiles').select('id, username, avatar_url').in('id', authorIds);
     const pMap = new Map<string, any>((profiles ?? []).map((p: any) => [p.id, p]));
 
-    return rows
-      .map((r): FollowedUser | null => {
-        const p = pMap.get(r.following_id);
-        if (!p) return null;
-        return {
-          id: p.id,
-          username: p.username?.trim() || '用户',
-          avatarUrl: p.avatar_url ?? undefined,
-          role: p.role === 'admin' ? 'admin' : 'user',
-          followedAt: r.created_at,
-        };
-      })
-      .filter((x): x is FollowedUser => x !== null);
+    return rows.map((p): FollowingFeedPost => {
+      const a = pMap.get(p.author_id);
+      return {
+        id: p.id,
+        title: p.title,
+        createdAt: p.created_at,
+        tags: Array.isArray(p.tags) ? p.tags : [],
+        author: {
+          id: p.author_id,
+          username: a?.username?.trim() || '用户',
+          avatarUrl: a?.avatar_url ?? undefined,
+        },
+      };
+    });
   } catch {
     return [];
   }
