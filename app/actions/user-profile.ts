@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
+import { isAdminUser } from '@/lib/utils/auth';
 import type { UserProfileData, PublicProfileData, ActivityFeedItem } from '@/types/dashboard';
 
 // 拉取多少条浏览历史用于计算连续天数 / 渲染动态流
@@ -98,47 +99,73 @@ export async function getPublicProfile(userId: string): Promise<PublicProfileDat
   const supabase = await createClient();
   const from = supabase.from as unknown as FromFn;
 
+  const { data: { user } } = await supabase.auth.getUser();
+  const isSelf = user?.id === userId;
+
+  // profiles 命中优先；表异常 / 无该行时降级。
+  let profile: ProfileRow | undefined;
   try {
-    const { data: profiles } = await from<ProfileRow>('profiles')
+    const { data } = await from<ProfileRow>('profiles')
       .select('id, username, avatar_url, role')
       .eq('id', userId);
-    const profile = (profiles ?? [])[0];
-    if (!profile) return null;
-
-    const [{ count: postCount }, { count: commentCount }, { count: subCount }, likes, postFeed, replyFeed] =
-      await Promise.all([
-        from<{ id: string }>('forum_posts')
-          .select('id', { count: 'exact', head: true })
-          .eq('author_id', userId),
-        from<{ id: string }>('forum_comments')
-          .select('id', { count: 'exact', head: true })
-          .eq('author_id', userId),
-        from<{ id: string }>('forum_sub_comments')
-          .select('id', { count: 'exact', head: true })
-          .eq('author_id', userId),
-        computeForumReputation(from, userId),
-        buildPostFeed(from, userId),
-        buildReplyFeed(from, userId),
-      ]);
-
-    const recentActivities = [...postFeed, ...replyFeed]
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-      .slice(0, FEED_LIMIT);
-
-    return {
-      userId,
-      username: profile.username?.trim() || '数学学习者',
-      avatarUrl: profile.avatar_url ?? undefined,
-      role: profile.role === 'admin' ? 'admin' : 'user',
-      stats: {
-        posts: postCount ?? 0,
-        replies: (commentCount ?? 0) + (subCount ?? 0),
-        likes,
-      },
-      recentActivities,
-    };
+    profile = (data ?? [])[0];
   } catch {
-    return null;
+    profile = undefined;
+  }
+
+  // 自己访问但 profiles 尚无行（用户名实际存于 auth metadata）→ 用会话兜底，
+  // 避免「我的主页」误判为不存在而 404。
+  if (!profile && isSelf && user) {
+    profile = {
+      id: user.id,
+      username:
+        (user.user_metadata?.username as string | undefined)?.trim() ||
+        user.email?.split('@')[0] ||
+        '我',
+      avatar_url: null,
+      role: isAdminUser(user) ? 'admin' : 'user',
+    };
+  }
+  if (!profile) return null;
+
+  // 论坛统计/动态各自独立降级：任一张论坛表未迁移或异常 → 退化为 0 / []，
+  // 绝不让「论坛未落库」把整张公开主页连累成 404。
+  const [posts, commentReplies, subReplies, likes, postFeed, replyFeed] = await Promise.all([
+    safeAuthorCount(from, 'forum_posts', userId),
+    safeAuthorCount(from, 'forum_comments', userId),
+    safeAuthorCount(from, 'forum_sub_comments', userId),
+    computeForumReputation(from, userId),
+    buildPostFeed(from, userId),
+    buildReplyFeed(from, userId),
+  ]);
+
+  const recentActivities = [...postFeed, ...replyFeed]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, FEED_LIMIT);
+
+  return {
+    userId,
+    username: profile.username?.trim() || '数学学习者',
+    avatarUrl: profile.avatar_url ?? undefined,
+    role: profile.role === 'admin' ? 'admin' : 'user',
+    stats: {
+      posts,
+      replies: commentReplies + subReplies,
+      likes,
+    },
+    recentActivities,
+  };
+}
+
+// 按 author_id 统计某表行数；表缺失 / 异常静默返回 0。
+async function safeAuthorCount(from: FromFn, table: string, uid: string): Promise<number> {
+  try {
+    const { count } = await from<{ id: string }>(table)
+      .select('id', { count: 'exact', head: true })
+      .eq('author_id', uid);
+    return count ?? 0;
+  } catch {
+    return 0;
   }
 }
 
