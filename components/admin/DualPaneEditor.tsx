@@ -103,6 +103,14 @@ function QuestionPreviewCard({
           <MathContent>{question.answer}</MathContent>
         </div>
       )}
+
+      {/* 解析 / 完整解答（大题含多解法） */}
+      {question.analysis && (
+        <div className="rounded-md bg-muted/30 px-3 py-2 text-sm space-y-1">
+          <span className="text-xs font-semibold text-muted-foreground">解析</span>
+          <MathContent>{question.analysis}</MathContent>
+        </div>
+      )}
     </div>
   );
 }

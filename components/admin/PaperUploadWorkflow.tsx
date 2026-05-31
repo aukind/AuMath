@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
-  processPaper, createUploadUrl, createReadUrl,
+  processPaper, processPaperWithAnswers, createUploadUrl, createReadUrl,
   publishPaperBundles, detectDuplicatePapers,
   type ExtractedPaperBundle, type DuplicatePaperInfo, type DuplicateStrategy,
 } from '@/app/actions/process-paper';
@@ -46,6 +46,14 @@ type FileUploadStatus =
   | { name: string; status: 'error'; message: string };
 
 type WorkflowStep = 1 | 2 | 3;
+
+// 录入模式：仅题目（多文件并行）/ 题目+答案配对
+type ImportMode = 'questions-only' | 'paired';
+
+// 交给 AiExtractPanel 的提取任务
+type ExtractJob =
+  | { mode: 'questions-only'; files: UploadedFile[] }
+  | { mode: 'paired'; questionFile: UploadedFile; answerFile: UploadedFile };
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -329,47 +337,76 @@ function modelBadge(m?: string) {
   );
 }
 
+/** 把 ProcessPaperResult（含大结果走 Storage 的分支）归一成 papers。 */
+async function unwrapResult(
+  result: Awaited<ReturnType<typeof processPaperWithAnswers>>,
+): Promise<{ papers: ExtractedPaperBundle[]; usedModel?: string }> {
+  if (!result.success) throw new Error(result.error);
+  if ('resultUrl' in result) {
+    const resp = await fetch(result.resultUrl);
+    if (!resp.ok) throw new Error(`拉取 Storage 结果失败 (HTTP ${resp.status})`);
+    const data = await resp.json() as { papers: ExtractedPaperBundle[] };
+    return { papers: data.papers, usedModel: result.usedModel };
+  }
+  return { papers: result.papers, usedModel: result.usedModel };
+}
+
 function AiExtractPanel({
-  uploadResults,
+  job,
   onDone,
   onBack,
 }: {
-  uploadResults: UploadedFile[];
+  job: ExtractJob;
   onDone: (papers: ExtractedPaperBundle[]) => void;
   onBack: () => void;
 }) {
   const [state, setState] = useState<ExtractionState>({ status: 'idle' });
 
   const runExtraction = useCallback(async () => {
-    const total = uploadResults.length;
-    setState({ status: 'extracting', done: 0, total });
-
-    let completed = 0;
-    // 所有文件并行提取（每个 processPaper 都是独立的 Server Action 实例，各享 maxDuration）
-    const settled = await Promise.allSettled(
-      uploadResults.map(async (u) => {
-        try {
-          return await extractOneFile(u);
-        } finally {
-          completed += 1;
-          setState((prev) => prev.status === 'extracting'
-            ? { status: 'extracting', done: completed, total }
-            : prev);
-        }
-      }),
-    );
-
     const papers: ExtractedPaperBundle[] = [];
     const errors: string[] = [];
     let usedModel: string | undefined;
-    for (let i = 0; i < settled.length; i++) {
-      const r = settled[i];
-      if (r.status === 'fulfilled') {
-        papers.push(...r.value.papers);
-        usedModel ??= r.value.usedModel;
-      } else {
-        const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
-        errors.push(`${uploadResults[i].fileName}：${msg}`);
+    let total = 1;
+
+    if (job.mode === 'paired') {
+      // 配对：试题卷 + 答案卷一次性提取
+      setState({ status: 'extracting', done: 0, total: 1 });
+      try {
+        const r = await unwrapResult(
+          await processPaperWithAnswers(job.questionFile.signedUrl, job.answerFile.signedUrl),
+        );
+        papers.push(...r.papers);
+        usedModel = r.usedModel;
+      } catch (e) {
+        errors.push(`${job.questionFile.fileName}：${e instanceof Error ? e.message : String(e)}`);
+      }
+      setState((prev) => prev.status === 'extracting' ? { status: 'extracting', done: 1, total: 1 } : prev);
+    } else {
+      // 仅题目：所有文件并行提取（每个 processPaper 都是独立的 Server Action 实例，各享 maxDuration）
+      total = job.files.length;
+      setState({ status: 'extracting', done: 0, total });
+      let completed = 0;
+      const settled = await Promise.allSettled(
+        job.files.map(async (u) => {
+          try {
+            return await extractOneFile(u);
+          } finally {
+            completed += 1;
+            setState((prev) => prev.status === 'extracting'
+              ? { status: 'extracting', done: completed, total }
+              : prev);
+          }
+        }),
+      );
+      for (let i = 0; i < settled.length; i++) {
+        const r = settled[i];
+        if (r.status === 'fulfilled') {
+          papers.push(...r.value.papers);
+          usedModel ??= r.value.usedModel;
+        } else {
+          const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
+          errors.push(`${job.files[i].fileName}：${msg}`);
+        }
       }
     }
 
@@ -404,7 +441,7 @@ function AiExtractPanel({
     }
     const badge = total > 1 ? `${usedModel ?? 'flash'}·${total}文件` : usedModel;
     setState({ status: 'done', papers, usedModel: badge });
-  }, [uploadResults]);
+  }, [job]);
 
   useEffect(() => { runExtraction(); }, [runExtraction]);
 
@@ -418,9 +455,11 @@ function AiExtractPanel({
           </div>
           <div className="text-center">
             <p className="font-medium text-foreground">
-              {state.total > 1
-                ? `正在并行提取 ${state.total} 个文件（已完成 ${state.done}/${state.total}）…`
-                : '正在用 Gemini 2.5 Flash 极速转写文字与 LaTeX（仅转写题面，不自行解题）…'}
+              {job.mode === 'paired'
+                ? '正在用 Gemini 2.5 Flash 提取题目，并按题号从答案卷照抄答案与解析（不自行解题）…'
+                : state.total > 1
+                  ? `正在并行提取 ${state.total} 个文件（已完成 ${state.done}/${state.total}）…`
+                  : '正在用 Gemini 2.5 Flash 极速转写文字与 LaTeX（仅转写题面，不自行解题）…'}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">AI 正在识别 LaTeX 公式并通过 AST 管线清洗…</p>
           </div>
@@ -700,13 +739,113 @@ function DuplicateConfirmModal({
   );
 }
 
+// ── 单文件拖拽区（配对模式用：试题卷 / 答案卷各一个）─────────────────────────────
+
+function SingleFileDropzone({
+  label, hint, file, onUploaded,
+}: {
+  label: string;
+  hint: string;
+  file: UploadedFile | null;
+  onUploaded: (f: UploadedFile) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onDrop = useCallback(async (accepted: File[]) => {
+    const f = accepted[0];
+    if (!f) return;
+    setBusy(true); setError(null);
+    try {
+      onUploaded(await uploadOneFile(f));
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(msg);
+      toast.error(`${label}上传失败：${msg}`);
+    } finally { setBusy(false); }
+  }, [label, onUploaded]);
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+    onDrop, accept: ACCEPT, maxSize: MAX_BYTES, multiple: false, disabled: busy,
+  });
+
+  return (
+    <div className="flex-1">
+      <p className="mb-1.5 text-xs font-semibold text-foreground">{label}</p>
+      <div
+        {...getRootProps()}
+        className={[
+          'flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-10 text-center cursor-pointer transition-all select-none',
+          isDragActive ? 'border-primary bg-primary/5'
+            : file ? 'border-green-400/60 bg-green-50/40 dark:bg-green-900/10'
+            : 'border-border hover:border-primary/40 hover:bg-muted/20',
+          busy ? 'pointer-events-none opacity-60' : '',
+        ].join(' ')}
+      >
+        <input {...getInputProps()} />
+        {busy ? <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          : file ? <CheckCircle2 className="h-6 w-6 text-green-500" />
+          : <FileText className="h-6 w-6 text-muted-foreground/50" />}
+        <p className="text-sm text-foreground truncate max-w-full">
+          {busy ? '上传中…'
+            : file ? `${file.fileType === 'pdf' ? '📄' : '🖼️'} ${file.fileName}`
+            : (isDragActive ? '松开以上传' : hint)}
+        </p>
+        {file && !busy && <p className="text-[11px] text-muted-foreground">点击可重新选择</p>}
+      </div>
+      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
+// ── 配对上传：试题卷 + 答案卷 ───────────────────────────────────────────────────
+
+function PairedUpload({
+  questionFile, answerFile, onQuestion, onAnswer, onReset, onNext,
+}: {
+  questionFile: UploadedFile | null;
+  answerFile:   UploadedFile | null;
+  onQuestion: (f: UploadedFile) => void;
+  onAnswer:   (f: UploadedFile) => void;
+  onReset: () => void;
+  onNext:  () => void;
+}) {
+  const ready = !!questionFile && !!answerFile;
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col sm:flex-row gap-4">
+        <SingleFileDropzone label="① 试题卷 PDF" hint="拖入或点击选择试题文件" file={questionFile} onUploaded={onQuestion} />
+        <SingleFileDropzone label="② 答案卷 PDF" hint="拖入或点击选择答案 / 参考答案文件" file={answerFile} onUploaded={onAnswer} />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        两份都上传后进入提取：题目从试题卷读取，答案与解析按题号从答案卷<strong>照抄</strong>（选填只录答案、大题录完整解答并含全部解法），<strong>不会让 AI 自行解题</strong>。
+      </p>
+      <div className="flex justify-end gap-3">
+        <button onClick={onReset} className="flex items-center gap-1.5 rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-muted transition-colors">
+          <RotateCcw className="h-3.5 w-3.5" /> 重置
+        </button>
+        <button
+          onClick={onNext}
+          disabled={!ready}
+          className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          下一步：AI 提取 <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Workflow Orchestrator ─────────────────────────────────────────────────
 
 const DRAFT_KEY = 'aumath_paper_draft_v2';
 
 export default function PaperUploadWorkflow() {
   const [step, setStep] = useState<WorkflowStep>(1);
+  const [mode, setMode] = useState<ImportMode>('questions-only');
   const [uploadResults, setUploadResults] = useState<UploadedFile[]>([]);
+  const [questionFile, setQuestionFile] = useState<UploadedFile | null>(null);
+  const [answerFile, setAnswerFile] = useState<UploadedFile | null>(null);
   const [extractedPapers, setExtractedPapers] = useState<ExtractedPaperBundle[]>([]);
 
   // 恢复草稿
@@ -726,12 +865,24 @@ export default function PaperUploadWorkflow() {
     setUploadResults(files);
   }, []);
 
-  const handleReset = useCallback(() => {
+  const clearUploads = useCallback(() => {
     setUploadResults([]);
+    setQuestionFile(null);
+    setAnswerFile(null);
+  }, []);
+
+  const handleReset = useCallback(() => {
+    clearUploads();
     setExtractedPapers([]);
     setStep(1);
     try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
-  }, []);
+  }, [clearUploads]);
+
+  // 切模式时清掉已传文件，避免两套状态混淆
+  const switchMode = useCallback((next: ImportMode) => {
+    setMode(next);
+    clearUploads();
+  }, [clearUploads]);
 
   const handleNextStep = useCallback(() => setStep(2), []);
 
@@ -741,6 +892,12 @@ export default function PaperUploadWorkflow() {
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(papers)); } catch {}
   }, []);
 
+  // Step 2 的提取任务
+  const job: ExtractJob | null =
+    mode === 'paired'
+      ? (questionFile && answerFile ? { mode: 'paired', questionFile, answerFile } : null)
+      : (uploadResults.length > 0 ? { mode: 'questions-only', files: uploadResults } : null);
+
   return (
     <div>
       <StepIndicator current={step} />
@@ -749,20 +906,51 @@ export default function PaperUploadWorkflow() {
       {step === 1 && (
         <section className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="mb-4 text-sm font-semibold text-foreground">第一步：上传试卷文件</h2>
-          {uploadResults.length > 0 ? (
-            <UploadSuccess files={uploadResults} onReset={handleReset} onNext={handleNextStep} />
+
+          {/* 模式切换 */}
+          <div className="mb-5 inline-flex rounded-lg border bg-muted/40 p-1 text-sm">
+            {([
+              ['questions-only', '仅题目'],
+              ['paired', '题目 + 答案配对'],
+            ] as [ImportMode, string][]).map(([m, label]) => (
+              <button
+                key={m}
+                onClick={() => switchMode(m)}
+                className={[
+                  'rounded-md px-4 py-1.5 font-medium transition-colors',
+                  mode === m ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground',
+                ].join(' ')}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          {mode === 'questions-only' ? (
+            uploadResults.length > 0 ? (
+              <UploadSuccess files={uploadResults} onReset={handleReset} onNext={handleNextStep} />
+            ) : (
+              <PaperDropzone onUploadDone={handleUploadDone} />
+            )
           ) : (
-            <PaperDropzone onUploadDone={handleUploadDone} />
+            <PairedUpload
+              questionFile={questionFile}
+              answerFile={answerFile}
+              onQuestion={setQuestionFile}
+              onAnswer={setAnswerFile}
+              onReset={handleReset}
+              onNext={handleNextStep}
+            />
           )}
         </section>
       )}
 
       {/* Step 2: AI Extraction */}
-      {step === 2 && uploadResults.length > 0 && (
+      {step === 2 && job && (
         <section className="rounded-xl border bg-card p-6 shadow-sm">
           <h2 className="mb-4 text-sm font-semibold text-foreground">第二步：AI 视觉提取</h2>
           <AiExtractPanel
-            uploadResults={uploadResults}
+            job={job}
             onDone={handleExtractionDone}
             onBack={handleReset}
           />
