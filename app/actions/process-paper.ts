@@ -63,6 +63,10 @@ const PDF_CHUNK_SIZE        = 30;   // 每块 30 页，单块 Flash 调用 ~10-2
 const CHUNK_CONCURRENCY     = 10;   // 并发数：充分利用 Gemini 多通道
 const PARALLEL_TRIGGER_PAGES = 25;  // >25 页就分块。单次 60 页 Flash 调用经常输出截断 → JSON 解析失败
 
+// 单次 Gemini 调用硬超时（ms）。@google/genai 默认不超时，重图（带照片/水印的模拟题）
+// 一旦卡住前端就会一直转圈；加上界限后会快速失败成可读错误。主+兜底两次 ≤ 240s，留在 maxDuration 300s 内。
+const GEMINI_TIMEOUT_MS = 120_000;
+
 // ── System Prompt ──────────────────────────────────────────────
 
 const SYSTEM_INSTRUCTION = `\
@@ -109,6 +113,8 @@ Each question element (ALL 5 fields required):
    "2023年普通高等学校招生全国统一考试新课标I卷数学" → "2023年新高考一卷"
    "1977年普通高等学校招生考试（上海卷理）" → "1977年上海卷理"
    "2024年北京市海淀区高三期末迎考闭卷模拟检测" → "2024年海淀区期末模考"
+   【模拟题命名】type="mock" 的模拟/调研/联考卷一律按「年份+地区+考试名称」浓缩，例：
+   "湖北省武汉市2025届高三三月调研考试" → "2025年湖北武汉三月调研"；"浙江省L16联盟2024年高三返校适应性测试" → "2024年浙江L16联盟返校适应性测试"。
    【一年两考】北京、上海等地含"春季高考/春季招生/秋季招生"等关键词的，用括号浓缩标注季次，如 "2002年上海卷（春）"、"2002年上海卷（秋）"。
 2. type: "real" 表示高考真题或联考; "mock" 表示模拟/校考/期末/月考。
 3. grade: type 为 "real" 时填 null；type 为 "mock" 时必须填 "high_school_1"(高一)、"high_school_2"(高二) 或 "high_school_3"(高三)。
@@ -150,6 +156,7 @@ Each question element (ALL 5 fields required):
     - 不要尝试用 SVG/PNG/TikZ/ASCII 绘图
     - 如果原题正文写了 "如图" / "如图所示" 这几个字，原样保留
     图形会由用户后续手工补回，这里只转写文字 + 公式 + 选项。
+16a.【忽略与题目无关的杂物】模拟题卷面常混入：实拍照片（如共享单车、实物图）、机构 Logo、二维码、页眉页脚、以及斜向半透明网站水印（如重复出现的 "UP" / 网址字样）。这些一律**当作不存在**：绝不要把水印文字、照片内容、Logo 文案写进任何 content/options/solution。水印字符若恰好压在题干文字上，按题干本意还原文字，丢弃水印。
 
 17. options: object {"A":"…","B":"…"} for choice questions; null for fill/essay/proof.
 17a.【选择题选项不要重复】对于选择题，options 字段已经承载了 (A)/(B)/(C)/(D)，**content 字段绝不能再把 "(A)..(B)..(C)..(D).." 复述一遍**。content 末尾应止于题干主句的句号/问号，紧接着的 (A) 起的选项块只填进 options 对象。错误示范：content="**5.** ...的距离是 (A) 1/2 (B) √3/2 (C) 1 (D) √3"。正确：content="**5.** ...的距离是"，options={"A":"$\\\\dfrac{1}{2}$","B":"$\\\\dfrac{\\\\sqrt{3}}{2}$","C":"$1$","D":"$\\\\sqrt{3}$"}。
@@ -564,7 +571,7 @@ async function processPaperInner(
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { success: false, error: '服务端配置缺失：GEMINI_API_KEY 未设置' };
 
-  const client = new GoogleGenAI({ apiKey });
+  const client = new GoogleGenAI({ apiKey, httpOptions: { timeout: GEMINI_TIMEOUT_MS } });
 
   let rawBuffer: ArrayBuffer;
   let mimeType:  SupportedMime;
@@ -955,7 +962,7 @@ export async function generateSvgForQuestion(
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { success: false, error: '服务端配置缺失：GEMINI_API_KEY 未设置' };
 
-  const client = new GoogleGenAI({ apiKey });
+  const client = new GoogleGenAI({ apiKey, httpOptions: { timeout: GEMINI_TIMEOUT_MS } });
 
   const prompt = `${SVG_GEN_PROMPT}
 
