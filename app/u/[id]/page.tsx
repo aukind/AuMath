@@ -1,11 +1,14 @@
 // 公开用户主页（RSC）。任何人可见，仅展示论坛维度数据（发帖/回复/获赞 + 近期动态）。
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { Toaster } from 'sonner';
 import { ChevronLeft, Infinity as InfinityIcon, Settings } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import ProfileStatCards from '@/components/profile/ProfileStatCards';
 import ActivityFeed from '@/components/dashboard/ActivityFeed';
+import FollowButton from '@/components/profile/FollowButton';
 import { getPublicProfile } from '@/app/actions/user-profile';
+import { getFollowCounts, isFollowing } from '@/app/actions/follows';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -35,10 +38,15 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
   const profile = await getPublicProfile(id);
   if (!profile) notFound();
 
-  // 判断是否本人，决定是否显示「编辑资料」入口
+  // 判断是否本人；并行取关注态与关注/粉丝数
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const [{ data: { user } }, counts, viewerFollows] = await Promise.all([
+    supabase.auth.getUser(),
+    getFollowCounts(profile.userId),
+    isFollowing(profile.userId),
+  ]);
   const isSelf = user?.id === profile.userId;
+  const isLoggedIn = !!user;
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -70,15 +78,24 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
                 </span>
               )}
             </div>
-            <p className="mt-0.5 text-sm text-zinc-400">社区成员</p>
+            <p className="mt-1 flex items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400">
+              <span>
+                <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{counts.following}</span> 关注
+              </span>
+              <span>
+                <span className="font-semibold tabular-nums text-zinc-900 dark:text-zinc-100">{counts.followers}</span> 粉丝
+              </span>
+            </p>
           </div>
-          {isSelf && (
+          {isSelf ? (
             <Link
               href="/account"
               className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               <Settings size={13} /> 编辑资料
             </Link>
+          ) : (
+            <FollowButton targetId={profile.userId} initialFollowing={viewerFollows} isLoggedIn={isLoggedIn} />
           )}
         </div>
 
@@ -99,6 +116,7 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
           </section>
         )}
       </main>
+      <Toaster richColors position="top-center" />
     </div>
   );
 }

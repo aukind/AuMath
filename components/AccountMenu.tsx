@@ -4,7 +4,7 @@
 // 收拢进一个菜单：点击账号即可查看个人中心，退出也归入此处。
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { UserSquare, Settings, LayoutDashboard, LogOut, ChevronDown } from 'lucide-react';
+import { UserSquare, Users, Settings, LayoutDashboard, LogOut, ChevronDown } from 'lucide-react';
 import { logout } from '@/app/actions/auth';
 
 interface AccountMenuProps {
@@ -86,6 +86,9 @@ export default function AccountMenu({ username, userId, isAdmin = false, avatarU
           <div className="mt-1 space-y-0.5">
             <Link href={`/u/${userId}`} role="menuitem" onClick={() => setOpen(false)} className={itemCls}>
               <UserSquare size={15} className="text-zinc-400" /> 我的主页
+            </Link>
+            <Link href="/following" role="menuitem" onClick={() => setOpen(false)} className={itemCls}>
+              <Users size={15} className="text-zinc-400" /> 我的关注
             </Link>
             <Link href="/account" role="menuitem" onClick={() => setOpen(false)} className={itemCls}>
               <Settings size={15} className="text-zinc-400" /> 账号中心
