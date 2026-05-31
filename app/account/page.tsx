@@ -1,16 +1,20 @@
-// 账号管理中心（RSC）。未登录跳登录页。
+// 账号中心（RSC）。未登录跳登录页。
+// 集学习概览（攻克难题 / 论坛声望 / 连续学习）+ 近期动态 + 账号设置于一页，对所有登录用户开放。
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { Toaster } from 'sonner';
-import { ChevronLeft, Infinity as InfinityIcon } from 'lucide-react';
+import { ChevronLeft, Infinity as InfinityIcon, UserSquare } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import AccountSettings from '@/components/account/AccountSettings';
+import UserStatsOverview from '@/components/dashboard/UserStatsOverview';
+import ActivityFeed from '@/components/dashboard/ActivityFeed';
 import { getMyAccount } from '@/app/actions/account';
+import { getUserProfile } from '@/app/actions/user-profile';
 
 export const dynamic = 'force-dynamic';
 
 export default async function AccountPage() {
-  const account = await getMyAccount();
+  const [account, profile] = await Promise.all([getMyAccount(), getUserProfile()]);
   if (!account) redirect('/login?redirectTo=/account');
 
   return (
@@ -30,9 +34,31 @@ export default async function AccountPage() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl px-4 py-8">
-        <h1 className="mb-5 text-xl font-bold text-zinc-900 dark:text-zinc-50">账号管理</h1>
-        <AccountSettings account={account} />
+      <main className="mx-auto max-w-2xl space-y-10 px-4 py-8">
+        {/* ── 学习概览 ── */}
+        {profile && (
+          <section className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h1 className="text-xl font-bold text-zinc-900 dark:text-zinc-50">你好，{profile.username}</h1>
+              <Link
+                href={`/u/${account.id}`}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                <UserSquare size={13} /> 我的公开主页
+              </Link>
+            </div>
+            <UserStatsOverview stats={profile.stats} />
+          </section>
+        )}
+
+        {/* ── 近期动态 ── */}
+        {profile && <ActivityFeed items={profile.recentActivities} />}
+
+        {/* ── 账号设置 ── */}
+        <section className="space-y-4">
+          <h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">账号设置</h2>
+          <AccountSettings account={account} />
+        </section>
       </main>
       <Toaster richColors position="top-center" />
     </div>

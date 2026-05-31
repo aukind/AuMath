@@ -8,6 +8,7 @@
 //   - 点赞为乐观更新：本地立即 +1，失败由上层回滚（见 CommentSection）。
 
 import { memo, useState } from 'react';
+import Link from 'next/link';
 import { ChevronDown, MessageSquare, ThumbsUp } from 'lucide-react';
 import type { ForumComment, SessionUser, SubComment } from '@/types/forum';
 import MathContent from './MathContent';
@@ -67,12 +68,17 @@ function SubCommentRow({
   const { openReply } = useReply();
   return (
     <div className="flex gap-2 py-1.5">
-      <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+      <Link
+        href={`/u/${sub.author.id}`}
+        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-100 text-xs font-medium text-zinc-600 transition-opacity hover:opacity-80 dark:bg-zinc-800 dark:text-zinc-300"
+      >
         {initials(sub.author.username)}
-      </span>
+      </Link>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 text-xs">
-          <span className="font-medium text-zinc-800 dark:text-zinc-200">{sub.author.username}</span>
+          <Link href={`/u/${sub.author.id}`} className="font-medium text-zinc-800 hover:underline dark:text-zinc-200">
+            {sub.author.username}
+          </Link>
           <RoleBadge role={sub.author.role} />
           {replyToUsername && (
             <>
@@ -132,12 +138,14 @@ function CommentItem({ comment, currentUser, onUpvote, onAdminAction }: CommentI
   return (
     <article className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
       <header className="flex items-center gap-2">
-        <Avatar name={comment.author.username} url={comment.author.avatarUrl} />
+        <Link href={`/u/${comment.author.id}`} className="shrink-0 transition-opacity hover:opacity-80">
+          <Avatar name={comment.author.username} url={comment.author.avatarUrl} />
+        </Link>
         <div className="flex flex-col">
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+            <Link href={`/u/${comment.author.id}`} className="text-sm font-medium text-zinc-900 hover:underline dark:text-zinc-100">
               {comment.author.username}
-            </span>
+            </Link>
             <RoleBadge role={comment.author.role} />
           </div>
           <span className="text-xs text-zinc-400">{formatTime(comment.createdAt)}</span>

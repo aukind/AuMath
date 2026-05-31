@@ -1,4 +1,4 @@
-import { CheckCircle2, MessageSquarePlus, BadgeCheck } from 'lucide-react';
+import { CheckCircle2, MessageSquarePlus, MessageSquareReply, BadgeCheck } from 'lucide-react';
 import { formatRelativeTime } from '@/lib/utils/datetime';
 import type { ActivityFeedItem, ActivityType } from '@/types/dashboard';
 
@@ -18,6 +18,10 @@ const TYPE_META: Record<ActivityType, TypeMeta> = {
   created_post: {
     icon: MessageSquarePlus,
     node: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10',
+  },
+  replied: {
+    icon: MessageSquareReply,
+    node: 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-500/10',
   },
   earned_badge: {
     icon: BadgeCheck,

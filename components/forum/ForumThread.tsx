@@ -6,6 +6,7 @@
 //   - 管理员可置顶/加精/删帖；作者可删自己的帖（权限由 RLS 兜底）。
 
 import { useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import useSWR from 'swr';
 import { toast } from 'sonner';
@@ -80,7 +81,9 @@ export default function ForumThread({
           <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">{post.title}</h1>
 
           <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-            <span className="font-medium text-zinc-700 dark:text-zinc-300">{post.author.username}</span>
+            <Link href={`/u/${post.author.id}`} className="font-medium text-zinc-700 hover:underline dark:text-zinc-300">
+              {post.author.username}
+            </Link>
             <span>· {new Date(post.createdAt).toLocaleString('zh-CN')}</span>
             <span className="inline-flex items-center gap-1"><Eye className="h-3.5 w-3.5" />{post.viewCount}</span>
             <span className="inline-flex items-center gap-1"><MessageSquare className="h-3.5 w-3.5" />{post.commentCount}</span>

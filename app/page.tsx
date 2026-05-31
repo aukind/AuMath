@@ -5,11 +5,11 @@ import { getSiteViews } from '@/app/actions/site-stats';
 import { getForumPosts } from '@/app/actions/forum';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
-import { logout } from '@/app/actions/auth';
 import Link from 'next/link';
 import PageLayout, { type MainView } from '@/components/PageLayout';
-import { Infinity, PenLine, LogOut, LayoutDashboard, UserCog } from 'lucide-react';
+import { Infinity, PenLine } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
+import AccountMenu from '@/components/AccountMenu';
 import CanvasScratchpad from '@/components/CanvasScratchpad';
 import MobileMenuDrawer from '@/components/MobileMenuDrawer';
 import type { QuestionWithTopics, WorkspaceType } from '@/types/database';
@@ -76,6 +76,10 @@ export default async function HomePage({
   const isAdmin = isAdminUser(user);
   const isLoggedIn = !!user;
   const userId = user?.id;
+  const username =
+    (user?.user_metadata?.username as string | undefined)?.trim() ||
+    user?.email?.split('@')[0] ||
+    '我';
 
   // 非 browse 时统一携带 workspaceQuestions，供「我的题库」常驻 slot 使用（论坛 slot 用 forumPosts）。
   const questions = mainView === 'browse'
@@ -116,31 +120,19 @@ export default async function HomePage({
 
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />
-            {isLoggedIn ? (
+            {isLoggedIn && userId ? (
               <>
                 {isAdmin && (
-                  <>
-                    <a href="/dashboard" className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-                      <LayoutDashboard size={13} /> <span className="hidden sm:inline">控制台</span>
-                    </a>
-                    <a href="/admin/paper-upload" className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors">
-                      <PenLine size={13} /> <span className="hidden sm:inline">AI 录题</span>
-                    </a>
-                  </>
+                  <Link href="/admin/paper-upload" className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors">
+                    <PenLine size={13} /> <span className="hidden sm:inline">AI 录题</span>
+                  </Link>
                 )}
-                <a href="/account" className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
-                  <UserCog size={13} /> <span className="hidden sm:inline">账号</span>
-                </a>
-                <form action={logout}>
-                  <button type="submit" className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 border border-zinc-200 dark:border-zinc-700 px-3 py-1.5 rounded-lg transition-colors">
-                    <LogOut size={12} /> <span className="hidden sm:inline">退出</span>
-                  </button>
-                </form>
+                <AccountMenu username={username} userId={userId} isAdmin={isAdmin} />
               </>
             ) : (
-              <a href="/login" className="flex items-center justify-center min-w-[44px] min-h-[44px] px-3 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
+              <Link href="/login" className="flex items-center justify-center min-w-[44px] min-h-[44px] px-3 text-xs text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 transition-colors">
                 登录
-              </a>
+              </Link>
             )}
           </div>
         </div>

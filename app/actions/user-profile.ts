@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import type { UserProfileData, ActivityFeedItem } from '@/types/dashboard';
+import type { UserProfileData, PublicProfileData, ActivityFeedItem } from '@/types/dashboard';
 
 // 拉取多少条浏览历史用于计算连续天数 / 渲染动态流
 const HISTORY_LOOKBACK = 60;
@@ -59,12 +59,13 @@ export async function getUserProfile(): Promise<UserProfileData | null> {
       streakDays: computeStreak(history.map((h) => h.viewed_at)),
     };
 
-    // 题库练习动态 + 论坛发帖动态，合并后按时间倒序取前 N 条。
-    const [solvedFeed, postFeed] = await Promise.all([
+    // 题库练习动态 + 论坛发帖 + 论坛回复，合并后按时间倒序取前 N 条。
+    const [solvedFeed, postFeed, replyFeed] = await Promise.all([
       buildSolvedFeed(from, history.slice(0, FEED_LIMIT)),
       buildPostFeed(from, user.id),
+      buildReplyFeed(from, user.id),
     ]);
-    const recentActivities = [...solvedFeed, ...postFeed]
+    const recentActivities = [...solvedFeed, ...postFeed, ...replyFeed]
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, FEED_LIMIT);
 
@@ -77,6 +78,67 @@ export async function getUserProfile(): Promise<UserProfileData | null> {
       stats: { totalSolved: 0, forumReputation: 0, streakDays: 0 },
       recentActivities: [],
     };
+  }
+}
+
+/**
+ * 聚合任意用户的「公开主页」数据 —— 仅论坛维度，不暴露刷题量/学习习惯等隐私。
+ *
+ * 返回：
+ *   - username / avatarUrl / role  ← profiles
+ *   - stats.posts    ← 该用户发布的主题帖数
+ *   - stats.replies  ← 一级回复 + 楼中楼总数
+ *   - stats.likes    ← 收到的他人点赞数（= 论坛声望）
+ *   - recentActivities ← 近期发帖 + 近期回复，按时间倒序
+ *
+ * profiles / forum_* 未应用或用户不存在时返回 null，由页面 notFound() 兜底。
+ */
+export async function getPublicProfile(userId: string): Promise<PublicProfileData | null> {
+  if (!userId) return null;
+  const supabase = await createClient();
+  const from = supabase.from as unknown as FromFn;
+
+  try {
+    const { data: profiles } = await from<ProfileRow>('profiles')
+      .select('id, username, avatar_url, role')
+      .eq('id', userId);
+    const profile = (profiles ?? [])[0];
+    if (!profile) return null;
+
+    const [{ count: postCount }, { count: commentCount }, { count: subCount }, likes, postFeed, replyFeed] =
+      await Promise.all([
+        from<{ id: string }>('forum_posts')
+          .select('id', { count: 'exact', head: true })
+          .eq('author_id', userId),
+        from<{ id: string }>('forum_comments')
+          .select('id', { count: 'exact', head: true })
+          .eq('author_id', userId),
+        from<{ id: string }>('forum_sub_comments')
+          .select('id', { count: 'exact', head: true })
+          .eq('author_id', userId),
+        computeForumReputation(from, userId),
+        buildPostFeed(from, userId),
+        buildReplyFeed(from, userId),
+      ]);
+
+    const recentActivities = [...postFeed, ...replyFeed]
+      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .slice(0, FEED_LIMIT);
+
+    return {
+      userId,
+      username: profile.username?.trim() || '数学学习者',
+      avatarUrl: profile.avatar_url ?? undefined,
+      role: profile.role === 'admin' ? 'admin' : 'user',
+      stats: {
+        posts: postCount ?? 0,
+        replies: (commentCount ?? 0) + (subCount ?? 0),
+        likes,
+      },
+      recentActivities,
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -158,11 +220,59 @@ async function buildPostFeed(from: FromFn, uid: string): Promise<ActivityFeedIte
   }
 }
 
+// ── 论坛回复 → 动态流 ──────────────────────────────────────────
+// 取该用户最近的一级回复，关联帖子标题渲染「回复了《标题》」。论坛表缺失时静默 []。
+async function buildReplyFeed(from: FromFn, uid: string): Promise<ActivityFeedItem[]> {
+  try {
+    const { data: comments } = await from<CommentLite>('forum_comments')
+      .select('id, post_id, created_at')
+      .eq('author_id', uid)
+      .order('created_at', { ascending: false })
+      .limit(FEED_LIMIT);
+
+    const rows = comments ?? [];
+    if (!rows.length) return [];
+
+    const postIds = [...new Set(rows.map((c) => c.post_id))];
+    const { data: posts } = await from<{ id: string; title: string }>('forum_posts')
+      .select('id, title')
+      .in('id', postIds);
+    const titleMap = new Map((posts ?? []).map((p) => [p.id, p.title]));
+
+    return rows.map((c): ActivityFeedItem => {
+      const title = titleMap.get(c.post_id);
+      return {
+        id: `reply-${c.id}`,
+        type: 'replied',
+        title: title ? `《${title}》` : '一条论坛回复',
+        description: '在该帖下发表了回复',
+        timestamp: c.created_at,
+        repoOrTopic: '社区讨论区',
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 interface QuestionLite {
   id: string;
   content: string;
   source: string | null;
   question_topic_relations?: { topics: { name: string } | null }[];
+}
+
+interface ProfileRow {
+  id: string;
+  username: string | null;
+  avatar_url: string | null;
+  role: string | null;
+}
+
+interface CommentLite {
+  id: string;
+  post_id: string;
+  created_at: string;
 }
 
 interface PostLite {
