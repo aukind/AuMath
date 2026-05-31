@@ -17,8 +17,14 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AuMath",
-  description: "打造属于你个人的数学学习网站",
+  metadataBase: new URL("https://aumath.com"),
+  title: "AuMath · 高阶数学题库与社区",
+  description: "面向高考真题、模拟题与圆锥曲线、导数等高难拔高训练的数学题库与学习社区。",
+  openGraph: {
+    siteName: "AuMath",
+    type: "website",
+    locale: "zh_CN",
+  },
 };
 
 export default function RootLayout({

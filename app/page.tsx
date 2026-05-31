@@ -9,7 +9,7 @@ import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
 import Link from 'next/link';
 import PageLayout, { type MainView } from '@/components/PageLayout';
-import { Infinity, PenLine } from 'lucide-react';
+import { Infinity, PenLine, CalendarDays, Search as SearchIcon } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import AccountMenu from '@/components/AccountMenu';
 import NotificationBell from '@/components/NotificationBell';
@@ -129,6 +129,20 @@ export default async function HomePage({
           </Link>
 
           <div className="ml-auto flex items-center gap-2">
+            <Link
+              href="/search"
+              aria-label="搜索"
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+            >
+              <SearchIcon size={18} />
+            </Link>
+            <Link
+              href="/daily"
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            >
+              <CalendarDays size={14} className="text-indigo-500" />
+              <span className="hidden sm:inline">每日一题</span>
+            </Link>
             <ThemeToggle />
             {isLoggedIn && userId ? (
               <>

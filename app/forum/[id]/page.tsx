@@ -12,6 +12,24 @@ import {
 } from '@/app/actions/forum';
 import type { ForumPost } from '@/types/forum';
 
+export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const post = await getForumPost(id).catch(() => null as ForumPost | null);
+  if (!post) return { title: '帖子 · AuMath' };
+  // 正文是 Lexical JSON，剥离标签/符号后截断作描述
+  const plain = post.content
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[{}[\]"]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const description = plain.slice(0, 120) || `${post.author.username} 在 AuMath 社区发布的讨论`;
+  return {
+    title: `${post.title} · AuMath 社区`,
+    description,
+    openGraph: { title: post.title, description, type: 'article' },
+  };
+}
+
 export default async function ForumPostPage({
   params,
 }: {
