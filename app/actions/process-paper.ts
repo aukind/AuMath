@@ -83,8 +83,8 @@ You are an advanced OCR repair, mathematical typesetting, and knowledge-classifi
   • 试卷头/试卷尾的"考试时间 120 分钟"、"满分 150 分"等元信息再次出现
 每识别到一个新边界，就在 "papers" 数组里追加一个新对象。**绝不能** 把不同试卷的题目堆在同一个 paper 对象里，宁可错分多份也不能合并。
 
-【最高优先级 — 你是转写引擎，不是解题引擎】
-绝对禁止自行解答、推导、计算、证明任何题目。你唯一的职责是把卷面上**已经存在**的文字、公式、选项原样转写下来。解答题/大题**绝不能**写出任何解题过程、步骤、推导或最终结果——除非卷面本身直接印着答案（见下方 solution 规则）。自行解题是本任务最严重的错误：既拖慢速度又制造幻觉。
+【最高优先级 — 你是转写引擎，不是解题引擎；只录题面，不录答案】
+绝对禁止自行解答、推导、计算、证明任何题目。你唯一的职责是把卷面上的**题目题面**（文字、公式、选项）原样转写下来。**绝不能**输出任何答案：既不要自己解题，**也不要照抄卷面上已经印出的答案/参考答案/答案栏**——本任务只录题面，答案一律不录。自行解题或录入答案都是本任务最严重的错误：既拖慢速度又污染题面。
 
 Output ONLY a raw JSON object. No explanations, no reasoning, no Markdown fencing. Top-level structure:
 {
@@ -103,12 +103,11 @@ Output ONLY a raw JSON object. No explanations, no reasoning, no Markdown fencin
 
 NEVER merge questions from different papers into one entry. 哪怕只有 0.1% 的把握是新试卷，也要拆成两个对象。
 
-Each question element (ALL 5 fields required):
+Each question element (ALL 4 fields required；不要输出 solution / answer 字段):
 {
   "question_number": 5,
   "content": "**5.** 完整题干（按规则 14-16 排版）",
   "options": {"A":"...","B":"...","C":"...","D":"..."} or null,
-  "solution": "仅当卷面【直接印有】答案/参考答案/答案栏时照抄（选择题抄印出的字母；填空/解答题抄印出的最终答案）；卷面没印答案就填 \"\"。【绝对禁止自行解题、推导或计算】",
   "category": "数列"
 }
 
@@ -141,7 +140,7 @@ Each question element (ALL 5 fields required):
 11a.【希腊字母 vs 拉丁字母】绝对不能把希腊字母 OCR 成相似的拉丁字母：α≠a, β≠b, γ≠y, ν≠v, π≠n, ρ≠p, χ≠x, ω≠w, μ≠u, σ≠o, τ≠t, ξ≠ξ；遇到希腊字母必须用 LaTeX 命令保留（\\\\alpha \\\\beta \\\\gamma \\\\theta \\\\pi \\\\sigma \\\\phi \\\\omega 等）。
 11b.【补集符号】中国教材的补集 ∁_U A 必须用 \\\\complement 命令转写，不要写成 \\\\mathsf{C} / \\\\mathbf{C} / \\\\mathbb{C} / \\\\mathcal{C} / 裸 C —— 这些都不是补集符号。正例 \\\\complement_{I} S，反例 \\\\mathsf{C}_{I} S。补集符号同样必须包在 $...$ 内（如 $\\\\complement_{I} S$），绝不能裸写在普通文本里。
 11d.【向量符号】由两点确定的向量必须用「长箭头」\\\\overrightarrow{AB}（贯穿两个字母），绝对不要用 \\\\vec{AB}——\\\\vec 的短帽箭头只压在末字母上，两点向量看着很别扭。仅当是单个向量名（如向量 a）时才用 \\\\vec{a} 或 \\\\boldsymbol{a}。正例 $\\\\overrightarrow{MP}\\\\cdot\\\\overrightarrow{MN}$，反例 $\\\\vec{MP}\\\\cdot\\\\vec{MN}$。
-11c.【填空题的空白横线】填空题留空处（原卷的 "____" 横线）只能转写成 LaTeX 横线 \\\\underline{\\\\qquad}，且必须放在普通文本里、不要包进 $...$。绝对禁止把空白 OCR 成裸下标 / 嵌套空括号 / 散落上下标，例如 \`=_{ {{{ {_}}}}}\`、\`{_}\`、\`x_\`、\`a^{}\` 都是非法的——任何 \`_\` 或 \`^\` 后面都必须紧跟一个非空操作数（单字符或 {...}）。题目要求的数值/表达式答案放进 solution 字段，不要塞进题面的空白处。正例：content 写 "则 $a_1+a_2+\\\\cdots+a_{10}=$ \\\\underline{\\\\qquad}."，solution 写 "$80$"。
+11c.【填空题的空白横线】填空题留空处（原卷的 "____" 横线）只能转写成 LaTeX 横线 \\\\underline{\\\\qquad}，且必须放在普通文本里、不要包进 $...$。绝对禁止把空白 OCR 成裸下标 / 嵌套空括号 / 散落上下标，例如 \`=_{ {{{ {_}}}}}\`、\`{_}\`、\`x_\`、\`a^{}\` 都是非法的——任何 \`_\` 或 \`^\` 后面都必须紧跟一个非空操作数（单字符或 {...}）。填空题的答案**绝不录入**（既不要塞进题面空白，也不要单独输出）——题面只保留到那条横线为止。正例：content 写 "则 $a_1+a_2+\\\\cdots+a_{10}=$ \\\\underline{\\\\qquad}."（不附任何答案）。
 
 ═══ Numbering & Structure Rules ═══
 12. Detect question boundaries: section headers ("一、选择题"), numbers ("1.", "（1）") etc.
@@ -168,8 +167,7 @@ Each question element (ALL 5 fields required):
 17a.【选择题选项不要重复】对于选择题，options 字段已经承载了 (A)/(B)/(C)/(D)，**content 字段绝不能再把 "(A)..(B)..(C)..(D).." 复述一遍**。content 末尾应止于题干主句的句号/问号，紧接着的 (A) 起的选项块只填进 options 对象。错误示范：content="**5.** ...的距离是 (A) 1/2 (B) √3/2 (C) 1 (D) √3"。正确：content="**5.** ...的距离是"，options={"A":"$\\\\dfrac{1}{2}$","B":"$\\\\dfrac{\\\\sqrt{3}}{2}$","C":"$1$","D":"$\\\\sqrt{3}$"}。
 17b.【选项内公式同样必须包 $】options 每个选项里的所有数学符号/公式，与题干同等标准——必须用 $...$ 包裹，绝不能把 \\\\rho、\\\\cos\\\\theta、\\\\dfrac{1}{2}、\\\\complement 等裸命令写在选项文本里。错误：{"A":"极坐标方程 \\\\rho=\\\\cos\\\\theta 的图形"}；正确：{"A":"$\\\\rho=\\\\cos\\\\theta$ 与 $\\\\rho\\\\cos\\\\theta=\\\\dfrac{1}{2}$ 的交点"}。
 17c.【选项必须是真实且互不相同的备选项，禁止复述题干】options 必须填原卷中 (A)(B)(C)(D) 各自**不同**的备选内容。**绝对禁止**把题干原话、或题干里的同一段公式，当作每个选项的内容逐字复述（例如 A、B 两项内容雷同、且都等于题干那句话——这是 OCR 失败/幻觉的典型表现）。如果实在无法辨认某题的选项，**宁可把 options 设为 null**，也不要编造或复述题干来凑数。
-18. solution: ONLY copy an answer that is literally printed on the paper（卷面已印的「答案」/「参考答案」/「答案栏」）。选择题抄印出的字母；填空/解答题抄印出的最终答案。
-    若卷面没有印答案，solution 必须是空字符串 ""。**NEVER solve, derive, compute, or prove anything yourself** —— 哪怕题目很简单也绝不自行作答。`;
+18. 【不录任何答案】绝不输出 solution / answer 字段，也绝不把答案写进 content。无论答案是你自己算出来的，还是卷面上已经印好的（答案/参考答案/答案栏），一律**不录入**。本管线只录题面，答案在录题后由人工在编辑页补充。`;
 
 const USER_PROMPT = '请提取图片/PDF中所有题目，按规定 JSON 格式输出。';
 
@@ -332,13 +330,13 @@ async function normalizeQuestions(rawList: Record<string, unknown>[]): Promise<E
   });
   const all = await Promise.all(
     sorted.map(async (q): Promise<ExtractedQuestion> => {
-      const rawAnswer   = String(q.solution ?? q.answer ?? '');
       const rawCategory = String(q.category ?? '');
-      const [content, options, answer] = await Promise.all([
+      const [content, options] = await Promise.all([
         Promise.resolve(normalizeLaTeX(String(q.content ?? ''))),
         Promise.resolve(normalizeOptions(q.options)),
-        Promise.resolve(normalizeLaTeX(rawAnswer)),
       ]);
+      // 录题只保留题面：卷面即便印了答案也一律不录入（答案/解析后续在编辑页补）。
+      const answer          = '';
       const category        = VALID_CATEGORIES.has(rawCategory) ? rawCategory : undefined;
       const question_number = typeof q.question_number === 'number' ? q.question_number : undefined;
       // 治本：即便模型把选项复述进 content，也在入库前确定性剥掉，杜绝与选项卡片重复。
