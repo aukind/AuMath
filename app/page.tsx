@@ -10,7 +10,7 @@ import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
 import Link from 'next/link';
 import PageLayout, { type MainView } from '@/components/PageLayout';
-import { Infinity, PenLine, CalendarDays, Search as SearchIcon } from 'lucide-react';
+import { Infinity, PenLine, CalendarDays, Search as SearchIcon, FileText } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import AccountMenu from '@/components/AccountMenu';
 import NotificationBell from '@/components/NotificationBell';
@@ -150,9 +150,14 @@ export default async function HomePage({
             {isLoggedIn && userId ? (
               <>
                 {isAdmin && (
-                  <Link href="/admin/paper-upload" className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors">
-                    <PenLine size={13} /> <span className="hidden sm:inline">AI 录题</span>
-                  </Link>
+                  <>
+                    <Link href="/admin/paper-upload" className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60 hover:bg-violet-100 dark:hover:bg-violet-900/30 transition-colors">
+                      <PenLine size={13} /> <span className="hidden sm:inline">AI 录题</span>
+                    </Link>
+                    <Link href="/admin/papers" className="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg text-zinc-600 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+                      <FileText size={13} /> <span className="hidden sm:inline">试卷管理</span>
+                    </Link>
+                  </>
                 )}
                 <NotificationBell count={unreadCount} />
                 <AccountMenu username={username} userId={userId} isAdmin={isAdmin} avatarUrl={avatarUrl} />

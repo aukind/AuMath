@@ -23,6 +23,7 @@ import QuestionSearch from '@/components/QuestionSearch';
 import SiteViewsBadge from '@/components/SiteViewsBadge';
 import ForumPostList from '@/components/forum/ForumPostList';
 import DashboardWorkspace from '@/components/dashboard/DashboardWorkspace';
+import EditPaperButton from '@/components/admin/EditPaperButton';
 import { useSoftNav, isPlainLeftClick } from '@/components/ui/useSoftNav';
 import type { TabItem } from '@/components/ui/AnimatedTabs';
 import { deleteQuestion, updateQuestionCategory } from '@/app/actions/questions';
@@ -280,7 +281,11 @@ function BrowseView({
           {activePaper?.year && <span className="text-xs text-zinc-400">{activePaper.year} 年</span>}
           {questions.length > 0 && <p className="text-xs text-zinc-400 mt-0.5">共 {questions.length} 道题</p>}
         </div>
-        {!paperId && <SortSelect value={validSort} topicId={topicId} />}
+        <div className="flex items-center gap-2">
+          {/* 管理员：直接在浏览页编辑当前试卷信息 */}
+          {isAdmin && activePaper && <EditPaperButton paper={activePaper} />}
+          {!paperId && <SortSelect value={validSort} topicId={topicId} />}
+        </div>
       </div>
 
       {questions.length === 0 ? (
