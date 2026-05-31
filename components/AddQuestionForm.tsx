@@ -241,7 +241,7 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
 
   const handleSubmit = (status: 'published' | 'draft') => {
     if (!content.trim()) { setErrorMsg('题目正文不能为空'); return; }
-    if (!answer.trim())  { setErrorMsg('标准答案不能为空'); return; }
+    // 标准答案可为空：录题只录题面，答案可后补。
     setErrorMsg(null);
 
     const payload = {
@@ -344,7 +344,7 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
         {/* 答案 + 解析：可开启分屏预览 */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <CollapsibleField
-            label="标准答案 *"
+            label="标准答案"
             value={answer}
             onChange={setAnswer}
             textareaRef={answerRef}

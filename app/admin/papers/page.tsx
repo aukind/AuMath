@@ -3,8 +3,8 @@ import { redirect } from 'next/navigation';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
 import { getPapers } from '@/app/actions/questions';
-import { ArrowLeft, FileText, ChevronRight } from 'lucide-react';
-import PaperRowActions from '@/components/admin/PaperRowActions';
+import { ArrowLeft } from 'lucide-react';
+import AdminPaperList from '@/components/admin/AdminPaperList';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '试卷管理 · AuMath' };
@@ -32,42 +32,7 @@ export default async function AdminPapersPage() {
           </p>
         </header>
 
-        <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 divide-y divide-zinc-100 dark:divide-zinc-800">
-          {papers.length === 0 ? (
-            <div className="py-16 text-center text-sm text-muted-foreground">
-              暂无试卷，请前往{' '}
-              <Link href="/admin/paper-upload" className="text-blue-600 hover:underline">
-                录题工作台
-              </Link>{' '}
-              上传。
-            </div>
-          ) : (
-            papers.map((p) => (
-              <div key={p.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors group">
-                <FileText className="h-4 w-4 text-zinc-400 shrink-0" />
-                <Link
-                  href={`/admin/papers/${p.id}`}
-                  className="flex-1 min-w-0 flex items-center gap-3"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-foreground truncate">
-                      {p.title}
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-3 text-xs text-muted-foreground">
-                      {p.year && <span>{p.year} 年</span>}
-                      <span className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[10px]">
-                        {p.type === 'real' ? '真题' : '模拟'}
-                      </span>
-                      <span>{p.total_questions} 题</span>
-                    </div>
-                  </div>
-                  <ChevronRight className="h-4 w-4 text-zinc-300 dark:text-zinc-600 group-hover:text-zinc-500 dark:group-hover:text-zinc-400 transition-colors" />
-                </Link>
-                <PaperRowActions paperId={p.id} title={p.title} />
-              </div>
-            ))
-          )}
-        </div>
+        <AdminPaperList papers={papers} />
       </div>
     </main>
   );
