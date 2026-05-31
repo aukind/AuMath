@@ -388,10 +388,17 @@ function transformNodes(nodes: UNode[]): UNode[] {
  * Exported so individual formula strings can be unit-tested directly.
  */
 export function canonicalizeMathBody(body: string): string {
-  const ast  = parse(body) as unknown as UNode;
-  const xast = transformNode(ast);
+  // `parseMath` 在当前 @unified-latex 版本里直接返回**节点数组**（UNode[]），
+  // 不再包成 { type: "root", content: [...] }。两种形态都兼容：数组直接进 transformNodes，
+  // 根节点则取其 children。早前误把数组当成单节点传给 transformNode → 命中 default 分支
+  // → 整个规范化静默失效（间距宏/同义词/上下标排序全没生效）。
+  const parsed = parse(body) as unknown;
+  const nodes: UNode[] = Array.isArray(parsed)
+    ? (parsed as UNode[])
+    : childNodes(parsed as UNode);
+  const xnodes = transformNodes(nodes);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return printRaw(xast as any);
+  return printRaw(xnodes as any);
 }
 
 /**

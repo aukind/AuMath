@@ -160,7 +160,9 @@ describe("scenario: conic section equation with script reordering", () => {
     // Standard ellipse/hyperbola: x₁²/a² + y₁²/b² = 1
     const input  = "\\frac{x^{2}_{1}}{a^{2}} + \\frac{y^{2}_{1}}{b^{2}} = 1";
     const output = math(input);
-    expect(output).toBe("\\frac{x_{1}^{2}}{a^{2}} + \\frac{y_{1}^{2}}{b^{2}} = 1");
+    // 注：parseMath 会丢弃花括号参数 `}` 之后的空格（TeX 数学模式本就忽略），故 `+`/`=`
+    // 前的空格不在规范形里——纯属外观，KaTeX 渲染完全一致。脚标重排 x^{2}_{1}→x_{1}^{2} 正确。
+    expect(output).toBe("\\frac{x_{1}^{2}}{a^{2}}+ \\frac{y_{1}^{2}}{b^{2}}= 1");
   });
 
   it("is idempotent", () => {
