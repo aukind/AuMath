@@ -9,12 +9,16 @@ import { extractLatexFromImage } from '@/app/actions/extract-latex';
 type Stage =
   | { kind: 'idle' }
   | { kind: 'loading'; previewUrl: string }
-  | { kind: 'ready'; previewUrl: string; markdown: string }
+  | { kind: 'ready'; previewUrl: string; markdown: string; file: File }
   | { kind: 'error'; previewUrl: string | null; message: string };
 
 interface ScreenshotToLatexButtonProps {
-  /** Receives the Markdown+LaTeX snippet ready to splice into the textarea. */
-  onInsert: (snippet: string) => void;
+  /**
+   * Receives the Markdown+LaTeX snippet plus the original source image File
+   * (so hosts can optionally embed the原图). Hosts that only want the text
+   * can ignore the second argument.
+   */
+  onInsert: (snippet: string, sourceFile: File | null) => void;
   className?: string;
 }
 
@@ -70,7 +74,7 @@ export function ScreenshotToLatexButton({
         setStage({ kind: 'error', previewUrl, message: result.error });
         return;
       }
-      setStage({ kind: 'ready', previewUrl, markdown: result.markdown });
+      setStage({ kind: 'ready', previewUrl, markdown: result.markdown, file });
     } catch (e) {
       setStage({
         kind: 'error',
@@ -140,7 +144,7 @@ export function ScreenshotToLatexButton({
 
   const insert = useCallback(() => {
     if (stage.kind !== 'ready') return;
-    onInsert(stage.markdown);
+    onInsert(stage.markdown, stage.file);
     setOpen(false);
     reset();
   }, [stage, onInsert, reset]);

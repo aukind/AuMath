@@ -21,6 +21,8 @@ import {
 } from '@lexical/markdown';
 import { MathNode } from '@/components/editor/MathNode';
 import { MATH_TRANSFORMERS } from '@/components/editor/MathTransformers';
+import { ImageNode } from '@/components/editor/ImageNode';
+import { IMAGE_TRANSFORMER } from '@/components/editor/ImageTransformers';
 
 const theme = {
   paragraph: 'm-0 leading-relaxed',
@@ -40,7 +42,7 @@ const theme = {
  * MarkdownShortcutPlugin 启动时会校验每个转换器的 dependencies 是否已注册，
  * 缺一个就会在运行时抛 "missing dependency ... for transformer"。
  */
-const FORUM_NODES = [MathNode, HeadingNode, QuoteNode, ListNode, ListItemNode];
+const FORUM_NODES = [MathNode, ImageNode, HeadingNode, QuoteNode, ListNode, ListItemNode];
 
 /**
  * markdown 快捷输入转换器。刻意只保留「渲染器 lexicalToSafeMarkdown 能还原」的子集：
@@ -49,6 +51,7 @@ const FORUM_NODES = [MathNode, HeadingNode, QuoteNode, ListNode, ListItemNode];
  * 也避免引入 @lexical/code、@lexical/link 等额外节点依赖。
  */
 export const FORUM_TRANSFORMERS: Transformer[] = [
+  IMAGE_TRANSFORMER,
   ...MATH_TRANSFORMERS,
   HEADING,
   QUOTE,

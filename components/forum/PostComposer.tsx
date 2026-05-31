@@ -11,14 +11,24 @@ import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin';
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary';
 import { MarkdownShortcutPlugin } from '@lexical/react/LexicalMarkdownShortcutPlugin';
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext';
+import { $convertFromMarkdownString, $convertToMarkdownString } from '@lexical/markdown';
 import { $getRoot } from 'lexical';
-import { useEffect, useState, useTransition } from 'react';
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
+import { ImageIcon, Loader2 } from 'lucide-react';
 import { MathPlugin } from '@/components/editor/MathPlugin';
 import { MathToolbarButton } from '@/components/editor/MathToolbarButton';
+import { ScreenshotToLatexButton } from '@/components/admin/ScreenshotToLatexButton';
 import { createForumPost } from '@/app/actions/forum';
+import { uploadForumImage } from '@/app/actions/forum-image';
 import { buildReplyEditorConfig, FORUM_TRANSFORMERS } from './lexicalConfig';
+
+// 工具栏按钮统一样式（暗色极客风，与 Σ公式 一致）
+const TOOLBAR_BTN =
+  'inline-flex h-7 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium ' +
+  'text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-50 ' +
+  'dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800';
 
 function ComposerInner() {
   const [editor] = useLexicalComposerContext();
@@ -56,6 +66,61 @@ function ComposerInner() {
     });
   };
 
+  // 把一段 Markdown 追加进编辑器：整体 round-trip（含已嵌图片/公式），光标落到末尾。
+  const insertMarkdown = useCallback(
+    (md: string) => {
+      editor.update(() => {
+        const cur = $convertToMarkdownString(FORUM_TRANSFORMERS).trim();
+        $convertFromMarkdownString(cur ? `${cur}\n\n${md}` : md, FORUM_TRANSFORMERS);
+      });
+    },
+    [editor],
+  );
+
+  // 截图识别插入：若有原图，先上传并把原图嵌在转写文字之上（保留几何图）。
+  const handleScreenshotInsert = useCallback(
+    async (markdown: string, file: File | null) => {
+      if (file) {
+        const t = toast.loading('上传原图中…');
+        try {
+          const fd = new FormData();
+          fd.append('file', file);
+          const { url } = await uploadForumImage(fd);
+          insertMarkdown(`![题目原图](${url})\n\n${markdown}`);
+          toast.success('已插入原图与识别文字', { id: t });
+          return;
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : '原图上传失败，已仅插入文字', { id: t });
+        }
+      }
+      insertMarkdown(markdown);
+    },
+    [insertMarkdown],
+  );
+
+  // 纯上传图片（补几何图 / 手写）
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploadingImage(true);
+    const t = toast.loading('上传图片中…');
+    try {
+      const fd = new FormData();
+      fd.append('file', file);
+      const { url } = await uploadForumImage(fd);
+      insertMarkdown(`![图片](${url})`);
+      toast.success('已插入图片', { id: t });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '图片上传失败', { id: t });
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   return (
     <div className="space-y-3">
       <input
@@ -88,9 +153,21 @@ function ComposerInner() {
           <MathPlugin />
           <MarkdownShortcutPlugin transformers={FORUM_TRANSFORMERS} />
         </div>
-        <div className="flex items-center justify-between border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
-          <MathToolbarButton />
-          <span className="text-xs text-zinc-400">支持 $行内$ 与 $$块级$$ 公式</span>
+        <div className="flex flex-wrap items-center gap-2 border-t border-zinc-200 px-3 py-2 dark:border-zinc-800">
+          <MathToolbarButton className={TOOLBAR_BTN} />
+          <ScreenshotToLatexButton onInsert={handleScreenshotInsert} className={TOOLBAR_BTN} />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadingImage}
+            className={TOOLBAR_BTN}
+            title="上传图片（直接嵌入帖子，可保留几何图/手写）"
+          >
+            {uploadingImage ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImageIcon className="h-3.5 w-3.5" />}
+            <span>上传图片</span>
+          </button>
+          <input ref={fileInputRef} type="file" accept="image/*" hidden onChange={handleImageFile} />
+          <span className="ml-auto text-xs text-zinc-400">截图自动转公式 · 或直接传图 · 支持 $公式$</span>
         </div>
       </div>
 

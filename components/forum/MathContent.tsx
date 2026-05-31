@@ -13,10 +13,25 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
-import rehypeSanitize from 'rehype-sanitize';
+import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import 'katex/dist/katex.min.css';
 import { lexicalToSafeMarkdown } from '@/lib/forum/lexicalSerialize';
 import { FORUM_KATEX_OPTIONS } from '@/lib/forum/sanitize';
+
+// 在默认 schema 基础上放行 <img>，且 src 仅允许 https（图片来自本项目 Supabase 存储，
+// 序列化器已二次校验来源）。其余 HTML 仍按默认 schema 清洗。
+const SANITIZE_SCHEMA = {
+  ...defaultSchema,
+  tagNames: [...(defaultSchema.tagNames ?? []), 'img'],
+  attributes: {
+    ...defaultSchema.attributes,
+    img: ['src', 'alt', 'title'],
+  },
+  protocols: {
+    ...defaultSchema.protocols,
+    src: ['https'],
+  },
+};
 
 interface MathContentProps {
   /** 序列化后的 Lexical JSON 字符串 */
@@ -46,7 +61,7 @@ export default function MathContent({ content, className }: MathContentProps) {
         remarkPlugins={[remarkMath, remarkGfm]}
         // 注意顺序：先 rehype-sanitize 清洗 HAST，再 rehype-katex 注入 KaTeX 标记。
         // 序列化器已不产出原始 HTML，这里是第三道防线。
-        rehypePlugins={[rehypeSanitize, [rehypeKatex, FORUM_KATEX_OPTIONS]]}
+        rehypePlugins={[[rehypeSanitize, SANITIZE_SCHEMA], [rehypeKatex, FORUM_KATEX_OPTIONS]]}
       >
         {markdown}
       </ReactMarkdown>

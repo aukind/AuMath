@@ -22,7 +22,23 @@ interface LexNode {
   inline?: boolean;
   tag?: string; // heading: h1..h6
   listType?: string; // 'bullet' | 'number'
+  src?: string; // image
+  altText?: string; // image
   children?: LexNode[];
+}
+
+/**
+ * 仅放行来自本项目 Supabase 存储的 https 图片，杜绝伪造 JSON 注入任意 / javascript: URL。
+ * 公开 URL 形如 `${SUPABASE_URL}/storage/v1/object/public/forum-images/...`。
+ */
+function isTrustedImageSrc(src: string): boolean {
+  const base = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  return (
+    !!src &&
+    !!base &&
+    src.startsWith('https://') &&
+    src.startsWith(`${base}/storage/`)
+  );
 }
 
 /**
@@ -64,6 +80,12 @@ function renderNode(node: LexNode): string {
       return renderTextNode(node);
     case 'math':
       return renderMathNode(node);
+    case 'image': {
+      const src = node.src ?? '';
+      if (!isTrustedImageSrc(src)) return '';
+      const alt = sanitizeText(node.altText ?? '').replace(/[[\]]/g, '');
+      return `\n\n![${alt}](${src})\n\n`;
+    }
     case 'linebreak':
       return '  \n';
     case 'paragraph':
