@@ -5,6 +5,7 @@ import { ChevronDown, GripVertical, Layers, Pencil, Star, Trash2, X } from 'luci
 import MathRenderer from '@/components/MathRenderer';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import { toggleFavorite, markError, removeError, recordView } from '@/app/actions/user-workspace';
+import { stripInlineOptionTail } from '@/lib/questions/content';
 import type { QuestionWithTopics } from '@/types/database';
 
 interface QuestionCardProps {
@@ -19,11 +20,6 @@ interface QuestionCardProps {
   initialFavorited?: boolean;
   initialErrored?: boolean;
 }
-
-// content 末尾的选项枚举尾巴：以 A 标记开头、其后出现 B 标记，直到结尾。
-// 标记形如 (A) / A. / A、 / A．；分隔符含真实换行、空白或字面量反斜杠-n（"\\n"）。
-const OPTION_TAIL_RE =
-  /(?:\\n|\s)*\(?[Aa]\s*[.)、．][\s\S]*?\(?[Bb]\s*[.)、．][\s\S]*$/;
 
 function normalizeOptions(raw: unknown): string[] {
   if (!raw) return [];
@@ -79,12 +75,8 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
   const solutionContent = [question.answer, question.analysis || question.solution].filter(Boolean).join('\n\n---\n\n');
   const options = normalizeOptions(question.metadata?.options);
 
-  // Gemini 经常把选项同时塞进 content 和 options，于是渲染两遍。
-  // 当本题有 options 且 content 末尾出现一段「A… B…」选项枚举时，把这段尾巴砍掉，避免重复。
-  // 兼容多种写法：(A)/A./A、/A．，分隔符可为真实换行、空白或被错误转义的字面量 "\n"。
-  const displayContent = options.length >= 2
-    ? question.content.replace(OPTION_TAIL_RE, '').trimEnd()
-    : question.content;
+  // 兜底：老数据 / 模型漏网时，展示侧再用同一逻辑剥掉题干里重复的选项尾巴（治本在 process-paper 入库时）。
+  const displayContent = stripInlineOptionTail(question.content, options.length >= 2);
 
   async function handleConfirmDelete() {
     if (!onDelete) return;

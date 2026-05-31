@@ -3,6 +3,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { revalidatePath } from 'next/cache';
 import { normalizeLaTeX } from '@/lib/normalizeLatex';
+import { stripInlineOptionTail } from '@/lib/questions/content';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { Difficulty } from '@/types/database';
 
@@ -324,7 +325,9 @@ async function normalizeQuestions(rawList: Record<string, unknown>[]): Promise<E
       ]);
       const category        = VALID_CATEGORIES.has(rawCategory) ? rawCategory : undefined;
       const question_number = typeof q.question_number === 'number' ? q.question_number : undefined;
-      return { id: crypto.randomUUID(), question_number, content, options, answer, category };
+      // 治本：即便模型把选项复述进 content，也在入库前确定性剥掉，杜绝与选项卡片重复。
+      const cleanContent = stripInlineOptionTail(content, options.length >= 2);
+      return { id: crypto.randomUUID(), question_number, content: cleanContent, options, answer, category };
     }),
   );
   // 过滤掉完全空的题（content/options/answer 全空 = 模型输出被截断的残骸）
