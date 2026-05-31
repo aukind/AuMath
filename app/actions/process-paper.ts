@@ -141,6 +141,7 @@ Each question element (ALL 5 fields required):
 ═══ Numbering & Structure Rules ═══
 12. Detect question boundaries: section headers ("一、选择题"), numbers ("1.", "（1）") etc.
 13. question_number: original integer from the paper. Infer from context if omitted. NEVER skip or mis-order.
+13a.【完整性 — 一道都不能漏】必须输出卷面上**每一道**带题号的题，题号必须连续不缺号。尤其是篇幅很长、含表格、含大段"新定义/统计学背景"的解答题（例如某道给出"岗位—能力分值"表格、定义 $n$ 维向量距离的统计大题），**绝不能因为它长、含表格、含多个小问 (1)(2)(i)(ii)、或被半透明水印部分遮挡就跳过、截断或与相邻题合并**。这类题若含表格，按规则 8 转成 GFM 表格照常嵌进 content；小问按规则 15 各自换行。哪怕该题要写很长，也必须完整输出。
 
 ═══ 【CRITICAL】Content Layout Rules — 严格遵循，否则页面会很难看 ═══
 14. content 必须以加粗题号开头："**5.**" 或 "**第5题**"，题号后空一格再写题干主句。
