@@ -11,6 +11,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { notify } from '@/lib/notifications';
 import type {
   ForumComment,
   ForumPost,
@@ -229,6 +230,9 @@ export async function submitForumReply(
       .single();
     if (error || !data) throw new Error('发布失败：' + (error?.message ?? '未知错误'));
     revalidatePath(`/forum/${target.postId}`);
+    // 通知楼主：有人回复了你的帖子
+    const { data: post } = await sb.from('forum_posts').select('author_id').eq('id', target.postId).maybeSingle();
+    await notify(sb, { recipientId: post?.author_id, actorId: uid, type: 'reply_post', postId: target.postId });
     return {
       kind: 'comment',
       data: {
@@ -259,6 +263,18 @@ export async function submitForumReply(
     .single();
   if (error || !data) throw new Error('发布失败：' + (error?.message ?? '未知错误'));
   revalidatePath(`/forum/${target.postId}`);
+  // 通知被回复的楼主（一级回复作者），以及被 @ 的子评论作者
+  const { data: parent } = await sb
+    .from('forum_comments')
+    .select('author_id, post_id')
+    .eq('id', target.parentId)
+    .maybeSingle();
+  if (parent) {
+    await notify(sb, { recipientId: parent.author_id, actorId: uid, type: 'reply_comment', postId: parent.post_id });
+    if (replyToUserId && replyToUserId !== parent.author_id) {
+      await notify(sb, { recipientId: replyToUserId, actorId: uid, type: 'reply_comment', postId: parent.post_id });
+    }
+  }
   return {
     kind: 'sub',
     data: {
@@ -293,6 +309,13 @@ export async function toggleForumUpvote(commentId: string): Promise<number> {
       .eq('user_id', uid);
   } else {
     await sb.from('forum_comment_votes').insert({ comment_id: commentId, user_id: uid });
+    // 新点赞 → 通知被赞回复的作者
+    const { data: comment } = await sb
+      .from('forum_comments')
+      .select('author_id, post_id')
+      .eq('id', commentId)
+      .maybeSingle();
+    await notify(sb, { recipientId: comment?.author_id, actorId: uid, type: 'like', postId: comment?.post_id });
   }
 
   const { count } = await sb

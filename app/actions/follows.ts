@@ -11,6 +11,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
+import { notify } from '@/lib/notifications';
 
 export interface FollowCounts {
   followers: number;
@@ -69,6 +70,8 @@ export async function toggleFollow(targetId: string): Promise<ToggleFollowResult
         .from('user_follows')
         .insert({ follower_id: user.id, following_id: targetId });
       if (error) throw error;
+      // 新关注 → 通知被关注者
+      await notify(sb, { recipientId: targetId, actorId: user.id, type: 'follow' });
     }
 
     revalidatePath(`/u/${targetId}`);

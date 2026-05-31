@@ -4,6 +4,7 @@ import { getFavoritedQuestionIds, getErroredQuestionIds, getWorkspaceQuestions }
 import { getSiteViews } from '@/app/actions/site-stats';
 import { getForumPosts } from '@/app/actions/forum';
 import { getMyAccount } from '@/app/actions/account';
+import { getUnreadNotificationCount } from '@/app/actions/notifications';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
 import Link from 'next/link';
@@ -11,6 +12,7 @@ import PageLayout, { type MainView } from '@/components/PageLayout';
 import { Infinity, PenLine } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import AccountMenu from '@/components/AccountMenu';
+import NotificationBell from '@/components/NotificationBell';
 import CanvasScratchpad from '@/components/CanvasScratchpad';
 import MobileMenuDrawer from '@/components/MobileMenuDrawer';
 import type { QuestionWithTopics, WorkspaceType } from '@/types/database';
@@ -52,6 +54,7 @@ export default async function HomePage({
     erroredIds,
     siteViews,
     account,
+    unreadCount,
   ] = await Promise.all([
     supabase.auth.getUser(),
     getQuestionTopics(),
@@ -74,6 +77,7 @@ export default async function HomePage({
     getErroredQuestionIds(),
     getSiteViews(),
     getMyAccount(),
+    getUnreadNotificationCount(),
   ]);
 
   const isAdmin = isAdminUser(user);
@@ -133,6 +137,7 @@ export default async function HomePage({
                     <PenLine size={13} /> <span className="hidden sm:inline">AI 录题</span>
                   </Link>
                 )}
+                <NotificationBell count={unreadCount} />
                 <AccountMenu username={username} userId={userId} isAdmin={isAdmin} avatarUrl={avatarUrl} />
               </>
             ) : (
