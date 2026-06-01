@@ -24,8 +24,12 @@ _processor = PipelineBProcessor(return_clean_image=False)
 _MAX_FIGURES = 12  # 单页几何图上限，防异常页拖垮
 
 
-def _process_page(img_bgr, page_no: int | None = None, vectorize: bool = True) -> list[AutoFigure]:
-    """单页：检测 → 归属 → 裁剪原图（+可选矢量化）。检测依赖缺失时抛 ImportError。"""
+def _process_page(img_bgr, page_no: int | None = None, vectorize: bool = True, mode: str = "image") -> list[AutoFigure]:
+    """单页：检测 → 归属 → 裁剪原图（+按 mode 矢量化）。检测依赖缺失时抛 ImportError。
+
+    mode='cloud-vector'：每张图送云端 8B 拿编译好的 SVG（最优质量，慢/可能限流）；
+    云端失败的图保留 crop_base64 兜底，绝不丢图。
+    """
     from app.detection.associate import assign_question, detect_question_anchors
     from app.detection.layout import detect_figure_boxes
 
@@ -33,18 +37,31 @@ def _process_page(img_bgr, page_no: int | None = None, vectorize: bool = True) -
     boxes = detect_figure_boxes(img_bgr)[:_MAX_FIGURES]
     anchors = detect_question_anchors(img_bgr) if boxes else []
 
+    cloud = None
     out: list[AutoFigure] = []
     for box in boxes:
         x1, y1, x2, y2, conf = box
         crop_png = encode_png_bgr(img_bgr[y1:y2, x1:x2])
         fig = AutoFigure(
             question_number=assign_question(box, anchors, w),
-            crop_base64=encode_base64(crop_png),  # 无损原图裁剪（默认路线）
+            crop_base64=encode_base64(crop_png),  # 始终带原图裁剪做兜底
             confidence=round(conf, 3),
             box=[x1, y1, x2, y2],
             page=page_no,
         )
-        if vectorize:
+        if mode == "cloud-vector":
+            try:
+                if cloud is None:
+                    from app.pipelines.pipeline_a_hfspace import HfSpacePipelineA
+
+                    cloud = HfSpacePipelineA()
+                res = cloud.process(crop_png)
+                fig.svg = res.svg or ""
+                fig.inline_svg = res.svg or ""
+                fig.tikz = res.tikz or ""
+            except Exception:  # noqa: BLE001 — 单图云端失败不影响其它，留 crop 兜底
+                pass
+        elif vectorize:
             result = _processor.process(crop_png)
             fig.svg = result.svg or ""
             fig.inline_svg = bake_labels_into_svg(result.svg or "", result.labels)
@@ -117,7 +134,7 @@ async def auto_figures_doc(req: AutoDocRequest) -> AutoFiguresResponse:
         figures: list[AutoFigure] = []
         try:
             for page_no, page in enumerate(pages, 1):
-                figures.extend(_process_page(page, page_no, vectorize=req.vectorize))
+                figures.extend(_process_page(page, page_no, vectorize=req.vectorize, mode=req.mode))
         except ImportError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "未安装版面检测依赖：pip install -r requirements-detection.txt") from exc
 

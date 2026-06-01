@@ -20,6 +20,25 @@ from app.pipelines.base import Pipeline, PipelineResult
 _RETRIES = 3  # 经代理到 HF 偶发 SSL EOF，重试常能过
 
 
+def _read_compiled_svg(result) -> str:
+    """Space /generate 第二项是编译好的图（dvisvgm 出的 SVG 文件路径）。读出来当矢量图用。"""
+    if not isinstance(result, (list, tuple)) or len(result) < 2:
+        return ""
+    comp = result[1]
+    path = comp if isinstance(comp, str) else (comp.get("path") or comp.get("name") if isinstance(comp, dict) else None)
+    if not path or not os.path.exists(path):
+        return ""
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+        head = raw[:256].lstrip()
+        if head.startswith(b"<svg") or head.startswith(b"<?xml"):
+            return raw.decode("utf-8", "ignore")
+    except OSError:
+        pass
+    return ""
+
+
 class HfSpacePipelineA(Pipeline):
     name = "A"
 
@@ -58,7 +77,8 @@ class HfSpacePipelineA(Pipeline):
                         api_name=settings.detikzify_space_api,
                     )
                     tikz = result[0] if isinstance(result, (list, tuple)) and result else (result if isinstance(result, str) else str(result))
-                    return PipelineResult(pipeline="A", used_engine=f"hf-space:{settings.detikzify_space_model}", tikz=tikz)
+                    svg = _read_compiled_svg(result)  # Space 已编译，直接拿矢量图
+                    return PipelineResult(pipeline="A", used_engine=f"hf-space:{settings.detikzify_space_model}", tikz=tikz, svg=svg)
                 except Exception as exc:  # noqa: BLE001
                     last_err = exc
                     self._client = None  # 链路坏了，重建

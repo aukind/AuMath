@@ -103,6 +103,7 @@ export interface AutoFigure {
   crop_base64: string;
   inline_svg: string;
   svg: string;
+  tikz: string;
   labels: { text: string; x_percent: number; y_percent: number; confidence?: number | null }[];
   confidence: number;
   box: number[];
@@ -132,12 +133,12 @@ export async function autoFigures(imageBase64: string): Promise<AutoFiguresActio
 export async function autoFiguresFromDoc(
   url: string,
   fileType: 'pdf' | 'image',
-  vectorize = true,
+  options: { vectorize?: boolean; mode?: 'image' | 'cloud-vector' } = {},
 ): Promise<AutoFiguresActionResult> {
   try {
     const data = await postJson<{ success: boolean; figures: AutoFigure[]; error?: string }>(
       '/auto-figures-doc',
-      { url, file_type: fileType, vectorize },
+      { url, file_type: fileType, vectorize: options.vectorize ?? true, mode: options.mode ?? 'image' },
     );
     if (!data.success) return { success: false, error: data.error ?? '自动识别失败' };
     return { success: true, figures: data.figures, pageWidth: 0, pageHeight: 0 };

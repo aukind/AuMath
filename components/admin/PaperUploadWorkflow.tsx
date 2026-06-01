@@ -8,7 +8,9 @@ import {
   type ExtractedPaperBundle, type ExtractedQuestion, type DuplicatePaperInfo, type DuplicateStrategy,
 } from '@/app/actions/process-paper';
 import { autoFiguresFromDoc } from '@/app/actions/cv-tikz';
-import { uploadFigureImage } from '@/app/actions/figure-image';
+import { uploadFigureImage, uploadFigureSvg } from '@/app/actions/figure-image';
+
+type FigureMode = 'image' | 'cloud-vector';
 import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
 import {
@@ -861,19 +863,28 @@ const DRAFT_KEY = 'aumath_paper_draft_v2';
 async function enrichPapersWithFigures(
   papers: ExtractedPaperBundle[],
   files: UploadedFile[],
+  mode: FigureMode,
 ): Promise<{ papers: ExtractedPaperBundle[]; merged: number; unassigned: number }> {
   const byQuestion = new Map<number, string[]>(); // question_number -> [图片URL]
   let unassigned = 0;
   for (const f of files) {
-    const res = await autoFiguresFromDoc(f.signedUrl, f.fileType, false); // vectorize=false → 只要裁剪原图
+    const res = await autoFiguresFromDoc(f.signedUrl, f.fileType, { mode, vectorize: false });
     if (!res.success) continue;
     for (const fig of res.figures) {
       if (fig.question_number == null) { unassigned++; continue; }
-      if (!fig.crop_base64) continue;
-      const up = await uploadFigureImage(fig.crop_base64);
-      if (!up.success) continue;
+      // cloud-vector：优先用云端 8B 编译的 SVG；失败/位图模式则用裁剪原图兜底（绝不丢图）
+      let url: string | null = null;
+      if (mode === 'cloud-vector' && fig.svg) {
+        const up = await uploadFigureSvg(fig.svg);
+        if (up.success) url = up.url;
+      }
+      if (!url && fig.crop_base64) {
+        const up = await uploadFigureImage(fig.crop_base64);
+        if (up.success) url = up.url;
+      }
+      if (!url) continue;
       const arr = byQuestion.get(fig.question_number) ?? [];
-      arr.push(up.url);
+      arr.push(url);
       byQuestion.set(fig.question_number, arr);
     }
   }
@@ -900,6 +911,7 @@ export default function PaperUploadWorkflow() {
   const [answerFile, setAnswerFile] = useState<UploadedFile | null>(null);
   const [extractedPapers, setExtractedPapers] = useState<ExtractedPaperBundle[]>([]);
   const [enriching, setEnriching] = useState(false);
+  const [figureMode, setFigureMode] = useState<FigureMode>('image');
 
   // 恢复草稿
   useEffect(() => {
@@ -946,7 +958,7 @@ export default function PaperUploadWorkflow() {
     if (figureFiles.length > 0) {
       setEnriching(true);
       try {
-        const { papers: enriched, merged, unassigned } = await enrichPapersWithFigures(papers, figureFiles);
+          const { papers: enriched, merged, unassigned } = await enrichPapersWithFigures(papers, figureFiles, figureMode);
         finalPapers = enriched;
         if (merged > 0) {
           toast.success(`自动识别并插入 ${merged} 张几何图${unassigned ? `（另有 ${unassigned} 张未能归属，可在编辑器手动插入）` : ''}`);
@@ -961,7 +973,7 @@ export default function PaperUploadWorkflow() {
     setExtractedPapers(finalPapers);
     setStep(3);
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(finalPapers)); } catch {}
-  }, [mode, questionFile, uploadResults]);
+  }, [mode, questionFile, uploadResults, figureMode]);
 
   // Step 2 的提取任务
   const job: ExtractJob | null =
@@ -1001,6 +1013,32 @@ export default function PaperUploadWorkflow() {
                 {label}
               </button>
             ))}
+          </div>
+
+          {/* 几何图处理方式 */}
+          <div className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-4 py-3 text-sm">
+            <span className="text-muted-foreground">几何图：</span>
+            {([
+              ['image', '无损位图（快·稳）'],
+              ['cloud-vector', '云端矢量 8B（最优·慢）'],
+            ] as [FigureMode, string][]).map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => setFigureMode(m)}
+                className={[
+                  'rounded-md px-3 py-1 font-medium transition-colors',
+                  figureMode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                ].join(' ')}
+              >
+                {label}
+              </button>
+            ))}
+            <span className="text-xs text-muted-foreground">
+              {figureMode === 'cloud-vector'
+                ? '调云端 DeTikZify-8B 生成干净矢量；逐图较慢、走代理，失败自动回退位图'
+                : '裁出原图嵌入，和原卷一致'}
+            </span>
           </div>
 
           {mode === 'questions-only' ? (

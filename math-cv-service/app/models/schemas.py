@@ -82,8 +82,9 @@ class DetectResponse(BaseModel):
 class AutoFigure(BaseModel):
     question_number: int | None = None  # 归属题号；认不准为 null（前端列为「未归属」）
     crop_base64: str = ""               # 原图裁剪 PNG（无损位图嵌入用，和原卷一模一样）
-    inline_svg: str = ""                # 矢量化产物（vectorize=True 时）
-    svg: str = ""
+    inline_svg: str = ""                # 矢量化产物（Pipeline B 烘焙 / 云端编译 SVG）
+    svg: str = ""                       # 云端 8B 编译好的矢量 SVG（cloud-vector 模式）
+    tikz: str = ""                      # 云端 8B 的 TikZ 源码
     labels: list[GeoLabel] = Field(default_factory=list)
     confidence: float                   # 检测置信度
     box: list[int]                      # [x1,y1,x2,y2]
@@ -93,7 +94,8 @@ class AutoFigure(BaseModel):
 class AutoDocRequest(BaseModel):
     url: str                            # 签名 URL；后端直接 fetch，绕开 Server Action 体积限制
     file_type: Literal["pdf", "image"] = "image"
-    vectorize: bool = True              # False=只返回裁剪原图（无损位图路线，更稳）
+    vectorize: bool = True              # Pipeline B 矢量化（mode=image 时无关）
+    mode: Literal["image", "cloud-vector"] = "image"  # image=裁原图；cloud-vector=云端8B→编译SVG
 
 
 class AutoFiguresResponse(BaseModel):
