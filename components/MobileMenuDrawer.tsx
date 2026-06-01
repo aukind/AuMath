@@ -3,6 +3,7 @@
 import { Drawer } from 'vaul';
 import { Menu, PenLine } from 'lucide-react';
 import SidebarTabs from '@/components/SidebarTabs';
+import SiteViewsBadge from '@/components/SiteViewsBadge';
 import type { TopicWithChildren, PaperRow } from '@/types/database';
 
 interface MobileMenuDrawerProps {
@@ -12,6 +13,7 @@ interface MobileMenuDrawerProps {
   selectedPaperId?: string;
   isAdmin: boolean;
   hasFilter: boolean;
+  siteViews: number; // 接收访问量数据
 }
 
 export default function MobileMenuDrawer({
@@ -21,6 +23,7 @@ export default function MobileMenuDrawer({
   selectedPaperId,
   isAdmin,
   hasFilter,
+  siteViews,
 }: MobileMenuDrawerProps) {
   return (
     <Drawer.Root direction="left">
@@ -66,20 +69,8 @@ export default function MobileMenuDrawer({
                 isAdmin={isAdmin}
               />
 
-              <a
-                href="/"
-                className="flex items-center gap-1.5 text-xs font-medium text-zinc-600 hover:text-indigo-600 dark:text-zinc-300 transition-colors"
-              >
-                💬 社区论坛
-              </a>
-              <a
-                href="/?view=mybank"
-                className="flex items-center gap-1.5 text-xs font-medium text-zinc-600 hover:text-indigo-600 dark:text-zinc-300 transition-colors"
-              >
-                📚 我的题库
-              </a>
-
-              <div className="mt-auto pt-4 border-t border-zinc-100 dark:border-zinc-800 space-y-2">
+              {/* 底部操作与统计区 */}
+              <div className="mt-auto pt-4 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
                 {hasFilter && (
                   <a
                     href="/"
@@ -96,6 +87,11 @@ export default function MobileMenuDrawer({
                     <PenLine size={11} /> 录入新题目
                   </a>
                 )}
+                
+                {/* 网站访问量徽章 */}
+                <div className="pt-1">
+                  <SiteViewsBadge initialCount={siteViews} />
+                </div>
               </div>
             </div>
           </div>

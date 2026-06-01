@@ -35,7 +35,6 @@ export default async function HomePage({
   const mybankTab: WorkspaceType =
     workspace === 'errors' || workspace === 'history' ? workspace : 'favorites';
 
-  // 主区视图：点了侧边栏题目 → 浏览；否则 view=mybank → 我的题库；默认 → 社区论坛
   const mainView: MainView = (topicId || paperId)
     ? 'browse'
     : view === 'mybank'
@@ -67,8 +66,6 @@ export default async function HomePage({
     mainView === 'browse' && topicId && !paperId
       ? getQuestions(topicId, validSort, 20, 'public')
       : Promise.resolve<QuestionWithTopics[]>([]),
-    // 非 browse（论坛或题库）时两份数据都预取，喂给 DashboardWorkspace 的两个常驻 slot，
-    // 客户端切换 Tab 不再发起服务端导航 → 0ms 秒切。
     mainView !== 'browse'
       ? getWorkspaceQuestions(mybankTab)
       : Promise.resolve<QuestionWithTopics[]>([]),
@@ -86,7 +83,7 @@ export default async function HomePage({
   const isAdmin = isAdminUser(user);
   const isLoggedIn = !!user;
   const userId = user?.id;
-  // 顶栏用户名/头像取自 profiles（getMyAccount），而非 auth metadata——后者改名后不会更新。
+  
   const username =
     account?.username ||
     (user?.user_metadata?.username as string | undefined)?.trim() ||
@@ -94,7 +91,6 @@ export default async function HomePage({
     '我';
   const avatarUrl = account?.avatarUrl ?? undefined;
 
-  // 非 browse 时统一携带 workspaceQuestions，供「我的题库」常驻 slot 使用（论坛 slot 用 forumPosts）。
   const questions = mainView === 'browse'
     ? (paperId ? paperResult.questions : topicQuestions)
     : workspaceQuestions;
@@ -122,6 +118,7 @@ export default async function HomePage({
             selectedPaperId={paperId}
             isAdmin={isAdmin}
             hasFilter={mainView === 'browse'}
+            siteViews={siteViews} /* 将访问次数传递给移动端菜单 */
           />
 
           <Link href="/" className="flex items-center gap-2">
