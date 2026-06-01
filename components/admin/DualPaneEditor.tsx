@@ -202,6 +202,7 @@ export default function DualPaneEditor({
   initialPaperYear,
   initialPaperType,
   initialPaperGrade,
+  figures = [],
   onReset,
 }: {
   initialQuestions:  ExtractedQuestion[];
@@ -209,6 +210,7 @@ export default function DualPaneEditor({
   initialPaperYear?:  number;
   initialPaperType?:  'real' | 'mock';
   initialPaperGrade?: 'high_school_1' | 'high_school_2' | 'high_school_3' | null;
+  figures?: { url: string; question_number: number | null; page: number | null }[];
   onReset: () => void;
 }) {
   const { resolvedTheme } = useTheme();
@@ -323,6 +325,32 @@ export default function DualPaneEditor({
   return (
     <div className="flex flex-col gap-4 h-full">
       <BatchMetaForm meta={meta} onChange={setMeta} />
+
+      {/* 几何图托盘：本卷检测到的所有图。把光标点进目标题的 content，再点缩略图即插入。 */}
+      {figures.length > 0 && (
+        <div className="rounded-lg border bg-muted/20 p-3">
+          <div className="mb-2 text-xs text-muted-foreground">
+            检测到 {figures.length} 张几何图 —— 把光标点进目标题，再点缩略图插入（自动归对的已在题里，归错的删掉那行再点这里重插）
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {figures.map((fig, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => insertLatexAtCursor(`\n\n![几何图](${fig.url})\n\n`)}
+                title="点击插入到光标处"
+                className="group relative shrink-0 rounded border bg-white p-1 hover:border-primary"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={fig.url} alt={`图${i + 1}`} className="h-20 w-auto max-w-[140px] object-contain" />
+                <span className="absolute left-1 top-1 rounded bg-black/60 px-1 text-[10px] text-white">
+                  {fig.question_number != null ? `第${fig.question_number}题?` : '未归属'}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4" style={{ height: 'calc(100vh - 420px)', minHeight: '480px' }}>
 

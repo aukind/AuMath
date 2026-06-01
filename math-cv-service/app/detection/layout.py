@@ -58,4 +58,27 @@ def detect_figure_boxes(img_bgr: np.ndarray) -> list[tuple[int, int, int, int, f
         boxes.append((bx1, by1, bx2, by2, float(cf)))
 
     boxes.sort(key=lambda b: b[4], reverse=True)
-    return boxes
+    return _nms(boxes)
+
+
+def _iou(a, b) -> float:
+    ax1, ay1, ax2, ay2 = a[:4]
+    bx1, by1, bx2, by2 = b[:4]
+    ix1, iy1 = max(ax1, bx1), max(ay1, by1)
+    ix2, iy2 = min(ax2, bx2), min(ay2, by2)
+    iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
+    inter = iw * ih
+    if inter == 0:
+        return 0.0
+    area_a = (ax2 - ax1) * (ay2 - ay1)
+    area_b = (bx2 - bx1) * (by2 - by1)
+    return inter / float(area_a + area_b - inter)
+
+
+def _nms(boxes: list, iou_thresh: float = 0.4) -> list:
+    """去重叠检测框（DocLayout 偶把一张图检成多个框 → 一题塞两图）。已按 conf 降序。"""
+    kept: list = []
+    for b in boxes:
+        if all(_iou(b, k) < iou_thresh for k in kept):
+            kept.append(b)
+    return kept

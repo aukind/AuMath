@@ -33,22 +33,73 @@ def detect_question_anchors(img_bgr: np.ndarray) -> list[tuple[int, float, float
     return anchors
 
 
-def assign_question(
-    fig_box: tuple[int, int, int, int, float],
+def _cluster_columns(xs: list[float], page_w: int, min_gap_frac: float = 0.10) -> list[float]:
+    """把一堆 x 坐标 1D 聚类成若干列，返回各列代表 x（升序）。相邻间隔 > page_w*gap 即分列。"""
+    if not xs:
+        return []
+    xs_sorted = sorted(xs)
+    gap = page_w * min_gap_frac
+    cols: list[list[float]] = [[xs_sorted[0]]]
+    for x in xs_sorted[1:]:
+        if x - cols[-1][-1] > gap:
+            cols.append([x])
+        else:
+            cols[-1].append(x)
+    return [sum(c) / len(c) for c in cols]
+
+
+def _col_index(x: float, col_centers: list[float]) -> int:
+    if not col_centers:
+        return 0
+    return min(range(len(col_centers)), key=lambda i: abs(col_centers[i] - x))
+
+
+def assign_figures(
+    fig_boxes: list[tuple[int, int, int, int, float]],
     anchors: list[tuple[int, float, float]],
     page_w: int,
-) -> int | None:
-    """图归属：同栏内、位于图上方、y 最大（最贴近）的题号。认不准返回 None。"""
-    if not anchors:
-        return None
-    fx1, fy1, fx2, fy2, _ = fig_box
-    fcx = (fx1 + fx2) / 2
-    fmid_y = (fy1 + fy2) / 2
-    half = page_w / 2
-    fig_left = fcx < half
+) -> list[int | None]:
+    """整页一次性归属：列感知阅读顺序 + 最近题号（人读卷的方式）。
 
-    same_col = [a for a in anchors if (a[1] < half) == fig_left]
-    above = [a for a in (same_col or anchors) if a[2] <= fmid_y]
-    if not above:
-        return None
-    return max(above, key=lambda a: a[2])[0]  # 最贴近图上方的题号
+    返回与 fig_boxes 等长的题号列表。把题号锚点与图按 (列序号, y_top) 线性化成阅读顺序
+    （整列读完再读下一列），图归到它前面最近出现的题号 → 正确处理跨栏延续
+    （如折线图在中栏顶，但阅读顺序上紧跟左栏第9之后 → 归第9）。认不准为 None。
+    """
+    n = len(fig_boxes)
+    if n == 0:
+        return []
+    if not anchors:
+        return [None] * n
+
+    col_centers = _cluster_columns([a[1] for a in anchors], page_w)
+
+    # 诊断日志：真卷上看 OCR 到底认出了哪些题号 + 列聚类（排查归属错配）
+    print(
+        f"[assoc] page_w={page_w} figs={len(fig_boxes)} anchors={len(anchors)} cols={[round(c) for c in col_centers]}",
+        flush=True,
+    )
+    print(
+        f"[assoc] anchors(y升序)={sorted([(q, round(x), round(y)) for q, x, y in anchors], key=lambda t: t[2])}",
+        flush=True,
+    )
+
+    # 合并锚点与图为阅读顺序流；同一 (列,y) 时锚点(kind=0)排在图(kind=1)前
+    items: list[tuple[int, float, int, str, int]] = []
+    for qnum, ax, ay in anchors:
+        items.append((_col_index(ax, col_centers), ay, 0, "a", qnum))
+    for i, (x1, y1, _x2, _y2, _c) in enumerate(fig_boxes):
+        items.append((_col_index(x1, col_centers), float(y1), 1, "f", i))  # 图按左边定列
+    items.sort(key=lambda it: (it[0], it[1], it[2]))
+
+    result: list[int | None] = [None] * n
+    current: int | None = None
+    for _ci, _y, _kind, tag, val in items:
+        if tag == "a":
+            current = val
+        else:
+            result[val] = current
+    print(
+        f"[assoc] assign={result} fig(x1,y1)={[(round(b[0]), round(b[1])) for b in fig_boxes]}",
+        flush=True,
+    )
+    return result

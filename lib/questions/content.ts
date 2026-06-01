@@ -22,3 +22,18 @@ export function stripInlineOptionTail(content: string, hasOptions: boolean): str
   if (!content || !hasOptions) return content;
   return content.replace(PAREN_OPTION_TAIL_RE, '').replace(LINE_OPTION_TAIL_RE, '').trimEnd();
 }
+
+/** 高考选择题题干末尾的作答括号：全角括号 + 两个全角空格（U+3000），贴合试卷排版。 */
+export const ANSWER_BLANK = '（　　）';
+
+/** 题干末尾是否已带空作答括号（半/全角均认），用于避免重复追加。 */
+export function hasAnswerBlank(stem: string): boolean {
+  return /[(（]\s*[)）]\s*$/.test(stem.trimEnd());
+}
+
+/** 给选择题题干补上末尾作答括号；已有空括号或空串则原样返回。纯字符串函数，前后端通用。 */
+export function withAnswerBlank(stem: string): string {
+  const s = stem.trimEnd();
+  if (!s || hasAnswerBlank(s)) return stem;
+  return `${s}${ANSWER_BLANK}`;
+}

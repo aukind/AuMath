@@ -19,12 +19,16 @@ _reader = None
 
 
 def get_reader():
-    """easyocr.Reader 单例（CPU）。首次调用会下载/加载模型。"""
+    """easyocr.Reader 单例（CPU）。首次调用会下载/加载模型。
+
+    用 ['ch_sim','en']：题号锚点检测需在中文卷面上认出 "20."/"21."（纯英文模型读不准
+    导致归属错位）。几何字母检测仍靠 allowlist 限定 latin/digit，中文不会污染。
+    """
     global _reader
     if _reader is None:
         import easyocr
 
-        _reader = easyocr.Reader(["en"], gpu=False)
+        _reader = easyocr.Reader(["ch_sim", "en"], gpu=False)
     return _reader
 
 

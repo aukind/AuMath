@@ -125,7 +125,7 @@ export async function getQuestionById(id: string): Promise<QuestionForEdit | nul
     .from('questions')
     .select('id, content, answer, analysis, question_type, difficulty, year, source, status, metadata, interactive_sandbox, question_topic_relations(topic_id)')
     .eq('id', id)
-    .single();
+    .maybeSingle();
 
   if (error || !data) return null;
 
@@ -158,7 +158,7 @@ export async function updateQuestion(
 
   // 合并 metadata：保留既有的 tags/exam_number 等键，只覆写 options。
   const { data: existing } = await supabase
-    .from('questions').select('metadata').eq('id', id).single();
+    .from('questions').select('metadata').eq('id', id).maybeSingle();
   const metadata: Record<string, unknown> = { ...((existing as any)?.metadata ?? {}) };
   const opts = cleanOptions(input.options);
   if (opts.length) metadata.options = opts;
@@ -409,7 +409,7 @@ export async function deleteQuestion(
   }
 
   // 权限校验：管理员可删任意题；普通用户只能删自己的私有题
-  const { data: q } = await admin.from('questions').select('created_by, is_public').eq('id', id).single();
+  const { data: q } = await admin.from('questions').select('created_by, is_public').eq('id', id).maybeSingle();
   if (!isAdminUser(user)) {
     if (!q || q.is_public || q.created_by !== user.id) {
       return { success: false, error: '无权限删除该题目' };
@@ -443,7 +443,7 @@ export async function updateQuestionCategory(
   }
 
   // 权限校验：管理员可改任意题；普通用户只能改自己的私有题
-  const { data: existing } = await admin.from('questions').select('created_by, is_public, metadata').eq('id', questionId).single();
+  const { data: existing } = await admin.from('questions').select('created_by, is_public, metadata').eq('id', questionId).maybeSingle();
   if (!isAdminUser(user)) {
     if (!existing || existing.is_public || existing.created_by !== user.id) {
       return { success: false, error: '无权限修改该题目' };
@@ -487,7 +487,7 @@ export async function getQuestionsByPaperId(paperId: string): Promise<PaperQuest
       .from('papers')
       .select('id, title, year, type, grade, created_at, updated_at')
       .eq('id', paperId)
-      .single(),
+      .maybeSingle(),
     // paper_questions → questions，严格按 question_number ASC 排序
     supabase
       .from('paper_questions')
@@ -509,7 +509,7 @@ export async function getQuestionsByPaperId(paperId: string): Promise<PaperQuest
 
   if (rowsErr) {
     console.error('[getQuestionsByPaperId] questions lookup', rowsErr.message);
-    return { paper: paper as PaperRow, questions: [] };
+    return { paper: paper as PaperRow | null, questions: [] };
   }
 
   const questions: QuestionWithNumber[] = (rows ?? [])
@@ -519,5 +519,5 @@ export async function getQuestionsByPaperId(paperId: string): Promise<PaperQuest
       question_number: row.question_number as number,
     }));
 
-  return { paper: paper as PaperRow, questions };
+  return { paper: paper as PaperRow | null, questions };
 }

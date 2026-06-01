@@ -6,7 +6,7 @@ import MathRenderer from '@/components/MathRenderer';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import DifficultyRating from '@/components/DifficultyRating';
 import { toggleFavorite, markError, removeError, recordView } from '@/app/actions/user-workspace';
-import { stripInlineOptionTail } from '@/lib/questions/content';
+import { stripInlineOptionTail, withAnswerBlank } from '@/lib/questions/content';
 import type { QuestionWithTopics } from '@/types/database';
 
 interface QuestionCardProps {
@@ -79,7 +79,10 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
   const options = normalizeOptions(question.metadata?.options);
 
   // 兜底：老数据 / 模型漏网时，展示侧再用同一逻辑剥掉题干里重复的选项尾巴（治本在 process-paper 入库时）。
-  const displayContent = stripInlineOptionTail(question.content, options.length >= 2);
+  // 选项进数组、走下方网格渲染的选择题，给题干补上高考式作答括号「（　　）」。
+  //（选项仍内联在题干里的题，由 MathRenderer 的 splitChoiceOptions 补括号，故此处仅处理数组选项题。）
+  const strippedContent = stripInlineOptionTail(question.content, options.length >= 2);
+  const displayContent = options.length >= 2 ? withAnswerBlank(strippedContent) : strippedContent;
 
   async function handleConfirmDelete() {
     if (!onDelete) return;

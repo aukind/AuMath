@@ -11,6 +11,8 @@
  * 该预处理是字符串级别的，**只在数学分隔符内部** 应用变换，绝不修改普通文本。
  */
 
+import { withAnswerBlank } from '@/lib/questions/content';
+
 // 需要把上下限放到符号正上/正下的算子（高考排版标准）。
 // 刻意不含积分族 \int \iint \iiint \oint —— 定积分 ∫_a^b 的上下限按惯例写在符号「右侧」，
 // 强行 \limits 会把它排成像求和那样上下堆叠，反而不符合高考排版。
@@ -73,6 +75,32 @@ function splitSubQuestions(input: string): string {
     /([^\n])\s*\(([1-9])\)(?=[一-鿿])/g,
     '$1\n\n**($2)** ',
   );
+}
+
+/**
+ * 选择题内联选项拆行：把挤在题干里的 "(A)… (B)… (C)… (D)…" 拆成各自独立成行，贴合试卷排版。
+ *
+ * 触发条件：文本里存在「(A)…(B)」这种递增的括号选项标记对（与 content.ts 的
+ * PAREN_OPTION_TAIL_RE 同源）。从首个 (A) 起，把其后每个 (X) 标记前断行，选项块与题干也断开。
+ * 选项已被单独抽进 metadata.options 的题目，其题干内联尾巴在 QuestionCard 渲染前已被剥除，
+ * 故这里自然不触发，不会与下方选项网格重复。用「成对递增标记」约束避免误伤正文/解析里偶发的
+ * 单个 "(A)" 引用或公式括号；半角 (A) 与全角（A）均支持。
+ */
+function splitChoiceOptions(input: string): string {
+  const anchor = /[(（]\s*[Aa]\s*[)）][\s\S]*?[(（]\s*[Bb]\s*[)）]/.exec(input);
+  if (!anchor) return input;
+  const start = anchor.index;
+  const head = input.slice(0, start).replace(/\s+$/, '');
+  const tail = input
+    .slice(start)
+    .replace(
+      /\s*[(（]\s*([A-Ha-h])\s*[)）]\s*/g,
+      (_m, letter: string) => `\n\n(${letter.toUpperCase()}) `,
+    )
+    .replace(/^\n+/, '');
+  // 高考排版：题干末尾补作答括号「（　　）」（已有则不重复）
+  const stem = head ? withAnswerBlank(head) : '';
+  return stem ? `${stem}\n\n${tail}` : tail;
 }
 
 /**
@@ -241,6 +269,7 @@ export function preprocessMathContent(input: string): string {
   //     后续步骤当成数学语义误处理。
   let text = convertTabular(input);
   text = splitSubQuestions(text);
+  text = splitChoiceOptions(text);
 
   // -1. 把 <!--FIG:描述--> HTML 注释转为可见的 blockquote 提示
   text = text.replace(/<!--FIG:([^>]+?)-->/g, (_m, desc) =>

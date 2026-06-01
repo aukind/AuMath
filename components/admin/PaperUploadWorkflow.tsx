@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
   processPaper, extractAnswers, createUploadUrl, createReadUrl,
@@ -11,6 +11,20 @@ import { autoFiguresFromDoc } from '@/app/actions/cv-tikz';
 import { uploadFigureImage, uploadFigureSvg } from '@/app/actions/figure-image';
 
 type FigureMode = 'image' | 'cloud-vector';
+
+interface DetectedFigure {
+  url: string;
+  question_number: number | null;
+  page: number | null;
+}
+
+// 几何图识别的实时进度（在第二步与 Gemini 提取并行展示）
+type FigureState =
+  | { status: 'idle' }
+  | { status: 'skipped' }                          // 没有可检图的文件
+  | { status: 'running'; detected: number }        // 检测中，已上传 N 张
+  | { status: 'done'; detected: number; merged: number; unassigned: number }
+  | { status: 'error'; message: string };
 import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
 import {
@@ -80,17 +94,17 @@ const STEPS: { label: string; desc: string }[] = [
 
 function StepIndicator({ current }: { current: WorkflowStep }) {
   return (
-    <ol className="mb-8 flex items-center gap-0">
+    <ol className="mb-6 flex items-center gap-0 opacity-60">
       {STEPS.map((step, idx) => {
         const num = (idx + 1) as WorkflowStep;
         const done = num < current;
         const active = num === current;
         return (
           <li key={num} className="flex flex-1 items-center">
-            <div className="flex flex-col items-center gap-1">
+            <div className="flex items-center gap-1.5">
               <div
                 className={[
-                  'flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold transition-colors',
+                  'flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-semibold transition-colors',
                   done
                     ? 'bg-primary text-primary-foreground'
                     : active
@@ -98,17 +112,14 @@ function StepIndicator({ current }: { current: WorkflowStep }) {
                       : 'border-2 border-border text-muted-foreground',
                 ].join(' ')}
               >
-                {done ? <CheckCircle2 className="h-4 w-4" /> : num}
+                {done ? <CheckCircle2 className="h-3 w-3" /> : num}
               </div>
-              <div className="text-center">
-                <p className={`text-xs font-medium ${active ? 'text-foreground' : 'text-muted-foreground'}`}>
-                  {step.label}
-                </p>
-                <p className="text-[10px] text-muted-foreground hidden sm:block">{step.desc}</p>
-              </div>
+              <span className={`text-[11px] ${active ? 'text-foreground' : 'text-muted-foreground'}`}>
+                {step.label}
+              </span>
             </div>
             {idx < STEPS.length - 1 && (
-              <div className={`mx-2 mb-5 h-px flex-1 ${done ? 'bg-primary' : 'bg-border'}`} />
+              <div className={`mx-2 h-px flex-1 ${done ? 'bg-primary/60' : 'bg-border'}`} />
             )}
           </li>
         );
@@ -153,7 +164,7 @@ function UploadSuccess({
           onClick={onNext}
           className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
         >
-          下一步：AI 提取（{files.length} 个文件）
+          一键提取并校对（{files.length} 个文件）
           <ChevronRight className="h-4 w-4" />
         </button>
       </div>
@@ -310,7 +321,7 @@ function PaperDropzone({
 type ExtractionState =
   | { status: 'idle' }
   | { status: 'extracting'; done: number; total: number }
-  | { status: 'done'; papers: ExtractedPaperBundle[]; usedModel?: string }
+  | { status: 'done'; papers: ExtractedPaperBundle[]; fileIdxOfPaper: number[]; usedModel?: string }
   | { status: 'error'; message: string };
 
 /** 对单个上传文件跑 AI 提取，返回其中所有试卷。结果过大时从 Storage 拉回。 */
@@ -341,19 +352,53 @@ function modelBadge(m?: string) {
   );
 }
 
+/** 自挂载起的秒数计时器；active=false 时停表。用于让长耗时步骤有「实时在动」的感觉。 */
+function useElapsed(active: boolean): number {
+  const [sec, setSec] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setSec((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return sec;
+}
+
+type RowState = 'pending' | 'running' | 'done' | 'error';
+
+/** 进度清单里的一行：状态图标 + 标题 + 右侧实时计数/说明。 */
+function TaskRow({ state, title, detail }: { state: RowState; title: string; detail?: string }) {
+  const icon =
+    state === 'done'    ? <CheckCircle2 className="h-4 w-4 text-green-500" /> :
+    state === 'running' ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> :
+    state === 'error'   ? <AlertCircle className="h-4 w-4 text-destructive" /> :
+    <div className="h-4 w-4 rounded-full border-2 border-border" />;
+  return (
+    <div className="flex items-center gap-3 py-2">
+      <span className="shrink-0">{icon}</span>
+      <span className={`text-sm ${state === 'pending' ? 'text-muted-foreground' : 'text-foreground'}`}>{title}</span>
+      {detail && <span className="ml-auto text-xs text-muted-foreground font-mono tabular-nums">{detail}</span>}
+    </div>
+  );
+}
+
 function AiExtractPanel({
   job,
+  figureState,
   onDone,
   onBack,
 }: {
   job: ExtractJob;
-  onDone: (papers: ExtractedPaperBundle[]) => void;
+  figureState: FigureState;
+  onDone: (papers: ExtractedPaperBundle[], fileIdxOfPaper: number[]) => void;
   onBack: () => void;
 }) {
   const [state, setState] = useState<ExtractionState>({ status: 'idle' });
+  const figRunning = figureState.status === 'running';
+  const figElapsed = useElapsed(figRunning);
 
   const runExtraction = useCallback(async () => {
     const papers: ExtractedPaperBundle[] = [];
+    const fileIdxOfPaper: number[] = []; // 与 papers 等长：每卷来自哪个上传文件（供图按卷归属）
     const errors: string[] = [];
     let usedModel: string | undefined;
     let total = 1;
@@ -395,7 +440,7 @@ function AiExtractPanel({
             : (aRes.value.success ? '' : aRes.value.error);
           toast.error(`答案未提取成功，已仅录题目（可在校对页补答案）：${amsg}`.slice(0, 160));
         }
-        papers.push(...qPapers);
+        for (const p of qPapers) { papers.push(p); fileIdxOfPaper.push(0); }
       }
     } else {
       // 仅题目：所有文件并行提取（每个 processPaper 都是独立的 Server Action 实例，各享 maxDuration）
@@ -417,7 +462,7 @@ function AiExtractPanel({
       for (let i = 0; i < settled.length; i++) {
         const r = settled[i];
         if (r.status === 'fulfilled') {
-          papers.push(...r.value.papers);
+          for (const p of r.value.papers) { papers.push(p); fileIdxOfPaper.push(i); }
           usedModel ??= r.value.usedModel;
         } else {
           const msg = r.reason instanceof Error ? r.reason.message : String(r.reason);
@@ -458,29 +503,66 @@ function AiExtractPanel({
     const badge = (job.mode === 'questions-only' && total > 1)
       ? `${usedModel ?? 'flash'}·${total}文件`
       : usedModel;
-    setState({ status: 'done', papers, usedModel: badge });
+    setState({ status: 'done', papers, fileIdxOfPaper, usedModel: badge });
   }, [job]);
 
   useEffect(() => { runExtraction(); }, [runExtraction]);
 
+  // 提取成功后自动进入校对界面（少一次点击）；ref 防 StrictMode 重复触发导致图重复插入
+  const advancedRef = useRef(false);
+  useEffect(() => {
+    if (state.status === 'done' && !advancedRef.current) {
+      advancedRef.current = true;
+      onDone(state.papers, state.fileIdxOfPaper);
+    }
+  }, [state, onDone]);
+
+  // ── 三行实时进度清单 ──
+  const geminiRow: RowState =
+    state.status === 'extracting' ? 'running' :
+    state.status === 'done'       ? 'done' :
+    state.status === 'error'      ? 'error' : 'pending';
+  const geminiDetail =
+    state.status === 'extracting' ? (state.total > 1 ? `${state.done}/${state.total} 文件` : '识别中') :
+    state.status === 'done'       ? `${state.papers.length} 套 · ${state.papers.reduce((s, p) => s + p.questions.length, 0)} 题` :
+    undefined;
+
+  const figRow: RowState =
+    figureState.status === 'running' ? 'running' :
+    figureState.status === 'done'    ? 'done' :
+    figureState.status === 'error'   ? 'error' : 'pending';
+  const figDetail =
+    figureState.status === 'running' ? `已识别 ${figureState.detected} 张 · ${figElapsed}s` :
+    figureState.status === 'done'    ? `${figureState.detected} 张` :
+    figureState.status === 'error'   ? '失败，转人工托盘' :
+    figureState.status === 'skipped' ? '—' : undefined;
+
+  // 归属行：图都到位后才结算（merged/unassigned 在 done 时有值）
+  const matchRow: RowState =
+    figureState.status === 'done'   ? 'done' :
+    figureState.status === 'running' ? 'pending' :
+    figureState.status === 'error'  ? 'error' : 'pending';
+  const matchDetail =
+    figureState.status === 'done'
+      ? `归属 ${figureState.merged} 张${figureState.unassigned ? ` · 待放 ${figureState.unassigned}` : ''}`
+      : undefined;
+  const showFigRows = figureState.status !== 'skipped' && figureState.status !== 'idle';
+
   return (
-    <div className="space-y-6">
-      {state.status === 'extracting' && (
-        <div className="flex flex-col items-center gap-4 py-20">
-          <div className="relative">
-            <Loader2 className="h-12 w-12 text-primary animate-spin" />
-            <Sparkles className="absolute -top-1 -right-1 h-4 w-4 text-yellow-500" />
+    <div className="space-y-5">
+      {/* 实时进度清单：取代旧的大转圈+营销文案 */}
+      {state.status !== 'error' && (
+        <div className="space-y-1.5">
+          <div className="rounded-lg border bg-muted/20 px-4 py-1 divide-y divide-border/50">
+            <TaskRow state={geminiRow} title="提取文字与 LaTeX 公式" detail={geminiDetail} />
+            {showFigRows && <TaskRow state={figRow} title="检测几何图（本地 CV）" detail={figDetail} />}
+            {showFigRows && <TaskRow state={matchRow} title="图文自动归属题号" detail={matchDetail} />}
           </div>
-          <div className="text-center">
-            <p className="font-medium text-foreground">
-              {job.mode === 'paired'
-                ? '正在用 Gemini 2.5 Flash 提取题目，并按题号从答案卷照抄答案与解析（不自行解题）…'
-                : state.total > 1
-                  ? `正在并行提取 ${state.total} 个文件（已完成 ${state.done}/${state.total}）…`
-                  : '正在用 Gemini 2.5 Flash 极速转写文字与 LaTeX（仅转写题面，不自行解题）…'}
+          {figRunning && (
+            <p className="px-1 text-xs text-muted-foreground/70">
+              整卷一次性扫描，通常约 1 分钟出全部图；计时在动即正常运行。
             </p>
-            <p className="mt-1 text-xs text-muted-foreground">AI 正在识别 LaTeX 公式并通过 AST 管线清洗…</p>
-          </div>
+          )}
         </div>
       )}
 
@@ -509,14 +591,10 @@ function AiExtractPanel({
               </span>
               {modelBadge(state.usedModel)}
             </div>
-            <button
-              onClick={() => onDone(state.papers)}
-              className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-            >
-              <ListChecks className="h-4 w-4" />
-              {state.papers.length === 1 ? '进入校对编辑器' : '进入多卷发布面板'}
-              <ChevronRight className="h-4 w-4" />
-            </button>
+            <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {figRunning ? `几何图识别中（${figElapsed}s）…` : '正在进入校对…'}
+            </span>
           </div>
 
           {/* 试卷列表预览 */}
@@ -847,7 +925,7 @@ function PairedUpload({
           disabled={!ready}
           className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          下一步：AI 提取 <ChevronRight className="h-4 w-4" />
+          一键提取并校对 <ChevronRight className="h-4 w-4" />
         </button>
       </div>
     </div>
@@ -858,20 +936,42 @@ function PairedUpload({
 
 const DRAFT_KEY = 'aumath_paper_draft_v2';
 
-/** 抽取后自动识别几何图，裁出原图传 Storage，按题号以 ![](url) 合进对应题。
- *  无损位图路线：和原卷一模一样、零畸变。CV 服务失败则原样返回，不阻断录题。 */
-async function enrichPapersWithFigures(
-  papers: ExtractedPaperBundle[],
+// 题干里引用图的特征词（Gemini 文字可靠，远胜扫描件 OCR 题号）
+// 仅匹配「明确指代配图」的措辞。刻意不含「图象」——它是函数题描述曲线的高频词
+// （如「两函数图象有相同对称轴」），并不意味着该题配了几何图，否则会把图误塞给三角/函数题。
+const FIG_REF_RE = /如图|图所示|如下图|示意图|下图所示|图\s*\d*\s*所示/;
+
+/** 把一组 x 中心按间隔聚成列，返回每个的列序号（0=最左）。用于图的阅读顺序排序。 */
+function columnRanks(centers: number[]): number[] {
+  if (centers.length === 0) return [];
+  const order = centers.map((c, i) => ({ c, i })).sort((a, b) => a.c - b.c);
+  const span = order[order.length - 1].c - order[0].c;
+  const gap = Math.max(span * 0.15, 1); // 间隔超过总跨度 15% 视为换列
+  const rank = new Array<number>(centers.length).fill(0);
+  let r = 0;
+  rank[order[0].i] = 0;
+  for (let k = 1; k < order.length; k++) {
+    if (order[k].c - order[k - 1].c > gap) r += 1;
+    rank[order[k].i] = r;
+  }
+  return rank;
+}
+
+type RawFigure = { url: string; box: number[]; page: number; fileIdx: number };
+
+/** 慢活：本地 CV 检测几何图 + 裁剪上传 Storage。**与 Gemini 文字提取并行跑**（不依赖其结果）。 */
+async function detectAndUploadFigures(
   files: UploadedFile[],
   mode: FigureMode,
-): Promise<{ papers: ExtractedPaperBundle[]; merged: number; unassigned: number }> {
-  const byQuestion = new Map<number, string[]>(); // question_number -> [图片URL]
-  let unassigned = 0;
-  for (const f of files) {
+  onProgress?: (detected: number) => void,
+): Promise<{ raws: RawFigure[]; error?: string }> {
+  const raws: RawFigure[] = [];
+  let firstError: string | undefined;
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+    const f = files[fileIdx];
     const res = await autoFiguresFromDoc(f.signedUrl, f.fileType, { mode, vectorize: false });
-    if (!res.success) continue;
+    if (!res.success) { firstError ??= res.error; continue; }
     for (const fig of res.figures) {
-      if (fig.question_number == null) { unassigned++; continue; }
       // cloud-vector：优先用云端 8B 编译的 SVG；失败/位图模式则用裁剪原图兜底（绝不丢图）
       let url: string | null = null;
       if (mode === 'cloud-vector' && fig.svg) {
@@ -883,24 +983,77 @@ async function enrichPapersWithFigures(
         if (up.success) url = up.url;
       }
       if (!url) continue;
-      const arr = byQuestion.get(fig.question_number) ?? [];
-      arr.push(url);
-      byQuestion.set(fig.question_number, arr);
+      raws.push({ url, box: fig.box ?? [0, 0, 0, 0], page: fig.page ?? 0, fileIdx });
+      onProgress?.(raws.length);  // 每上传一张就上报，第二步清单实时跳数
     }
   }
-  if (byQuestion.size === 0) return { papers, merged: 0, unassigned };
+  return { raws, error: firstError };
+}
 
+/**
+ * 快活：图 ↔ 含『如图』的题 按序对位，合进 content。瞬时，需 Gemini 结果。
+ *
+ * 多卷批量导入也支持：图按来源文件分组（fileIdx），只与「同一文件提取出的那些卷」里的含图题对位，
+ * 并以 (卷下标, 题号) 精确归属——避免把图插进别卷的同号题（多卷都有第9题时的串卷 bug）。
+ * 单卷只是「单文件单卷」的退化情形，逻辑一致。
+ */
+function matchFiguresToQuestions(
+  papers: ExtractedPaperBundle[],
+  fileIdxOfPaper: number[],
+  raws: RawFigure[],
+): { papers: ExtractedPaperBundle[]; merged: number; unassigned: number; figures: DetectedFigure[] } {
+  // 归属表：卷在 papers 中的下标 → (题号 → 图 URL[])。以卷下标为键，多卷间题号不互串。
+  const assign = new Map<number, Map<number, string[]>>();
+  const figures: DetectedFigure[] = [];
+  let unassigned = 0;
+
+  const fileIdxs = Array.from(new Set(raws.map(r => r.fileIdx))).sort((a, b) => a - b);
+  for (const fi of fileIdxs) {
+    // a) 该文件的图，按文档阅读顺序排序：页 → 列 → 纵坐标
+    const figs = raws.filter(r => r.fileIdx === fi);
+    const ranks = columnRanks(figs.map(r => (r.box[0] + r.box[2]) / 2));
+    const orderedFigs = figs
+      .map((r, i) => ({ ...r, col: ranks[i] }))
+      .sort((a, b) => a.page - b.page || a.col - b.col || a.box[1] - b.box[1]);
+
+    // b) 该文件提取出的卷里「含如图措辞」的题，按卷序 → 题号序，收集 (卷下标, 题号)
+    const refQs: { paperIdx: number; qnum: number }[] = [];
+    papers.forEach((p, paperIdx) => {
+      if (fileIdxOfPaper[paperIdx] !== fi) return;
+      p.questions
+        .filter(q => FIG_REF_RE.test(q.content || ''))
+        .sort((a, b) => (a.question_number ?? 0) - (b.question_number ?? 0))
+        .forEach(q => { if (q.question_number != null) refQs.push({ paperIdx, qnum: q.question_number }); });
+    });
+
+    // c) 阅读顺序的图 ↔ 含图题 按序对位；对不上的进托盘（unassigned）
+    orderedFigs.forEach((r, i) => {
+      const target = i < refQs.length ? refQs[i] : null;
+      figures.push({ url: r.url, question_number: target?.qnum ?? null, page: r.page });
+      if (!target) { unassigned += 1; return; }
+      const qmap = assign.get(target.paperIdx) ?? new Map<number, string[]>();
+      qmap.set(target.qnum, [...(qmap.get(target.qnum) ?? []), r.url]);
+      assign.set(target.paperIdx, qmap);
+    });
+  }
+
+  // 合并进 content：按卷下标精确定位，杜绝多卷同号题串卷
   let merged = 0;
-  const out = papers.map(p => ({
-    ...p,
-    questions: p.questions.map((q: ExtractedQuestion) => {
-      const urls = q.question_number != null ? byQuestion.get(q.question_number) : undefined;
-      if (!urls?.length) return q;
-      merged += urls.length;
-      return { ...q, content: `${q.content}${urls.map(u => `\n\n![几何图](${u})`).join('')}` };
-    }),
-  }));
-  return { papers: out, merged, unassigned };
+  const out = assign.size === 0 ? papers : papers.map((p, paperIdx) => {
+    const qmap = assign.get(paperIdx);
+    if (!qmap) return p;
+    return {
+      ...p,
+      questions: p.questions.map((q: ExtractedQuestion) => {
+        const urls = q.question_number != null ? qmap.get(q.question_number) : undefined;
+        if (!urls?.length) return q;
+        merged += urls.length;
+        return { ...q, content: `${q.content}${urls.map(u => `\n\n![几何图](${u})`).join('')}` };
+      }),
+    };
+  });
+
+  return { papers: out, merged, unassigned, figures };
 }
 
 export default function PaperUploadWorkflow() {
@@ -910,8 +1063,11 @@ export default function PaperUploadWorkflow() {
   const [questionFile, setQuestionFile] = useState<UploadedFile | null>(null);
   const [answerFile, setAnswerFile] = useState<UploadedFile | null>(null);
   const [extractedPapers, setExtractedPapers] = useState<ExtractedPaperBundle[]>([]);
-  const [enriching, setEnriching] = useState(false);
   const [figureMode, setFigureMode] = useState<FigureMode>('image');
+  const [detectedFigures, setDetectedFigures] = useState<DetectedFigure[]>([]);
+  const [figureState, setFigureState] = useState<FigureState>({ status: 'idle' });
+  // CV 检图与 Gemini 提取并行：进第二步即启动检图，存其 promise，提取完成时再对位
+  const figuresPromiseRef = useRef<Promise<{ raws: RawFigure[]; error?: string }> | null>(null);
 
   // 恢复草稿
   useEffect(() => {
@@ -939,6 +1095,9 @@ export default function PaperUploadWorkflow() {
   const handleReset = useCallback(() => {
     clearUploads();
     setExtractedPapers([]);
+    setDetectedFigures([]);
+    setFigureState({ status: 'idle' });
+    figuresPromiseRef.current = null;
     setStep(1);
     try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
   }, [clearUploads]);
@@ -949,31 +1108,52 @@ export default function PaperUploadWorkflow() {
     clearUploads();
   }, [clearUploads]);
 
-  const handleNextStep = useCallback(() => setStep(2), []);
-
-  const handleExtractionDone = useCallback(async (papers: ExtractedPaperBundle[]) => {
-    // 抽取完文字后，自动识别几何图并按题号合进对应题（图文分离的「图」这步补回）
+  // 进第二步：在 Gemini 提取的同时，并行启动本地 CV 检图（不依赖 Gemini 结果）→ 合成一步、省一次等待
+  const handleNextStep = useCallback(() => {
     const figureFiles = mode === 'paired' ? (questionFile ? [questionFile] : []) : uploadResults;
-    let finalPapers = papers;
     if (figureFiles.length > 0) {
-      setEnriching(true);
+      setFigureState({ status: 'running', detected: 0 });
+      // 实时上报：每上传一张图就刷新清单计数（与 Gemini 提取并行）
+      figuresPromiseRef.current = detectAndUploadFigures(figureFiles, figureMode, (d) =>
+        setFigureState({ status: 'running', detected: d }));
+    } else {
+      figuresPromiseRef.current = null;
+      setFigureState({ status: 'skipped' });
+    }
+    setStep(2);
+  }, [mode, questionFile, uploadResults, figureMode]);
+
+  const handleExtractionDone = useCallback(async (papers: ExtractedPaperBundle[], fileIdxOfPaper: number[]) => {
+    let finalPapers = papers;
+    if (figuresPromiseRef.current) {
       try {
-          const { papers: enriched, merged, unassigned } = await enrichPapersWithFigures(papers, figureFiles, figureMode);
+        // 检图多半已在 Gemini 提取期间跑完，这里只等收尾 + 瞬时对位
+        const { raws, error } = await figuresPromiseRef.current;
+        const { papers: enriched, merged, unassigned, figures } = matchFiguresToQuestions(papers, fileIdxOfPaper, raws);
         finalPapers = enriched;
-        if (merged > 0) {
-          toast.success(`自动识别并插入 ${merged} 张几何图${unassigned ? `（另有 ${unassigned} 张未能归属，可在编辑器手动插入）` : ''}`);
-        } else if (unassigned > 0) {
-          toast.info(`检测到 ${unassigned} 张图但未能自动归属，请用「插入几何图」手动放置`);
+        setDetectedFigures(figures);
+        if (raws.length === 0 && error) {
+          setFigureState({ status: 'error', message: error });
+          toast.error(`几何图识别失败：${error}`);
+        } else {
+          setFigureState({ status: 'done', detected: raws.length, merged, unassigned });
+          if (merged > 0) {
+            toast.success(`自动插入 ${merged} 张几何图${unassigned ? `（另有 ${unassigned} 张待人工放置）` : ''}`);
+          } else if (unassigned > 0) {
+            toast.info(`检测到 ${unassigned} 张图但未自动归属，请用编辑器托盘手动放置`);
+          } else {
+            toast.info('未检测到几何图');
+          }
         }
       } catch {
+        setFigureState({ status: 'error', message: 'CV 服务不可用' });
         /* CV 服务不可用则跳过，不阻断录题 */
       }
-      setEnriching(false);
     }
     setExtractedPapers(finalPapers);
     setStep(3);
     try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(finalPapers)); } catch {}
-  }, [mode, questionFile, uploadResults, figureMode]);
+  }, []);
 
   // Step 2 的提取任务
   const job: ExtractJob | null =
@@ -984,12 +1164,6 @@ export default function PaperUploadWorkflow() {
   return (
     <div>
       <StepIndicator current={step} />
-
-      {enriching && (
-        <div className="mb-4 flex items-center gap-2 rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" /> 正在自动识别几何图并插入对应题…（本地 CV）
-        </div>
-      )}
 
       {/* Step 1: Upload */}
       {step === 1 && (
@@ -1066,6 +1240,7 @@ export default function PaperUploadWorkflow() {
           <h2 className="mb-4 text-sm font-semibold text-foreground">第二步：AI 视觉提取</h2>
           <AiExtractPanel
             job={job}
+            figureState={figureState}
             onDone={handleExtractionDone}
             onBack={handleReset}
           />
@@ -1085,6 +1260,7 @@ export default function PaperUploadWorkflow() {
               initialPaperYear={extractedPapers[0].paper_year}
               initialPaperType={extractedPapers[0].paper_type}
               initialPaperGrade={extractedPapers[0].paper_grade}
+              figures={detectedFigures}
               onReset={handleReset}
             />
           ) : (

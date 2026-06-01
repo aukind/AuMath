@@ -30,20 +30,21 @@ def _process_page(img_bgr, page_no: int | None = None, vectorize: bool = True, m
     mode='cloud-vector'：每张图送云端 8B 拿编译好的 SVG（最优质量，慢/可能限流）；
     云端失败的图保留 crop_base64 兜底，绝不丢图。
     """
-    from app.detection.associate import assign_question, detect_question_anchors
+    from app.detection.associate import assign_figures, detect_question_anchors
     from app.detection.layout import detect_figure_boxes
 
     h, w = img_bgr.shape[:2]
     boxes = detect_figure_boxes(img_bgr)[:_MAX_FIGURES]
     anchors = detect_question_anchors(img_bgr) if boxes else []
+    qnums = assign_figures(boxes, anchors, w)  # 一次性按阅读顺序归属
 
     cloud = None
     out: list[AutoFigure] = []
-    for box in boxes:
+    for i, box in enumerate(boxes):
         x1, y1, x2, y2, conf = box
         crop_png = encode_png_bgr(img_bgr[y1:y2, x1:x2])
         fig = AutoFigure(
-            question_number=assign_question(box, anchors, w),
+            question_number=qnums[i],
             crop_base64=encode_base64(crop_png),  # 始终带原图裁剪做兜底
             confidence=round(conf, 3),
             box=[x1, y1, x2, y2],
@@ -119,7 +120,9 @@ async def auto_figures_doc(req: AutoDocRequest) -> AutoFiguresResponse:
     if not req.url.lower().startswith(("http://", "https://")):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "仅支持 http(s) URL")
     try:
-        with urllib.request.urlopen(req.url, timeout=90) as resp:  # noqa: S310 (仅 http(s) 签名URL)
+        # Supabase 直连可达，绕过 ClashX 代理（走代理反而易 SSL 抖断）；HF 那边仍用代理
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req.url, timeout=90) as resp:  # noqa: S310 (仅 http(s) 签名URL)
             data = resp.read()
     except Exception as exc:  # noqa: BLE001
         return AutoFiguresResponse(success=False, error=f"拉取文件失败: {exc}")

@@ -126,6 +126,9 @@ export default function PageLayout({
   // ── DnD（仅题目浏览模式下用于管理员拖拽归类）─────────────────
   const [activeQuestion, setActiveQuestion] = useState<QuestionWithTopics | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }));
+  // 显式给 DndContext 一个 SSR 稳定 id：否则 @dnd-kit 内部用自增计数器派生
+  // aria-describedby（DndDescribedBy-N），服务端/客户端取值不一致 → 水合报错。
+  const dndId = useId();
 
   function handleDragStart(event: DragStartEvent) {
     setActiveQuestion(questions.find(q => q.id === event.active.id) ?? null);
@@ -142,7 +145,7 @@ export default function PageLayout({
   }
 
   return (
-    <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext id={dndId} sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="mx-auto max-w-7xl w-full flex flex-1 overflow-hidden">
 
         {/* ── Desktop sidebar ── */}

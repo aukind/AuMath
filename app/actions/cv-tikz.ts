@@ -17,7 +17,7 @@ const CV_SERVICE_URL = process.env.CV_SERVICE_URL ?? 'http://127.0.0.1:8000';
 const CV_SERVICE_TOKEN = process.env.CV_SERVICE_TOKEN ?? '';
 const TIMEOUT_MS = 120_000;
 
-function postJson<T>(path: string, body: unknown): Promise<T> {
+function postJson<T>(path: string, body: unknown, timeoutMs: number = TIMEOUT_MS): Promise<T> {
   const url = new URL(`${CV_SERVICE_URL}${path}`);
   const payload = JSON.stringify(body);
   const lib = url.protocol === 'https:' ? https : http;
@@ -29,7 +29,7 @@ function postJson<T>(path: string, body: unknown): Promise<T> {
   if (CV_SERVICE_TOKEN) headers['X-CV-Token'] = CV_SERVICE_TOKEN;
 
   return new Promise<T>((resolve, reject) => {
-    const req = lib.request(url, { method: 'POST', headers, timeout: TIMEOUT_MS }, (res) => {
+    const req = lib.request(url, { method: 'POST', headers, timeout: timeoutMs }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => {
@@ -107,6 +107,7 @@ export interface AutoFigure {
   labels: { text: string; x_percent: number; y_percent: number; confidence?: number | null }[];
   confidence: number;
   box: number[];
+  page?: number | null;
 }
 
 export type AutoFiguresActionResult =
@@ -136,9 +137,11 @@ export async function autoFiguresFromDoc(
   options: { vectorize?: boolean; mode?: 'image' | 'cloud-vector' } = {},
 ): Promise<AutoFiguresActionResult> {
   try {
+    // 整卷云端逐图很慢（ZeroGPU 排队+代理+重试），给到 10 分钟
     const data = await postJson<{ success: boolean; figures: AutoFigure[]; error?: string }>(
       '/auto-figures-doc',
       { url, file_type: fileType, vectorize: options.vectorize ?? true, mode: options.mode ?? 'image' },
+      600_000,
     );
     if (!data.success) return { success: false, error: data.error ?? '自动识别失败' };
     return { success: true, figures: data.figures, pageWidth: 0, pageHeight: 0 };
