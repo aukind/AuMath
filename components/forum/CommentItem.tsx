@@ -31,15 +31,35 @@ function formatTime(iso: string): string {
   return new Date(iso).toLocaleDateString('zh-CN');
 }
 
-function Avatar({ name, url }: { name: string; url?: string }) {
-  if (url) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={url} alt={name} className="h-8 w-8 rounded-full object-cover" />;
-  }
+function Avatar({ name, url, role }: { name: string; url?: string; role?: string }) {
+  const isAdmin = role === 'admin';
   return (
-    <span className="flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-200">
-      {initials(name)}
-    </span>
+    <div className="relative inline-flex items-center justify-center shrink-0">
+      <div className="relative z-10 flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-200 overflow-hidden ring-1 ring-zinc-200 dark:ring-zinc-800">
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={url} alt={name} className="h-full w-full object-cover" />
+        ) : (
+          initials(name)
+        )}
+      </div>
+      {isAdmin && (
+        <div className="pointer-events-none absolute -inset-[7px] z-20">
+          <svg viewBox="0 0 100 100" className="h-full w-full animate-[spin_10s_linear_infinite]" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="au-admin-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#818cf8" />
+                <stop offset="50%" stopColor="#c084fc" />
+                <stop offset="100%" stopColor="#f472b6" />
+              </linearGradient>
+            </defs>
+            <circle cx="50" cy="50" r="47" stroke="url(#au-admin-grad)" strokeWidth="1.5" strokeDasharray="40 10 15 10" strokeLinecap="round" className="opacity-80" />
+            <circle cx="10" cy="50" r="2" fill="#818cf8" />
+            <circle cx="90" cy="50" r="2" fill="#f472b6" />
+          </svg>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -139,7 +159,7 @@ function CommentItem({ comment, currentUser, onUpvote, onAdminAction }: CommentI
     <article className="border-b border-zinc-100 px-4 py-3 dark:border-zinc-800">
       <header className="flex items-center gap-2">
         <Link href={`/u/${comment.author.id}`} className="shrink-0 transition-opacity hover:opacity-80">
-          <Avatar name={comment.author.username} url={comment.author.avatarUrl} />
+          <Avatar name={comment.author.username} url={comment.author.avatarUrl} role={comment.author.role} />
         </Link>
         <div className="flex flex-col">
           <div className="flex items-center gap-1.5">

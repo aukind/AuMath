@@ -53,6 +53,29 @@ function postJson<T>(path: string, body: unknown, timeoutMs: number = TIMEOUT_MS
   });
 }
 
+function getJson<T>(path: string, timeoutMs: number = 8_000): Promise<T> {
+  const url = new URL(`${CV_SERVICE_URL}${path}`);
+  const lib = url.protocol === 'https:' ? https : http;
+  const headers: Record<string, string> = {};
+  if (CV_SERVICE_TOKEN) headers['X-CV-Token'] = CV_SERVICE_TOKEN;
+
+  return new Promise<T>((resolve, reject) => {
+    const req = lib.request(url, { method: 'GET', headers, timeout: timeoutMs }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c: Buffer) => chunks.push(c));
+      res.on('end', () => {
+        const status = res.statusCode ?? 0;
+        if (status < 200 || status >= 300) { reject(new Error(`CV 服务 ${status}`)); return; }
+        try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')) as T); }
+        catch { reject(new Error('CV 服务返回非 JSON')); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('CV 服务超时')));
+    req.end();
+  });
+}
+
 function describeError(err: unknown): string {
   const code = (err as { code?: string })?.code;
   if (code === 'ECONNREFUSED' || code === 'ENOTFOUND') {
@@ -130,23 +153,33 @@ export async function autoFigures(imageBase64: string): Promise<AutoFiguresActio
   }
 }
 
-/** 整卷自动：后端直接 fetch 签名 URL（PDF 逐页栅格化），返回各图 + 归属题号。 */
+/** 整卷自动：后端直接 fetch 签名 URL（PDF 逐页栅格化），返回各图 + 归属题号。
+ *  传 jobId 后可用 getAutoFiguresProgress(jobId) 轮询按页进度。 */
 export async function autoFiguresFromDoc(
   url: string,
   fileType: 'pdf' | 'image',
-  options: { vectorize?: boolean; mode?: 'image' | 'cloud-vector' } = {},
+  options: { vectorize?: boolean; mode?: 'image' | 'cloud-vector'; jobId?: string } = {},
 ): Promise<AutoFiguresActionResult> {
   try {
     // 整卷云端逐图很慢（ZeroGPU 排队+代理+重试），给到 10 分钟
     const data = await postJson<{ success: boolean; figures: AutoFigure[]; error?: string }>(
       '/auto-figures-doc',
-      { url, file_type: fileType, vectorize: options.vectorize ?? true, mode: options.mode ?? 'image' },
+      { url, file_type: fileType, vectorize: options.vectorize ?? true, mode: options.mode ?? 'image', job_id: options.jobId ?? null },
       600_000,
     );
     if (!data.success) return { success: false, error: data.error ?? '自动识别失败' };
     return { success: true, figures: data.figures, pageWidth: 0, pageHeight: 0 };
   } catch (err) {
     return { success: false, error: describeError(err) };
+  }
+}
+
+/** 整卷检测进度（按页）：{ done, total }。total 为 0 表示未知（保留上次百分比）。失败静默返回 0。 */
+export async function getAutoFiguresProgress(jobId: string): Promise<{ done: number; total: number }> {
+  try {
+    return await getJson<{ done: number; total: number }>(`/auto-figures-progress/${encodeURIComponent(jobId)}`);
+  } catch {
+    return { done: 0, total: 0 };
   }
 }
 

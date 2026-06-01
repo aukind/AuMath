@@ -31,6 +31,10 @@ const defaultKatexOptions: KatexOptions = {
     '\\dd': '\\,\\mathrm{d}',
     '\\eu': '\\mathrm{e}',
     '\\iu': '\\mathrm{i}',
+    // 平行符号：高考/中文教材标准是「斜杠式」∥（两道右斜线），KaTeX 原生 \parallel 是竖直的，
+    // 不符合国标排版。重定义为斜杠式（两条紧挨的斜线），并保留关系符间距。
+    '\\parallel':  '\\mathrel{/\\mkern-5mu/}',
+    '\\nparallel': '\\mathrel{{\\not\\mathrel{/\\mkern-5mu/}}}',
   },
 };
 

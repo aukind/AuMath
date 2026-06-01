@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import time
 import urllib.request
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -24,19 +25,32 @@ _processor = PipelineBProcessor(return_clean_image=False)
 _MAX_FIGURES = 12  # 单页几何图上限，防异常页拖垮
 
 
-def _process_page(img_bgr, page_no: int | None = None, vectorize: bool = True, mode: str = "image") -> list[AutoFigure]:
-    """单页：检测 → 归属 → 裁剪原图（+按 mode 矢量化）。检测依赖缺失时抛 ImportError。
+def _process_page(
+    img_bgr,
+    page_no: int | None = None,
+    vectorize: bool = True,
+    mode: str = "image",
+    assign_anchors: bool = True,
+) -> list[AutoFigure]:
+    """单页：检测 →（可选）归属 → 裁剪原图（+按 mode 矢量化）。检测依赖缺失时抛 ImportError。
 
     mode='cloud-vector'：每张图送云端 8B 拿编译好的 SVG（最优质量，慢/可能限流）；
     云端失败的图保留 crop_base64 兜底，绝不丢图。
+
+    assign_anchors=False：跳过 easyocr 题号锚点（整卷管线用 —— 前端按 Gemini 文字自行归属，
+    不读后端 question_number；OCR 在 CPU 上每页数秒，砍掉可大幅提速）。qnums 全置 None。
     """
-    from app.detection.associate import assign_figures, detect_question_anchors
     from app.detection.layout import detect_figure_boxes
 
     h, w = img_bgr.shape[:2]
     boxes = detect_figure_boxes(img_bgr)[:_MAX_FIGURES]
-    anchors = detect_question_anchors(img_bgr) if boxes else []
-    qnums = assign_figures(boxes, anchors, w)  # 一次性按阅读顺序归属
+    if assign_anchors and boxes:
+        from app.detection.associate import assign_figures, detect_question_anchors
+
+        anchors = detect_question_anchors(img_bgr)
+        qnums = assign_figures(boxes, anchors, w)  # 一次性按阅读顺序归属
+    else:
+        qnums = [None] * len(boxes)
 
     cloud = None
     out: list[AutoFigure] = []
@@ -115,6 +129,29 @@ def _rasterize_pdf_bytes(data: bytes) -> list:
     return pages
 
 
+# 整卷处理进度：job_id → {"done": 已处理页, "total": 总页, "ts": 更新时刻}。
+# 前端轮询 /auto-figures-progress/{job_id} 拿百分比。内存级、单机够用；防泄漏按 TTL 清理。
+_PROGRESS: dict[str, dict] = {}
+_PROGRESS_TTL = 600.0  # 10 分钟
+
+
+def _set_progress(job_id: str | None, done: int, total: int) -> None:
+    if not job_id:
+        return
+    now = time.time()
+    # 顺手清理过期条目，避免长期累积
+    for k in [k for k, v in _PROGRESS.items() if now - v.get("ts", now) > _PROGRESS_TTL]:
+        _PROGRESS.pop(k, None)
+    _PROGRESS[job_id] = {"done": done, "total": total, "ts": now}
+
+
+@router.get("/auto-figures-progress/{job_id}")
+async def auto_figures_progress(job_id: str) -> dict:
+    """整卷检测进度：{done, total}。未知 job_id 返回 {0,0}（前端据此保留上次百分比）。"""
+    p = _PROGRESS.get(job_id)
+    return {"done": p["done"], "total": p["total"]} if p else {"done": 0, "total": 0}
+
+
 @router.post("/auto-figures-doc", response_model=AutoFiguresResponse)
 async def auto_figures_doc(req: AutoDocRequest) -> AutoFiguresResponse:
     if not req.url.lower().startswith(("http://", "https://")):
@@ -128,25 +165,39 @@ async def auto_figures_doc(req: AutoDocRequest) -> AutoFiguresResponse:
         return AutoFiguresResponse(success=False, error=f"拉取文件失败: {exc}")
 
     pages = None
+    t0 = time.perf_counter()
     try:
         if req.file_type == "pdf":
             pages = _rasterize_pdf_bytes(data)
         else:
             pages = [decode_bgr(data)]
+        t_raster = time.perf_counter() - t0
+        _set_progress(req.job_id, 0, len(pages))
 
         figures: list[AutoFigure] = []
+        t_detect = 0.0
         try:
             for page_no, page in enumerate(pages, 1):
-                figures.extend(_process_page(page, page_no, vectorize=req.vectorize, mode=req.mode))
+                tp = time.perf_counter()
+                # 整卷管线：跳过 easyocr 题号锚点（前端按 Gemini 文字自行归属）→ 大幅提速
+                figures.extend(_process_page(page, page_no, vectorize=req.vectorize, mode=req.mode, assign_anchors=False))
+                t_detect += time.perf_counter() - tp
+                _set_progress(req.job_id, page_no, len(pages))
         except ImportError as exc:
             raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "未安装版面检测依赖：pip install -r requirements-detection.txt") from exc
 
+        print(
+            f"[perf] pages={len(pages)} rasterize={t_raster:.1f}s detect={t_detect:.1f}s "
+            f"figs={len(figures)} total={time.perf_counter() - t0:.1f}s",
+            flush=True,
+        )
         return AutoFiguresResponse(success=True, figures=figures)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
         return AutoFiguresResponse(success=False, error=str(exc))
     finally:
+        _PROGRESS.pop(req.job_id, None) if req.job_id else None
         if pages is not None:
             del pages
         del data

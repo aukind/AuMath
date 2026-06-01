@@ -7,7 +7,7 @@ import {
   publishPaperBundles, detectDuplicatePapers,
   type ExtractedPaperBundle, type ExtractedQuestion, type DuplicatePaperInfo, type DuplicateStrategy,
 } from '@/app/actions/process-paper';
-import { autoFiguresFromDoc } from '@/app/actions/cv-tikz';
+import { autoFiguresFromDoc, getAutoFiguresProgress } from '@/app/actions/cv-tikz';
 import { uploadFigureImage, uploadFigureSvg } from '@/app/actions/figure-image';
 
 type FigureMode = 'image' | 'cloud-vector';
@@ -22,7 +22,7 @@ interface DetectedFigure {
 type FigureState =
   | { status: 'idle' }
   | { status: 'skipped' }                          // 没有可检图的文件
-  | { status: 'running'; detected: number }        // 检测中，已上传 N 张
+  | { status: 'running'; detected: number; percent?: number }  // 检测中：已上传 N 张 + 整卷扫描百分比
   | { status: 'done'; detected: number; merged: number; unassigned: number }
   | { status: 'error'; message: string };
 import dynamic from 'next/dynamic';
@@ -531,8 +531,10 @@ function AiExtractPanel({
     figureState.status === 'running' ? 'running' :
     figureState.status === 'done'    ? 'done' :
     figureState.status === 'error'   ? 'error' : 'pending';
+  const figPercent = figureState.status === 'running' ? (figureState.percent ?? 0)
+    : figureState.status === 'done' ? 100 : 0;
   const figDetail =
-    figureState.status === 'running' ? `已识别 ${figureState.detected} 张 · ${figElapsed}s` :
+    figureState.status === 'running' ? `${figPercent}% · 已识别 ${figureState.detected} 张 · ${figElapsed}s` :
     figureState.status === 'done'    ? `${figureState.detected} 张` :
     figureState.status === 'error'   ? '失败，转人工托盘' :
     figureState.status === 'skipped' ? '—' : undefined;
@@ -559,9 +561,17 @@ function AiExtractPanel({
             {showFigRows && <TaskRow state={matchRow} title="图文自动归属题号" detail={matchDetail} />}
           </div>
           {figRunning && (
-            <p className="px-1 text-xs text-muted-foreground/70">
-              整卷一次性扫描，通常约 1 分钟出全部图；计时在动即正常运行。
-            </p>
+            <div className="px-1 pt-0.5">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-500 ease-out"
+                  style={{ width: `${figPercent}%` }}
+                />
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground/70">
+                整卷扫描中 {figPercent}%（约 1 分钟出全部图）；进度条在动即正常运行。
+              </p>
+            </div>
           )}
         </div>
       )}
@@ -961,17 +971,36 @@ function columnRanks(centers: number[]): number[] {
 
 type RawFigure = { url: string; box: number[]; page: number; fileIdx: number };
 
-/** 慢活：本地 CV 检测几何图 + 裁剪上传 Storage。**与 Gemini 文字提取并行跑**（不依赖其结果）。 */
+/** 慢活：本地 CV 检测几何图 + 裁剪上传 Storage。**与 Gemini 文字提取并行跑**（不依赖其结果）。
+ *  onProgress：percent=整卷扫描百分比（轮询后端按页进度）；detected=已上传图数。 */
 async function detectAndUploadFigures(
   files: UploadedFile[],
   mode: FigureMode,
-  onProgress?: (detected: number) => void,
+  onProgress?: (p: { detected?: number; percent?: number }) => void,
 ): Promise<{ raws: RawFigure[]; error?: string }> {
   const raws: RawFigure[] = [];
   let firstError: string | undefined;
-  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
+  const N = files.length;
+  for (let fileIdx = 0; fileIdx < N; fileIdx++) {
     const f = files[fileIdx];
-    const res = await autoFiguresFromDoc(f.signedUrl, f.fileType, { mode, vectorize: false });
+    const jobId = `fig-${Date.now()}-${fileIdx}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // 轮询后端按页进度 → 折算成整体百分比（已完成文件 + 当前文件分数）/ 总文件数
+    let lastFrac = 0;
+    const poll = setInterval(async () => {
+      const { done, total } = await getAutoFiguresProgress(jobId);
+      if (total > 0) lastFrac = done / total;
+      onProgress?.({ percent: Math.min(99, Math.round(((fileIdx + lastFrac) / N) * 100)) });
+    }, 1200);
+
+    let res;
+    try {
+      res = await autoFiguresFromDoc(f.signedUrl, f.fileType, { mode, vectorize: false, jobId });
+    } finally {
+      clearInterval(poll);
+    }
+    // 该文件检测完成 → 百分比推进到该文件末尾
+    onProgress?.({ percent: Math.min(99, Math.round(((fileIdx + 1) / N) * 100)) });
     if (!res.success) { firstError ??= res.error; continue; }
     for (const fig of res.figures) {
       // cloud-vector：优先用云端 8B 编译的 SVG；失败/位图模式则用裁剪原图兜底（绝不丢图）
@@ -986,9 +1015,10 @@ async function detectAndUploadFigures(
       }
       if (!url) continue;
       raws.push({ url, box: fig.box ?? [0, 0, 0, 0], page: fig.page ?? 0, fileIdx });
-      onProgress?.(raws.length);  // 每上传一张就上报，第二步清单实时跳数
+      onProgress?.({ detected: raws.length });  // 每上传一张就上报，第二步清单实时跳数
     }
   }
+  onProgress?.({ percent: 100 });
   return { raws, error: firstError };
 }
 
@@ -1114,10 +1144,12 @@ export default function PaperUploadWorkflow() {
   const handleNextStep = useCallback(() => {
     const figureFiles = mode === 'paired' ? (questionFile ? [questionFile] : []) : uploadResults;
     if (figureFiles.length > 0) {
-      setFigureState({ status: 'running', detected: 0 });
-      // 实时上报：每上传一张图就刷新清单计数（与 Gemini 提取并行）
-      figuresPromiseRef.current = detectAndUploadFigures(figureFiles, figureMode, (d) =>
-        setFigureState({ status: 'running', detected: d }));
+      setFigureState({ status: 'running', detected: 0, percent: 0 });
+      // 实时上报：百分比（整卷扫描）与已上传图数分别更新到 running 状态（与 Gemini 提取并行）
+      figuresPromiseRef.current = detectAndUploadFigures(figureFiles, figureMode, (p) =>
+        setFigureState(prev => prev.status === 'running'
+          ? { status: 'running', detected: p.detected ?? prev.detected, percent: p.percent ?? prev.percent }
+          : { status: 'running', detected: p.detected ?? 0, percent: p.percent ?? 0 }));
     } else {
       figuresPromiseRef.current = null;
       setFigureState({ status: 'skipped' });

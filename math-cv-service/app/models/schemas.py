@@ -96,6 +96,7 @@ class AutoDocRequest(BaseModel):
     file_type: Literal["pdf", "image"] = "image"
     vectorize: bool = True              # Pipeline B 矢量化（mode=image 时无关）
     mode: Literal["image", "cloud-vector"] = "image"  # image=裁原图；cloud-vector=云端8B→编译SVG
+    job_id: str | None = None           # 进度跟踪：前端轮询 /auto-figures-progress/{job_id} 拿百分比
 
 
 class AutoFiguresResponse(BaseModel):

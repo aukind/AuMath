@@ -79,6 +79,7 @@ export async function getSessionForumUser(): Promise<SessionUser> {
 }
 
 // ── 帖子列表（论坛首页）置顶优先，再按时间倒序 ───────────────
+// ── 帖子列表（论坛首页）置顶优先，再按时间倒序 ───────────────
 export async function getForumPosts(): Promise<ForumPost[]> {
   const supabase = await createClient();
   const sb = supabase as any;
@@ -86,14 +87,17 @@ export async function getForumPosts(): Promise<ForumPost[]> {
     .from('forum_posts')
     .select(
       `id, title, content, view_count, tags, created_at, is_pinned,
-       author:profiles!forum_posts_author_id_fkey(id, username, avatar_url, role)`,
+       author:profiles!forum_posts_author_id_fkey(id, username, avatar_url, role),
+       comments:forum_comments(count)` // <--- 新增这行：同时去评论表查数量
     )
     .order('is_pinned', { ascending: false })
     .order('created_at', { ascending: false })
     .limit(50);
 
   if (error) throw new Error('帖子列表加载失败');
-  return (data ?? []).map((d: any) => mapPost(d, 0));
+  
+  // d.comments 返回的是类似 [{ count: 2 }] 的数组，提取并传给 mapPost
+  return (data ?? []).map((d: any) => mapPost(d, d.comments?.[0]?.count ?? 0));
 }
 
 // ── 发布新主贴，返回新帖 id（供客户端跳转）──────────────────

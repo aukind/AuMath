@@ -6,7 +6,7 @@ import MathRenderer from '@/components/MathRenderer';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import DifficultyRating from '@/components/DifficultyRating';
 import { toggleFavorite, markError, removeError, recordView } from '@/app/actions/user-workspace';
-import { stripInlineOptionTail, withAnswerBlank } from '@/lib/questions/content';
+import { stripInlineOptionTail, withAnswerBlank, isBlankOption } from '@/lib/questions/content';
 import type { QuestionWithTopics } from '@/types/database';
 
 interface QuestionCardProps {
@@ -77,12 +77,16 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
   // 不再单独显示 year 字段，避免重复占用视觉。
   const solutionContent = [question.answer, question.analysis || question.solution].filter(Boolean).join('\n\n---\n\n');
   const options = normalizeOptions(question.metadata?.options);
+  // 图形选项题（选项即配图中的子图）抽进数组后是 ["A.","B.","C.","D."] 空壳——不渲染空白网格，
+  // 但它仍是选择题：题干补括号、剥内联尾巴照常按 options.length 判定。
+  const isChoice = options.length >= 2;
+  const visibleOptions = options.filter(o => !isBlankOption(o));
 
   // 兜底：老数据 / 模型漏网时，展示侧再用同一逻辑剥掉题干里重复的选项尾巴（治本在 process-paper 入库时）。
   // 选项进数组、走下方网格渲染的选择题，给题干补上高考式作答括号「（　　）」。
   //（选项仍内联在题干里的题，由 MathRenderer 的 splitChoiceOptions 补括号，故此处仅处理数组选项题。）
-  const strippedContent = stripInlineOptionTail(question.content, options.length >= 2);
-  const displayContent = options.length >= 2 ? withAnswerBlank(strippedContent) : strippedContent;
+  const strippedContent = stripInlineOptionTail(question.content, isChoice);
+  const displayContent = isChoice ? withAnswerBlank(strippedContent) : strippedContent;
 
   async function handleConfirmDelete() {
     if (!onDelete) return;
@@ -185,10 +189,11 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
           <QuestionInteractiveSandbox config={question.interactive_sandbox} />
         )}
 
-        {/* Options — 字号、行距与题干完全一致，确保 1990 年代高考排版的整齐 */}
-        {options.length > 0 && (
-          <div className={`px-5 pb-4 pt-2 grid gap-x-8 gap-y-2 ${options.length <= 2 ? 'grid-cols-1' : 'grid-cols-2'}`}>
-            {options.map((opt, i) => (
+        {/* Options — 字号、行距与题干完全一致，确保 1990 年代高考排版的整齐。
+            图形选项题选项为空壳 → visibleOptions 为空 → 不渲染网格（选项已在配图里）。 */}
+        {visibleOptions.length > 0 && (
+          <div className={`px-5 pb-4 pt-2 grid gap-x-8 gap-y-2 ${visibleOptions.length <= 2 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+            {visibleOptions.map((opt, i) => (
               <div key={i} className="text-[15px] [&_.prose_p]:my-0 [&_.prose_p]:leading-[1.85]">
                 <MathRenderer content={opt} />
               </div>

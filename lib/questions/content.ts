@@ -26,6 +26,20 @@ export function stripInlineOptionTail(content: string, hasOptions: boolean): str
 /** 高考选择题题干末尾的作答括号：全角括号 + 两个全角空格（U+3000），贴合试卷排版。 */
 export const ANSWER_BLANK = '（　　）';
 
+/**
+ * 选项是否「只有字母标号、没有实际内容」——图形选项题（选项即配图中的子图，如散点图 A/B/C/D）
+ * 抽进 options 数组后常是 ["A.","B.","C.","D."] 空壳。剥掉前导标号与公式分隔符后若为空即判空，
+ * 供展示侧隐藏空白选项网格（选项已在配图里）。
+ */
+export function isBlankOption(opt: string): boolean {
+  const body = opt
+    .replace(/\*\*/g, '')                                    // 去 markdown 加粗
+    .replace(/^\s*[(（]?\s*[A-Za-z]\s*[)）.．、:：]?\s*/, '')  // 去前导字母标号：A. / (A) / A、 …
+    .replace(/\$/g, '')                                      // 去公式分隔符，仅用于判空（不改渲染内容）
+    .trim();
+  return body === '';
+}
+
 // 题干末尾「已有空作答括号」的两种形态：
 //  ① 公式内半角空括号，紧跟行内公式闭合符：…A\cap B=()$  （Gemini 常把原卷的「(  )」抄成这样）
 //  ② 公式外空括号（半角 () 或全角 （）），可含空格：…正确的有（ ） / …则 ( )

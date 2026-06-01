@@ -1,10 +1,5 @@
 'use client';
 
-// 论坛详情页顶层容器。
-//   - SWR 拉取主贴（ForumPost），以 RSC 预取数据作首屏，渲染标题/标签/作者/正文。
-//   - ReplyProvider 包裹整棵树，使主贴与所有评论共享同一个单例回复编辑器。
-//   - 管理员可置顶/加精/删帖；作者可删自己的帖（权限由 RLS 兜底）。
-
 import { useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -22,9 +17,43 @@ import MathContent from './MathContent';
 import CommentSection from './CommentSection';
 import { ReplyProvider } from './ReplyContext';
 
+// ── 带有极客专属头像框的 Avatar 组件 ──
+function Avatar({ name, url, role }: { name: string; url?: string; role?: string }) {
+  const isAdmin = role === 'admin';
+  return (
+    <div className="relative inline-flex items-center justify-center shrink-0">
+      <div className="relative z-10 flex h-11 w-11 shrink-0 overflow-hidden rounded-full ring-1 ring-zinc-200 dark:ring-zinc-800 bg-zinc-100 dark:bg-zinc-800">
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={url} alt={name} className="h-full w-full object-cover" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-indigo-500 to-violet-500 text-lg font-bold text-white">
+            {name.slice(0, 1).toUpperCase()}
+          </span>
+        )}
+      </div>
+      {isAdmin && (
+        <div className="pointer-events-none absolute -inset-[10px] z-20">
+          <svg viewBox="0 0 100 100" className="h-full w-full animate-[spin_10s_linear_infinite]" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="au-admin-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#818cf8" />
+                <stop offset="50%" stopColor="#c084fc" />
+                <stop offset="100%" stopColor="#f472b6" />
+              </linearGradient>
+            </defs>
+            <circle cx="50" cy="50" r="47" stroke="url(#au-admin-grad)" strokeWidth="1.5" strokeDasharray="40 10 15 10" strokeLinecap="round" className="opacity-80" />
+            <circle cx="10" cy="50" r="2" fill="#818cf8" />
+            <circle cx="90" cy="50" r="2" fill="#f472b6" />
+          </svg>
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ForumThreadProps {
   postId: string;
-  /** 当前登录态；访客为 null（只读，无发帖/回复/点赞按钮）。 */
   currentUser: SessionUser;
   initialPost?: ForumPost | null;
   initialComments?: ForumComment[];
@@ -43,17 +72,12 @@ export default function ForumThread({
     { fallbackData: initialPost ?? undefined },
   );
 
-  // 进入详情页计一次浏览数（fire-and-forget，失败无所谓）。
   useEffect(() => {
     incrementForumView(postId).catch(() => {});
   }, [postId]);
 
-  if (isLoading && !post) {
-    return <div className="p-8 text-center text-sm text-zinc-400">加载帖子中…</div>;
-  }
-  if (error || !post) {
-    return <div className="p-8 text-center text-sm text-red-500">帖子加载失败或不存在。</div>;
-  }
+  if (isLoading && !post) return <div className="p-8 text-center text-sm text-zinc-400">加载帖子中…</div>;
+  if (error || !post) return <div className="p-8 text-center text-sm text-red-500">帖子加载失败或不存在。</div>;
 
   const isAdmin = currentUser?.role === 'admin';
   const canDeletePost = !!currentUser && (isAdmin || currentUser.id === post.author.id);
@@ -66,67 +90,84 @@ export default function ForumThread({
 
   const handleDeletePost = () => {
     deleteForumPost(postId)
-      .then(() => {
-        toast.success('帖子已删除');
-        router.push('/forum');
-      })
+      .then(() => { toast.success('帖子已删除'); router.push('/forum'); })
       .catch((e) => toast.error(e instanceof Error ? e.message : '删除失败'));
   };
 
   return (
     <ReplyProvider>
       <div className="mx-auto max-w-2xl rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        {/* 主贴 */}
+        
+        {/* 主贴：对标推特排版 */}
         <article className="border-b border-zinc-100 px-4 py-4 dark:border-zinc-800">
-          <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-50">{post.title}</h1>
-
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
-            <Link href={`/u/${post.author.id}`} className="font-medium text-zinc-700 hover:underline dark:text-zinc-300">
-              {post.author.username}
+          
+          {/* 类似推特的头部：头像 + 用户名 + 时间 */}
+          <header className="flex items-center gap-3">
+            <Link href={`/u/${post.author.id}`} className="shrink-0 transition-opacity hover:opacity-80">
+              <Avatar name={post.author.username} url={post.author.avatarUrl} role={post.author.role} />
             </Link>
-            <span>· {new Date(post.createdAt).toLocaleString('zh-CN')}</span>
-            <span className="inline-flex items-center gap-1"><Eye className="h-3.5 w-3.5" />{post.viewCount}</span>
-            <span className="inline-flex items-center gap-1"><MessageSquare className="h-3.5 w-3.5" />{post.commentCount}</span>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-1.5">
+                <Link href={`/u/${post.author.id}`} className="font-bold text-zinc-900 hover:text-indigo-600 hover:underline dark:text-zinc-100 dark:hover:text-indigo-400">
+                  {post.author.username}
+                </Link>
+                {post.author.role === 'admin' && (
+                  <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-900 dark:text-amber-200">
+                    管理员
+                  </span>
+                )}
+              </div>
+              <span className="text-xs text-zinc-500 tabular-nums mt-0.5">
+                {new Date(post.createdAt).toLocaleString('zh-CN', {
+                  year: 'numeric', month: '2-digit', day: '2-digit',
+                  hour: '2-digit', minute: '2-digit', hour12: false
+                })}
+              </span>
+            </div>
+          </header>
+
+          {/* 标题与正文（全宽铺开） */}
+          <div className="mt-3.5">
+            <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-50 leading-snug">
+              {post.title}
+            </h1>
+            {post.tags.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {post.tags.map((tag) => (
+                  <span key={tag} className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-600 dark:bg-blue-950 dark:text-blue-300">
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="mt-3 text-[15px]">
+              <MathContent content={post.content} />
+            </div>
           </div>
 
-          {post.tags.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {post.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-600 dark:bg-blue-950 dark:text-blue-300"
-                >
-                  #{tag}
-                </span>
-              ))}
+          {/* 底部数据统计与操作 */}
+          <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 text-xs text-zinc-500 dark:border-zinc-800">
+            <div className="flex gap-4">
+              <span className="inline-flex items-center gap-1.5"><Eye className="h-4 w-4" />{post.viewCount}</span>
+              <span className="inline-flex items-center gap-1.5"><MessageSquare className="h-4 w-4" />{post.commentCount}</span>
             </div>
-          )}
-
-          <div className="mt-3">
-            <MathContent content={post.content} />
+            {(isAdmin || canDeletePost) && (
+              <div className="flex gap-3">
+                {isAdmin && (
+                  <>
+                    <button onClick={() => handleFlag({ isPinned: true }, '已置顶')} className="inline-flex items-center gap-1 hover:text-amber-600"><Pin className="h-3.5 w-3.5" />置顶</button>
+                    <button onClick={() => handleFlag({ isFeatured: true }, '已加精')} className="inline-flex items-center gap-1 hover:text-emerald-600"><Star className="h-3.5 w-3.5" />加精</button>
+                  </>
+                )}
+                {canDeletePost && (
+                  <button onClick={handleDeletePost} className="hover:text-red-600">删帖</button>
+                )}
+              </div>
+            )}
           </div>
-
-          {/* 管理员 / 作者操作 */}
-          {(isAdmin || canDeletePost) && (
-            <div className="mt-3 flex gap-3 border-t border-zinc-100 pt-2 text-xs text-zinc-500 dark:border-zinc-800">
-              {isAdmin && (
-                <>
-                  <button onClick={() => handleFlag({ isPinned: true }, '已置顶')} className="inline-flex items-center gap-1 hover:text-amber-600">
-                    <Pin className="h-3.5 w-3.5" />置顶
-                  </button>
-                  <button onClick={() => handleFlag({ isFeatured: true }, '已加精')} className="inline-flex items-center gap-1 hover:text-emerald-600">
-                    <Star className="h-3.5 w-3.5" />加精
-                  </button>
-                </>
-              )}
-              {canDeletePost && (
-                <button onClick={handleDeletePost} className="hover:text-red-600">删帖</button>
-              )}
-            </div>
-          )}
         </article>
 
-        {/* 评论区（含单例回复编辑器） */}
+        {/* 评论区 */}
         <CommentSection postId={postId} currentUser={currentUser} initialComments={initialComments} />
       </div>
     </ReplyProvider>
