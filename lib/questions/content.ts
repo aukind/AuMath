@@ -26,14 +26,26 @@ export function stripInlineOptionTail(content: string, hasOptions: boolean): str
 /** 高考选择题题干末尾的作答括号：全角括号 + 两个全角空格（U+3000），贴合试卷排版。 */
 export const ANSWER_BLANK = '（　　）';
 
-/** 题干末尾是否已带空作答括号（半/全角均认），用于避免重复追加。 */
+// 题干末尾「已有空作答括号」的两种形态：
+//  ① 公式内半角空括号，紧跟行内公式闭合符：…A\cap B=()$  （Gemini 常把原卷的「(  )」抄成这样）
+//  ② 公式外空括号（半角 () 或全角 （）），可含空格：…正确的有（ ） / …则 ( )
+const ANSWER_BLANK_IN_MATH_RE = /[(（]\s*[)）](\s*\$)\s*$/;
+const ANSWER_BLANK_TAIL_RE = /[(（][\s　]*[)）][\s　]*$/;
+
+/** 题干末尾是否已带空作答括号（公式内 ()$ 与公式外 （ ） 均认）。 */
 export function hasAnswerBlank(stem: string): boolean {
-  return /[(（]\s*[)）]\s*$/.test(stem.trimEnd());
+  const s = stem.trimEnd();
+  return ANSWER_BLANK_IN_MATH_RE.test(s) || ANSWER_BLANK_TAIL_RE.test(s);
 }
 
-/** 给选择题题干补上末尾作答括号；已有空括号或空串则原样返回。纯字符串函数，前后端通用。 */
+/**
+ * 给选择题题干补上高考式作答括号「（　　）」：先剥掉题干已有的空括号（含公式内 ()$ 这种半角小括号），
+ * 再统一补标准全角括号——既避免与原卷括号重复，又把半角升级为全角。空串原样返回。纯字符串函数，前后端通用。
+ */
 export function withAnswerBlank(stem: string): string {
-  const s = stem.trimEnd();
-  if (!s || hasAnswerBlank(s)) return stem;
+  let s = stem.trimEnd();
+  if (!s) return stem;
+  s = s.replace(ANSWER_BLANK_IN_MATH_RE, '$1');  // 公式内空括号：剥括号、保留闭合 $
+  s = s.replace(ANSWER_BLANK_TAIL_RE, '').trimEnd(); // 公式外空括号：整体剥掉
   return `${s}${ANSWER_BLANK}`;
 }
