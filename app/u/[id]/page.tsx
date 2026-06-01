@@ -21,15 +21,58 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   };
 }
 
-function Avatar({ name, url }: { name: string; url?: string }) {
-  if (url) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={url} alt={name} className="h-16 w-16 rounded-full object-cover ring-2 ring-white dark:ring-zinc-800" />;
-  }
+function Avatar({ name, url, role }: { name: string; url?: string; role?: string }) {
+  const isAdmin = role === 'admin';
+
   return (
-    <span className="flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-2xl font-bold text-white">
-      {name.slice(0, 1).toUpperCase()}
-    </span>
+    <div className="relative inline-flex items-center justify-center">
+      {/* --- 头像本体 --- */}
+      <div className="relative z-10 flex h-16 w-16 shrink-0 overflow-hidden rounded-full ring-2 ring-white dark:ring-zinc-800">
+        {url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={url} alt={name} className="h-full w-full object-cover" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-indigo-500 to-violet-500 text-2xl font-bold text-white">
+            {name.slice(0, 1).toUpperCase()}
+          </span>
+        )}
+      </div>
+
+      {/* --- 专属头像框 (Z-Index 盖在上面，且忽略鼠标事件) --- */}
+      {isAdmin && (
+        <div className="pointer-events-none absolute -inset-[14px] z-20">
+          {/* 这里我用一段代码生成了一个极客风的动态 SVG 头像框 */}
+          <svg
+            viewBox="0 0 100 100"
+            className="h-full w-full animate-[spin_10s_linear_infinite]"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <defs>
+              <linearGradient id="au-admin-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="#818cf8" />   {/* indigo-400 */}
+                <stop offset="50%" stopColor="#c084fc" />  {/* purple-400 */}
+                <stop offset="100%" stopColor="#f472b6" /> {/* pink-400 */}
+              </linearGradient>
+            </defs>
+            {/* 外层断点光环 */}
+            <circle
+              cx="50"
+              cy="50"
+              r="47"
+              stroke="url(#au-admin-grad)"
+              strokeWidth="1.5"
+              strokeDasharray="40 10 15 10"
+              strokeLinecap="round"
+              className="opacity-80"
+            />
+            {/* 内层装饰点 */}
+            <circle cx="10" cy="50" r="2" fill="#818cf8" />
+            <circle cx="90" cy="50" r="2" fill="#f472b6" />
+          </svg>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -68,7 +111,7 @@ export default async function PublicProfilePage({ params }: { params: Promise<{ 
       <main className="mx-auto max-w-2xl space-y-8 px-4 py-8">
         {/* 资料头部 */}
         <div className="flex items-center gap-4">
-          <Avatar name={profile.username} url={profile.avatarUrl} />
+         <Avatar name={profile.username} url={profile.avatarUrl} role={profile.role} />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h1 className="truncate text-xl font-bold text-zinc-900 dark:text-zinc-50">{profile.username}</h1>
