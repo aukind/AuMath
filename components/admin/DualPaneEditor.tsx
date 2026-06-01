@@ -9,6 +9,7 @@ import { useTheme } from 'next-themes';
 import type { editor as MonacoNS } from 'monaco-editor';
 import MathRenderer from '@/components/MathRenderer';
 import { ScreenshotToLatexButton } from '@/components/admin/ScreenshotToLatexButton';
+import GeometryFigureButton from '@/components/tikz/GeometryFigureButton';
 import type { ExtractedQuestion, PublishBatchMeta, PublishItemResult } from '@/app/actions/process-paper';
 import { publishQuestions } from '@/app/actions/process-paper';
 import {
@@ -331,6 +332,7 @@ export default function DualPaneEditor({
             <Code2 className="h-3.5 w-3.5" />
             <span>JSON 源码编辑</span>
             <ScreenshotToLatexButton onInsert={insertLatexAtCursor} />
+            <GeometryFigureButton onInsert={insertLatexAtCursor} />
             {parseError && (
               <span className="ml-auto flex items-center gap-1 text-destructive">
                 <AlertCircle className="h-3 w-3" />

@@ -1,0 +1,8 @@
+# ── 版面检测（自动找几何图）· DocLayout-YOLO ─────────────────────────────
+# MinerU 用的那个版面检测模型，单模型 ~200MB，远比整套 MinerU 轻。
+# torch 已随 requirements.txt 的 easyocr 安装；首次 predict 自动从 HF 拉权重。
+#
+#   source .venv/bin/activate && pip install -r requirements-detection.txt
+#
+doclayout-yolo
+huggingface-hub

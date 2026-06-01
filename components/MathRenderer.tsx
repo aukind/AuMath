@@ -35,7 +35,8 @@ const defaultKatexOptions: KatexOptions = {
 };
 
 // rehype-sanitize 模式：在默认基础上放行 SVG 标签和属性，用于内嵌几何图
-const svgSchema = {
+// 导出以便其他渲染处（如试卷打印视图 app/admin/paper）复用同一套 SVG 白名单。
+export const svgSchema = {
   ...defaultSchema,
   tagNames: [
     ...(defaultSchema.tagNames ?? []),

@@ -1,0 +1,20 @@
+# ── math-cv-service · MVP (Pipeline B 确定性管线 + 骨架) ─────────────────
+# Pipeline A 的真实后端 (DeTikZify/torch) 见 requirements-pipeline-a.txt，
+# 故意隔离，避免 18GB 内存被重依赖一次性吃满。
+
+# Web 框架 / 服务
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9      # 表单/文件上传
+pydantic-settings>=2.4       # .env 配置
+
+# 基础图像 / PDF（骨架即用）
+numpy>=1.26
+Pillow>=10.4
+PyMuPDF>=1.24                # PDF → 页面位图 (/rasterize)
+
+# Pipeline B 核心（Step 3 实现时启用；可后装）
+opencv-python-headless>=4.10 # 掩膜矩阵 + INPAINT_NS/TELEA（headless: 无 GUI 依赖）
+vtracer>=0.6                 # Rust 内核栅格→SVG 矢量化
+easyocr>=1.7                 # 字母+bbox 识别（M3 比 PaddleOCR 好装）
+cairosvg>=2.7               # SVG → PDF（overpic 编译用；需 `brew install cairo`）

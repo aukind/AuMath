@@ -4,7 +4,10 @@ import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
+import rehypeSanitize from 'rehype-sanitize';
 import { Printer, ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import { svgSchema } from '@/components/MathRenderer';
 import type { ExtractedQuestion, PublishBatchMeta } from '@/app/actions/process-paper';
 
 const PAPER_VIEW_KEY = 'aumath_paper_view';
@@ -19,7 +22,11 @@ function Math({ children }: { children: string }) {
     ">
       <ReactMarkdown
         remarkPlugins={[remarkMath]}
-        rehypePlugins={[[rehypeKatex, { throwOnError: false, strict: 'ignore' }]]}
+        rehypePlugins={[
+          rehypeRaw,                       // 解析内嵌 <svg> 几何图
+          [rehypeSanitize, svgSchema],     // 复用 MathRenderer 的 SVG 白名单
+          [rehypeKatex, { throwOnError: false, strict: 'ignore' }],
+        ]}
       >
         {children}
       </ReactMarkdown>

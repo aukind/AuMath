@@ -1,0 +1,24 @@
+# ── Pipeline A（生成式 · DeTikZify · Phase 2）───────────────────────────────
+# 真实后端 = DeTikZify（potamides/DeTikZify，已核实 API）。
+# 报告里的 GeoTikzBridge-8B 无法证实存在，故不采用；本适配器即 A 路线真实实现。
+#
+# ⚠️ 硬件现实（务必先读）：
+#   - 当前最小模型为 8B：nllg/detikzify-v2.5-8b，bf16 权重 ≈16GB。
+#     18GB 统一内存的 M3 Pro **跑不动**（OS + Next + 推理会 OOM/狂换页）。
+#     → 在自托管机 / 大显存 GPU 上启用；本机仅保留集成代码、默认 mock。
+#   - MCTS 自校验与 rasterize 需系统依赖：
+#       brew install texlive ghostscript poppler
+#   - 模型权重首次 load 时才从 HuggingFace 下载（数 GB），由首个请求触发。
+#
+# 启用方式：
+#   1) source .venv/bin/activate && pip install -r requirements-pipeline-a.txt
+#   2) .env 设 PIPELINE_A_ENGINE=detikzify（可选 DETIKZIFY_MODEL / DETIKZIFY_TIMEOUT）
+#
+# 安装（py3.13 可能需要 [legacy] extra 以规避 gradio/依赖兼容问题）：
+detikzify @ git+https://github.com/potamides/DeTikZify
+# 或：detikzify[legacy] @ git+https://github.com/potamides/DeTikZify
+
+torch>=2.3
+transformers>=4.44
+accelerate>=0.30
+Pillow>=10.4

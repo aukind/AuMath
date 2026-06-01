@@ -5,8 +5,10 @@ import { useDropzone } from 'react-dropzone';
 import {
   processPaper, extractAnswers, createUploadUrl, createReadUrl,
   publishPaperBundles, detectDuplicatePapers,
-  type ExtractedPaperBundle, type DuplicatePaperInfo, type DuplicateStrategy,
+  type ExtractedPaperBundle, type ExtractedQuestion, type DuplicatePaperInfo, type DuplicateStrategy,
 } from '@/app/actions/process-paper';
+import { autoFiguresFromDoc } from '@/app/actions/cv-tikz';
+import { uploadFigureImage } from '@/app/actions/figure-image';
 import dynamic from 'next/dynamic';
 import { toast } from 'sonner';
 import {
@@ -854,6 +856,42 @@ function PairedUpload({
 
 const DRAFT_KEY = 'aumath_paper_draft_v2';
 
+/** 抽取后自动识别几何图，裁出原图传 Storage，按题号以 ![](url) 合进对应题。
+ *  无损位图路线：和原卷一模一样、零畸变。CV 服务失败则原样返回，不阻断录题。 */
+async function enrichPapersWithFigures(
+  papers: ExtractedPaperBundle[],
+  files: UploadedFile[],
+): Promise<{ papers: ExtractedPaperBundle[]; merged: number; unassigned: number }> {
+  const byQuestion = new Map<number, string[]>(); // question_number -> [图片URL]
+  let unassigned = 0;
+  for (const f of files) {
+    const res = await autoFiguresFromDoc(f.signedUrl, f.fileType, false); // vectorize=false → 只要裁剪原图
+    if (!res.success) continue;
+    for (const fig of res.figures) {
+      if (fig.question_number == null) { unassigned++; continue; }
+      if (!fig.crop_base64) continue;
+      const up = await uploadFigureImage(fig.crop_base64);
+      if (!up.success) continue;
+      const arr = byQuestion.get(fig.question_number) ?? [];
+      arr.push(up.url);
+      byQuestion.set(fig.question_number, arr);
+    }
+  }
+  if (byQuestion.size === 0) return { papers, merged: 0, unassigned };
+
+  let merged = 0;
+  const out = papers.map(p => ({
+    ...p,
+    questions: p.questions.map((q: ExtractedQuestion) => {
+      const urls = q.question_number != null ? byQuestion.get(q.question_number) : undefined;
+      if (!urls?.length) return q;
+      merged += urls.length;
+      return { ...q, content: `${q.content}${urls.map(u => `\n\n![几何图](${u})`).join('')}` };
+    }),
+  }));
+  return { papers: out, merged, unassigned };
+}
+
 export default function PaperUploadWorkflow() {
   const [step, setStep] = useState<WorkflowStep>(1);
   const [mode, setMode] = useState<ImportMode>('questions-only');
@@ -861,6 +899,7 @@ export default function PaperUploadWorkflow() {
   const [questionFile, setQuestionFile] = useState<UploadedFile | null>(null);
   const [answerFile, setAnswerFile] = useState<UploadedFile | null>(null);
   const [extractedPapers, setExtractedPapers] = useState<ExtractedPaperBundle[]>([]);
+  const [enriching, setEnriching] = useState(false);
 
   // 恢复草稿
   useEffect(() => {
@@ -900,11 +939,29 @@ export default function PaperUploadWorkflow() {
 
   const handleNextStep = useCallback(() => setStep(2), []);
 
-  const handleExtractionDone = useCallback((papers: ExtractedPaperBundle[]) => {
-    setExtractedPapers(papers);
+  const handleExtractionDone = useCallback(async (papers: ExtractedPaperBundle[]) => {
+    // 抽取完文字后，自动识别几何图并按题号合进对应题（图文分离的「图」这步补回）
+    const figureFiles = mode === 'paired' ? (questionFile ? [questionFile] : []) : uploadResults;
+    let finalPapers = papers;
+    if (figureFiles.length > 0) {
+      setEnriching(true);
+      try {
+        const { papers: enriched, merged, unassigned } = await enrichPapersWithFigures(papers, figureFiles);
+        finalPapers = enriched;
+        if (merged > 0) {
+          toast.success(`自动识别并插入 ${merged} 张几何图${unassigned ? `（另有 ${unassigned} 张未能归属，可在编辑器手动插入）` : ''}`);
+        } else if (unassigned > 0) {
+          toast.info(`检测到 ${unassigned} 张图但未能自动归属，请用「插入几何图」手动放置`);
+        }
+      } catch {
+        /* CV 服务不可用则跳过，不阻断录题 */
+      }
+      setEnriching(false);
+    }
+    setExtractedPapers(finalPapers);
     setStep(3);
-    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(papers)); } catch {}
-  }, []);
+    try { sessionStorage.setItem(DRAFT_KEY, JSON.stringify(finalPapers)); } catch {}
+  }, [mode, questionFile, uploadResults]);
 
   // Step 2 的提取任务
   const job: ExtractJob | null =
@@ -915,6 +972,12 @@ export default function PaperUploadWorkflow() {
   return (
     <div>
       <StepIndicator current={step} />
+
+      {enriching && (
+        <div className="mb-4 flex items-center gap-2 rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> 正在自动识别几何图并插入对应题…（本地 CV）
+        </div>
+      )}
 
       {/* Step 1: Upload */}
       {step === 1 && (
