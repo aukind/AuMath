@@ -18,13 +18,16 @@ class Settings(BaseSettings):
     max_image_bytes: int = 15 * 1024 * 1024
 
     # PDF 栅格化
-    rasterize_dpi: int = 150
+    rasterize_dpi: int = 120  # 检测框不需高分；120 比 150 图更小、栅格化+YOLO 更快（大卷收益大）
     rasterize_max_pages: int = 30
 
     # 版面检测（DocLayout-YOLO，自动找几何图）。torch 已随 easyocr 在位。
     doclayout_model: str = "juliozhao/DocLayout-YOLO-DocStructBench"
     doclayout_weight_file: str = "doclayout_yolo_docstructbench_imgsz1024.pt"
-    detect_device: str = "cpu"  # M3：cpu 稳妥；可试 "mps"
+    detect_device: str = "cpu"  # torch 后端用；实测 mps 单图反而更慢，故 cpu。layout.py 有出错回退
+    # 检测后端："coreml" = ONNX + onnxruntime CoreML执行器(走 ANE，实测纯推理快 ~6x)；"torch" = 原 PyTorch。
+    # coreml 路径若初始化失败（缺 onnx/onnxruntime 等）会自动回退 torch。
+    detect_backend: str = "coreml"
     detect_conf: float = 0.2
     detect_imgsz: int = 1024
 

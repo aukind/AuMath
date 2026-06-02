@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useDropzone } from 'react-dropzone';
 import {
   processPaper, extractAnswers, createUploadUrl, createReadUrl,
@@ -573,6 +573,13 @@ function AiExtractPanel({
               </p>
             </div>
           )}
+          {state.status === 'extracting' && (
+            <div className="px-1 pt-1">
+              <button onClick={onBack} className="flex items-center gap-1.5 text-xs text-muted-foreground/70 hover:text-foreground transition-colors">
+                <RotateCcw className="h-3 w-3" /> 返回上一步（保留已传文件）
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -582,7 +589,7 @@ function AiExtractPanel({
           <pre className="mx-auto max-w-2xl whitespace-pre-wrap text-left text-sm text-destructive bg-destructive/5 border border-destructive/20 rounded-lg p-4 font-sans leading-relaxed">{state.message}</pre>
           <div className="flex justify-center gap-3">
             <button onClick={onBack} className="flex items-center gap-1.5 rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-muted transition-colors">
-              <RotateCcw className="h-3.5 w-3.5" /> 重新上传
+              <RotateCcw className="h-3.5 w-3.5" /> 返回上一步
             </button>
             <button onClick={runExtraction} className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors">
               <Sparkles className="h-3.5 w-3.5" /> 重试提取
@@ -644,16 +651,38 @@ type BulkPublishState =
 
 function MultiBulkPublisher({
   papers,
+  figures = [],
   onReset,
+  onBack,
 }: {
   papers: ExtractedPaperBundle[];
+  figures?: DetectedFigure[];
   onReset: () => void;
+  onBack: () => void;
 }) {
   const [publishState, setPublishState] = useState<BulkPublishState>({ status: 'idle' });
   const [activePapers, setActivePapers] = useState<boolean[]>(papers.map(() => true));
   const [dupModal, setDupModal] = useState<{ duplicates: DuplicatePaperInfo[]; selected: ExtractedPaperBundle[] } | null>(null);
+  // 本地可变副本：人工把未归属的图插回某卷某题后，从这份发布（papers prop 不可变）
+  const [editedPapers, setEditedPapers] = useState<ExtractedPaperBundle[]>(papers);
 
-  const selectedPapers = papers.filter((_, i) => activePapers[i]);
+  // 未归属图托盘：自动归对的已合进 content，这里只收没认出题号的，让人工选「卷+题」插回。
+  const unplacedFigures = useMemo(() => figures.filter(f => f.question_number == null), [figures]);
+  const [figSel, setFigSel] = useState<Record<number, { p: number; q: number }>>({});
+  const [placedFigs, setPlacedFigs] = useState<Set<number>>(new Set());
+
+  const insertFigure = useCallback((figIdx: number, url: string) => {
+    const sel = figSel[figIdx] ?? { p: 0, q: 0 };
+    setEditedPapers(prev => prev.map((paper, pi) => pi !== sel.p ? paper : {
+      ...paper,
+      questions: paper.questions.map((qq, qi) => qi !== sel.q ? qq : { ...qq, content: `${qq.content}\n\n![几何图](${url})` }),
+    }));
+    setPlacedFigs(prev => new Set(prev).add(figIdx));
+    const tgt = editedPapers[sel.p]?.questions[sel.q];
+    toast.success(`已插入到「${editedPapers[sel.p]?.paper_title ?? `试卷${sel.p + 1}`}」第${tgt?.question_number ?? sel.q + 1}题`);
+  }, [figSel, editedPapers]);
+
+  const selectedPapers = editedPapers.filter((_, i) => activePapers[i]);
 
   const handleStaleAction = useCallback((msg: string): boolean => {
     if (/Server Action .* was not found/i.test(msg)) {
@@ -726,9 +755,59 @@ function MultiBulkPublisher({
 
   return (
     <div className="space-y-5">
+      {/* 未归属几何图托盘：给每张图选「试卷 + 题号」插回，避免多卷批量时丢图 */}
+      {unplacedFigures.length > placedFigs.size && (
+        <div className="rounded-lg border bg-muted/20 p-3">
+          <div className="mb-2 text-xs text-muted-foreground">
+            另有 {unplacedFigures.length - placedFigs.size} 张几何图未自动归属 —— 给每张选「试卷 + 题号」插入（自动归对的已在题里）
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {unplacedFigures.map((fig, i) => {
+              if (placedFigs.has(i)) return null;
+              const sel = figSel[i] ?? { p: 0, q: 0 };
+              const qs = editedPapers[sel.p]?.questions ?? [];
+              return (
+                <div key={i} className="flex shrink-0 flex-col gap-1.5 rounded border bg-white p-2 dark:bg-zinc-900">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={fig.url} alt={`图${i + 1}`} className="h-20 w-auto max-w-[140px] self-center object-contain" />
+                  <select
+                    value={sel.p}
+                    onChange={e => setFigSel(prev => ({ ...prev, [i]: { p: Number(e.target.value), q: 0 } }))}
+                    className="rounded border bg-background px-1 py-0.5 text-[11px] text-foreground"
+                  >
+                    {editedPapers.map((p, pi) => (
+                      <option key={pi} value={pi}>{p.paper_title ?? `试卷${pi + 1}`}</option>
+                    ))}
+                  </select>
+                  <div className="flex items-center gap-1">
+                    <select
+                      value={sel.q}
+                      onChange={e => setFigSel(prev => ({ ...prev, [i]: { p: sel.p, q: Number(e.target.value) } }))}
+                      className="flex-1 rounded border bg-background px-1 py-0.5 text-[11px] text-foreground"
+                    >
+                      {qs.map((qq, qi) => (
+                        <option key={qi} value={qi}>第{qq.question_number ?? qi + 1}题</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => insertFigure(i, fig.url)}
+                      disabled={qs.length === 0}
+                      className="rounded bg-primary px-2 py-0.5 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      插入
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 试卷勾选列表（难度改为发布后由用户众包评分，这里不再设置） */}
       <ul className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-        {papers.map((paper, i) => (
+        {editedPapers.map((paper, i) => (
           <li key={i} className={['rounded-lg border p-4 transition-colors', activePapers[i] ? 'bg-muted/30' : 'opacity-50'].join(' ')}>
             <div className="flex items-start gap-3">
               <input
@@ -761,9 +840,14 @@ function MultiBulkPublisher({
 
       {/* 发布按钮 */}
       <div className="flex items-center justify-between pt-2 border-t">
-        <span className="text-sm text-muted-foreground">
-          已选 {selectedPapers.length}/{papers.length} 套 · 共 {selectedPapers.reduce((s, p) => s + p.questions.length, 0)} 道题
-        </span>
+        <div className="flex items-center gap-4">
+          <button onClick={onBack} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+            <RotateCcw className="h-3.5 w-3.5" /> 返回上一步
+          </button>
+          <span className="text-sm text-muted-foreground">
+            已选 {selectedPapers.length}/{papers.length} 套 · 共 {selectedPapers.reduce((s, p) => s + p.questions.length, 0)} 道题
+          </span>
+        </div>
         <button
           onClick={handlePublishAll}
           disabled={publishState.status === 'publishing' || !selectedPapers.length}
@@ -1002,7 +1086,8 @@ async function detectAndUploadFigures(
     // 该文件检测完成 → 百分比推进到该文件末尾
     onProgress?.({ percent: Math.min(99, Math.round(((fileIdx + 1) / N) * 100)) });
     if (!res.success) { firstError ??= res.error; continue; }
-    for (const fig of res.figures) {
+    // 同一文件的图**并发上传**（实测每张 ~900ms，串行会拖很久）；完成一张即累加计数。
+    await Promise.all(res.figures.map(async (fig) => {
       // cloud-vector：优先用云端 8B 编译的 SVG；失败/位图模式则用裁剪原图兜底（绝不丢图）
       let url: string | null = null;
       if (mode === 'cloud-vector' && fig.svg) {
@@ -1013,10 +1098,10 @@ async function detectAndUploadFigures(
         const up = await uploadFigureImage(fig.crop_base64);
         if (up.success) url = up.url;
       }
-      if (!url) continue;
+      if (!url) return;
       raws.push({ url, box: fig.box ?? [0, 0, 0, 0], page: fig.page ?? 0, fileIdx });
-      onProgress?.({ detected: raws.length });  // 每上传一张就上报，第二步清单实时跳数
-    }
+      onProgress?.({ detected: raws.length });  // 每传完一张就上报，第二步清单实时跳数
+    }));
   }
   onProgress?.({ percent: 100 });
   return { raws, error: firstError };
@@ -1048,25 +1133,49 @@ function matchFiguresToQuestions(
       .map((r, i) => ({ ...r, col: ranks[i] }))
       .sort((a, b) => a.page - b.page || a.col - b.col || a.box[1] - b.box[1]);
 
-    // b) 该文件提取出的卷里「含如图措辞」的题，按卷序 → 题号序，收集 (卷下标, 题号)
-    const refQs: { paperIdx: number; qnum: number }[] = [];
+    // b) 该文件提取出的卷里「需要配图」的题，按卷序 → 题号序，带配额收集 (卷下标, 题号, 张数)。
+    //    首选 Gemini 数出的 figure_count（支持一题多图，如三视图 5 张）；
+    //    若整文件都没数到任何配图（老数据/漏填）→ 回退「含如图措辞各计 1 张」的旧启发式。
+    const quotaQs: { paperIdx: number; qnum: number; count: number }[] = [];
     papers.forEach((p, paperIdx) => {
       if (fileIdxOfPaper[paperIdx] !== fi) return;
       p.questions
-        .filter(q => FIG_REF_RE.test(q.content || ''))
+        .filter(q => q.question_number != null && (q.figure_count ?? 0) > 0)
         .sort((a, b) => (a.question_number ?? 0) - (b.question_number ?? 0))
-        .forEach(q => { if (q.question_number != null) refQs.push({ paperIdx, qnum: q.question_number }); });
+        .forEach(q => quotaQs.push({ paperIdx, qnum: q.question_number!, count: q.figure_count! }));
     });
+    let refQs: { paperIdx: number; qnum: number; count: number }[];
+    if (quotaQs.length > 0) {
+      refQs = quotaQs;
+    } else {
+      // 回退：含「如图」措辞的题各计 1 张图
+      refQs = [];
+      papers.forEach((p, paperIdx) => {
+        if (fileIdxOfPaper[paperIdx] !== fi) return;
+        p.questions
+          .filter(q => FIG_REF_RE.test(q.content || ''))
+          .sort((a, b) => (a.question_number ?? 0) - (b.question_number ?? 0))
+          .forEach(q => { if (q.question_number != null) refQs.push({ paperIdx, qnum: q.question_number, count: 1 }); });
+      });
+    }
 
-    // c) 阅读顺序的图 ↔ 含图题 按序对位；对不上的进托盘（unassigned）
-    orderedFigs.forEach((r, i) => {
-      const target = i < refQs.length ? refQs[i] : null;
-      figures.push({ url: r.url, question_number: target?.qnum ?? null, page: r.page });
-      if (!target) { unassigned += 1; return; }
-      const qmap = assign.get(target.paperIdx) ?? new Map<number, string[]>();
-      qmap.set(target.qnum, [...(qmap.get(target.qnum) ?? []), r.url]);
-      assign.set(target.paperIdx, qmap);
-    });
+    // c) 阅读顺序的图按配额依次填进各题：refQs[0] 取走前 count 张，refQs[1] 取走接着的 count 张…
+    //    图取完则后续题少分；多出来的图进托盘（unassigned）——绝不乱塞给别的题。
+    let fc = 0; // 已分配到的图游标
+    for (const ref of refQs) {
+      for (let k = 0; k < ref.count && fc < orderedFigs.length; k++, fc++) {
+        const r = orderedFigs[fc];
+        figures.push({ url: r.url, question_number: ref.qnum, page: r.page });
+        const qmap = assign.get(ref.paperIdx) ?? new Map<number, string[]>();
+        qmap.set(ref.qnum, [...(qmap.get(ref.qnum) ?? []), r.url]);
+        assign.set(ref.paperIdx, qmap);
+      }
+    }
+    // 剩余未分配的图 → 托盘
+    for (; fc < orderedFigs.length; fc++) {
+      figures.push({ url: orderedFigs[fc].url, question_number: null, page: orderedFigs[fc].page });
+      unassigned += 1;
+    }
   }
 
   // 合并进 content：按卷下标精确定位，杜绝多卷同号题串卷
@@ -1133,6 +1242,13 @@ export default function PaperUploadWorkflow() {
     setStep(1);
     try { sessionStorage.removeItem(DRAFT_KEY); } catch {}
   }, [clearUploads]);
+
+  // 返回上一步：回到第1步上传，但**保留已传文件**（不重新跑 Gemini）。复位检测态，避免旧进度串到下次提取。
+  const handleBackToUpload = useCallback(() => {
+    setFigureState({ status: 'idle' });
+    figuresPromiseRef.current = null;
+    setStep(1);
+  }, []);
 
   // 切模式时清掉已传文件，避免两套状态混淆
   const switchMode = useCallback((next: ImportMode) => {
@@ -1276,7 +1392,7 @@ export default function PaperUploadWorkflow() {
             job={job}
             figureState={figureState}
             onDone={handleExtractionDone}
-            onBack={handleReset}
+            onBack={handleBackToUpload}
           />
         </section>
       )}
@@ -1295,10 +1411,11 @@ export default function PaperUploadWorkflow() {
               initialPaperType={extractedPapers[0].paper_type}
               initialPaperGrade={extractedPapers[0].paper_grade}
               figures={detectedFigures}
-              onReset={handleReset}
+              onReset={handleBackToUpload}
+              onContinue={handleReset}
             />
           ) : (
-            <MultiBulkPublisher papers={extractedPapers} onReset={handleReset} />
+            <MultiBulkPublisher papers={extractedPapers} figures={detectedFigures} onReset={handleReset} onBack={handleBackToUpload} />
           )}
         </section>
       )}

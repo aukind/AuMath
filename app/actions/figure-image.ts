@@ -7,14 +7,20 @@ import { createAdminClient } from '@/lib/supabase/admin';
 
 const BUCKET = 'paper-figures';
 
+// 进程级缓存：bucket 只需确保一次。否则每张图上传前都 listBuckets() 多一次网络往返，
+// 多图录题时累加成明显延迟（实测每张上传 ~900ms，串行+往返更慢）。
+let bucketReady = false;
+
 async function ensureBucket(supabase: ReturnType<typeof createAdminClient>) {
+  if (bucketReady) return;
   const { data: buckets } = await supabase.storage.listBuckets();
-  if (buckets?.some((b: { id: string }) => b.id === BUCKET)) return;
+  if (buckets?.some((b: { id: string }) => b.id === BUCKET)) { bucketReady = true; return; }
   await supabase.storage.createBucket(BUCKET, {
     public: true, // 题库页直接 <img> 引用，需公开读
     fileSizeLimit: 10 * 1024 * 1024,
     allowedMimeTypes: ['image/png', 'image/jpeg', 'image/webp', 'image/svg+xml'],
   });
+  bucketReady = true;
 }
 
 export type UploadFigureResult = { success: true; url: string } | { success: false; error: string };

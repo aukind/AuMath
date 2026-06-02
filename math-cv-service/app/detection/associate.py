@@ -73,16 +73,6 @@ def assign_figures(
 
     col_centers = _cluster_columns([a[1] for a in anchors], page_w)
 
-    # 诊断日志：真卷上看 OCR 到底认出了哪些题号 + 列聚类（排查归属错配）
-    print(
-        f"[assoc] page_w={page_w} figs={len(fig_boxes)} anchors={len(anchors)} cols={[round(c) for c in col_centers]}",
-        flush=True,
-    )
-    print(
-        f"[assoc] anchors(y升序)={sorted([(q, round(x), round(y)) for q, x, y in anchors], key=lambda t: t[2])}",
-        flush=True,
-    )
-
     # 合并锚点与图为阅读顺序流；同一 (列,y) 时锚点(kind=0)排在图(kind=1)前
     items: list[tuple[int, float, int, str, int]] = []
     for qnum, ax, ay in anchors:
@@ -98,8 +88,4 @@ def assign_figures(
             current = val
         else:
             result[val] = current
-    print(
-        f"[assoc] assign={result} fig(x1,y1)={[(round(b[0]), round(b[1])) for b in fig_boxes]}",
-        flush=True,
-    )
     return result

@@ -21,6 +21,8 @@ export interface ExtractedQuestion {
   analysis: string;
   /** 6大知识点之一 */
   category?: string;
+  /** 本题配图张数（Gemini 数图，供图文配额分发；三视图「图①②③④⑤」按张数计）。缺省=未知 */
+  figure_count?: number;
 }
 
 /** 答案卷里单题的答案与解析（按题号回填到题目上） */
@@ -65,7 +67,8 @@ export interface PublishItemResult {
 
 export type PublishBatchResult =
   | { success: true;  results: PublishItemResult[]; savedCount: number; paper_id?: string }
-  | { success: false; error: string };
+  | { success: false; error: string }
+  | { success: false; duplicate: DuplicatePaperInfo };  // 检测到同名卷，待前端弹窗选 跳过/替换
 
 // ── 模型配置 ───────────────────────────────────────────────────
 
@@ -167,6 +170,7 @@ const SHARED_TRANSCRIPTION_RULES = `\
     - 不要尝试用 SVG/PNG/TikZ/ASCII 绘图
     - 如果原题正文写了 "如图" / "如图所示" 这几个字，原样保留
     图形会由用户后续手工补回，这里只转写文字 + 公式 + 选项。
+16b.【数图，不画图】在「不描述、不画图」前提下，额外**数清该题正文/选项里属于本题的配图张数**填入 figure_count（默认 0）。要点：三视图题里成组的「图①②③④⑤」按**张数**计（如 5）；函数图象/统计图/几何图各计 1；纯文字题填 0；选项本身是图（如散点图 A/B/C/D 四选项各一张图）按选项图张数计。只数本题自己的图，绝不要把相邻题的图算进来。
 16a.【忽略与题目无关的杂物】模拟题卷面常混入：实拍照片（如共享单车、实物图）、机构 Logo、二维码、页眉页脚、以及斜向半透明网站水印（如重复出现的 "UP" / 网址字样）。这些一律**当作不存在**：绝不要把水印文字、照片内容、Logo 文案写进任何 content/options/solution。水印字符若恰好压在题干文字上，按题干本意还原文字，丢弃水印。
 
 17. options: object {"A":"…","B":"…"} for choice questions; null for fill/essay/proof.
@@ -189,7 +193,8 @@ Each question element (ALL 4 fields required；不要输出 solution / answer �
   "question_number": 5,
   "content": "**5.** 完整题干（按规则 14-16 排版）",
   "options": {"A":"...","B":"...","C":"...","D":"..."} or null,
-  "category": "数列"
+  "category": "数列",
+  "figure_count": 0
 }
 
 ${SHARED_TRANSCRIPTION_RULES}
@@ -408,9 +413,10 @@ async function normalizeQuestions(
       const analysis = keepAnswers ? normalizeLaTeX(String(q.analysis ?? q.solution ?? '')) : '';
       const category        = VALID_CATEGORIES.has(rawCategory) ? rawCategory : undefined;
       const question_number = typeof q.question_number === 'number' ? q.question_number : undefined;
+      const figure_count    = typeof q.figure_count === 'number' && q.figure_count >= 0 ? Math.round(q.figure_count) : undefined;
       // 治本：即便模型把选项复述进 content，也在入库前确定性剥掉，杜绝与选项卡片重复。
       const cleanContent = stripInlineOptionTail(content, options.length >= 2);
-      return { id: crypto.randomUUID(), question_number, content: cleanContent, options, answer, analysis, category };
+      return { id: crypto.randomUUID(), question_number, content: cleanContent, options, answer, analysis, category, figure_count };
     }),
   );
   // 过滤掉完全空的题（content/options/answer 全空 = 模型输出被截断的残骸）
@@ -802,6 +808,7 @@ export async function extractAnswers(answerUrl: string): Promise<ExtractAnswersR
 export async function publishQuestions(
   questions: ExtractedQuestion[],
   meta:      PublishBatchMeta,
+  strategy?: DuplicateStrategy,   // 未给=遇同名卷返回 duplicate 待前端确认；'replace'=先删旧卷再发
 ): Promise<PublishBatchResult> {
   let supabase;
   try {
@@ -812,93 +819,105 @@ export async function publishQuestions(
 
   if (!questions.length) return { success: false, error: '没有可发布的题目' };
 
-  const settled = await Promise.allSettled(
-    questions.map(async (q) => {
-      // 有选项 → 选择题，否则 → 解答题
-      const question_type = q.options.length > 0 ? 'multiple_choice' : 'calculation';
+  // 单卷查重：插入题目之前按 标题+年份 检测同名卷（否则先插题再发现重复会留下孤儿题）。
+  // strategy 未给 → 返回 duplicate 交前端弹窗；'replace' → 删旧卷再发。多卷路径已自行预处理重复，
+  // 调用时旧卷已删/已跳过，此处查不到重复故不受影响。
+  if (meta.source && (strategy === undefined || strategy === 'replace')) {
+    const dup = await detectDuplicatePapers([{ paper_title: meta.source, paper_year: meta.year ?? undefined, questions: [] }]);
+    if (dup.success && dup.duplicates.length > 0) {
+      if (strategy === undefined) return { success: false, duplicate: dup.duplicates[0] };
+      await deletePaperWithQuestions(dup.duplicates[0].existingId); // replace
+    }
+  }
 
-      const metadata: Record<string, unknown> = {};
-      if (q.category)            metadata.tags        = q.category;
-      if (q.question_number != null) metadata.exam_number = `第${q.question_number}题`;
-      if (q.options.length > 0)  metadata.options     = q.options;
+  // 批量插入：一次 INSERT 多行（取代逐题 N 次往返；dev 下走代理时差异巨大）。
+  // PostgREST 对单条多行 insert 的 returning 按插入顺序返回，故 inserted[i] 对应 questions[i]。
+  const rows = questions.map((q) => {
+    const question_type = q.options.length > 0 ? 'multiple_choice' : 'calculation';
+    const metadata: Record<string, unknown> = {};
+    if (q.category)                metadata.tags        = q.category;
+    if (q.question_number != null) metadata.exam_number = `第${q.question_number}题`;
+    if (q.options.length > 0)      metadata.options     = q.options;
+    return {
+      content:    q.content,
+      answer:     q.answer,
+      analysis:   q.analysis ?? '',
+      question_type,
+      difficulty: 3, // 已退役字段，留默认中等；展示用群众评分
+      year:       meta.year,
+      source:     meta.source || null,
+      status:     'published',
+      metadata,
+    };
+  });
 
-      const { data, error } = await supabase
-        .from('questions')
-        .insert({
-          content:       q.content,
-          answer:        q.answer,
-          analysis:      q.analysis ?? '',
-          question_type,
-          difficulty:    3, // 已退役字段，留默认中等；展示用群众评分
-          year:          meta.year,
-          source:        meta.source || null,
-          status:        'published',
-          metadata,
-        })
-        .select('id')
-        .single();
-      if (error) throw new Error(error.message);
-      return data.id as string;
-    }),
-  );
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb = supabase as any;
+  // 试卷行不依赖题目 id → 与批量插题**并行**，省一次代理往返（dev 下走 ClashX 收益明显）。
+  const paperPromise = meta.source
+    ? sb.from('papers').insert({
+        title: meta.source,
+        year:  meta.year,
+        type:  meta.paper_type ?? 'real',
+        grade: meta.paper_grade ?? null,
+      }).select('id').single()
+    : Promise.resolve({ data: null, error: null });
 
-  const results: PublishItemResult[] = settled.map((r, i) =>
-    r.status === 'fulfilled'
-      ? { localId: questions[i].id, dbId: r.value }
-      : { localId: questions[i].id, error: (r.reason as Error).message },
-  );
+  const [qRes, pRes] = await Promise.all([
+    supabase.from('questions').insert(rows).select('id'),
+    paperPromise,
+  ]);
 
-  const savedCount = results.filter(r => r.dbId).length;
+  const { data: inserted, error: insErr } = qRes;
+  if (insErr || !inserted) {
+    // 题目入库失败 → 清掉可能已并行插入的孤儿试卷行（best-effort）。
+    if (pRes?.data?.id) { try { await sb.from('papers').delete().eq('id', pRes.data.id); } catch {} }
+    return { success: false, error: `题目入库失败：${insErr?.message ?? '未返回 id'}` };
+  }
 
-  // ── 创建试卷记录并关联题目 ────────────────────────────────────
+  const results: PublishItemResult[] = inserted.map((row, i) => ({
+    localId: questions[i]?.id ?? `row-${i}`,
+    dbId:    (row as { id: string }).id,
+  }));
+  const savedCount = results.length;
+
+  // ── 关联题目到（已并行创建的）试卷记录 ────────────────────────────
   let paper_id: string | undefined;
-  if (meta.source && savedCount > 0) {
+  const { data: paperData, error: paperErr } = pRes ?? { data: null, error: null };
+  if (meta.source && savedCount > 0 && !paperErr && paperData) {
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const sb = supabase as any;
-      const { data: paperData, error: paperErr } = await sb
-        .from('papers')
-        .insert({
-          title: meta.source,
-          year:  meta.year,
-          type:  meta.paper_type ?? 'real',
-          grade: meta.paper_grade ?? null,
+      paper_id = paperData.id as string;
+
+      const paperQuestionsRows = results
+        .map((r, i) => {
+          if (!r.dbId) return null;
+          const q = questions[i];
+          return {
+            paper_id:        paperData.id as string,
+            question_id:     r.dbId,
+            question_number: q.question_number ?? (i + 1),
+          };
         })
-        .select('id')
-        .single();
+        .filter((row): row is NonNullable<typeof row> => row !== null);
 
-      if (!paperErr && paperData) {
-        paper_id = paperData.id as string;
-
-        const paperQuestionsRows = results
-          .map((r, i) => {
-            if (!r.dbId) return null;
-            const q = questions[i];
-            return {
-              paper_id:        paperData.id as string,
-              question_id:     r.dbId,
-              question_number: q.question_number ?? (i + 1),
-            };
-          })
-          .filter((row): row is NonNullable<typeof row> => row !== null);
-
-        if (paperQuestionsRows.length > 0) {
-          const { error: pqErr } = await supabase
-            .from('paper_questions')
-            .insert(paperQuestionsRows);
-          if (pqErr) {
-            // 不要 swallow —— 之前的静默 catch 导致大量试卷题数徽章丢失。
-            console.error('[publishQuestions] paper_questions insert failed:', {
-              paper_id,
-              attempted: paperQuestionsRows.length,
-              error: pqErr.message,
-            });
-          }
+      if (paperQuestionsRows.length > 0) {
+        const { error: pqErr } = await supabase
+          .from('paper_questions')
+          .insert(paperQuestionsRows);
+        if (pqErr) {
+          // 不要 swallow —— 之前的静默 catch 导致大量试卷题数徽章丢失。
+          console.error('[publishQuestions] paper_questions insert failed:', {
+            paper_id,
+            attempted: paperQuestionsRows.length,
+            error: pqErr.message,
+          });
         }
       }
     } catch (e) {
       console.error('[publishQuestions] paper bind failed:', (e as Error).message);
     }
+  } else if (meta.source && paperErr) {
+    console.error('[publishQuestions] papers insert failed:', paperErr.message);
   }
 
   if (savedCount > 0) {
@@ -1106,7 +1125,8 @@ export async function publishPaperBundles(
     if (r.success) {
       results.push({ title: bundle.paper_title, savedCount: r.savedCount, paper_id: r.paper_id });
     } else {
-      results.push({ title: bundle.paper_title, savedCount: 0, error: r.error });
+      // 多卷路径已在循环前删/跳过重复，运行时不会命中 duplicate 分支；仅为类型完整兜底。
+      results.push({ title: bundle.paper_title, savedCount: 0, error: 'error' in r ? r.error : `已存在同名卷《${r.duplicate.title}》` });
     }
   }
 

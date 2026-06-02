@@ -10,12 +10,13 @@ import type { editor as MonacoNS } from 'monaco-editor';
 import MathRenderer from '@/components/MathRenderer';
 import { ScreenshotToLatexButton } from '@/components/admin/ScreenshotToLatexButton';
 import GeometryFigureButton from '@/components/tikz/GeometryFigureButton';
-import type { ExtractedQuestion, PublishBatchMeta, PublishItemResult } from '@/app/actions/process-paper';
+import type { ExtractedQuestion, PublishBatchMeta, PublishItemResult, DuplicatePaperInfo, DuplicateStrategy } from '@/app/actions/process-paper';
 import { publishQuestions } from '@/app/actions/process-paper';
 import {
   CheckCircle2, AlertCircle, Loader2, Send,
-  RotateCcw, Code2, Eye, BookOpen, Printer,
+  RotateCcw, Code2, Eye, BookOpen, Printer, Upload,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 const PAPER_VIEW_KEY = 'aumath_paper_view';
 
@@ -204,6 +205,7 @@ export default function DualPaneEditor({
   initialPaperGrade,
   figures = [],
   onReset,
+  onContinue,
 }: {
   initialQuestions:  ExtractedQuestion[];
   initialPaperTitle?: string;
@@ -211,7 +213,8 @@ export default function DualPaneEditor({
   initialPaperType?:  'real' | 'mock';
   initialPaperGrade?: 'high_school_1' | 'high_school_2' | 'high_school_3' | null;
   figures?: { url: string; question_number: number | null; page: number | null }[];
-  onReset: () => void;
+  onReset: () => void;       // 返回上一步（保留已传文件）
+  onContinue?: () => void;   // 发布成功后「继续上传下一份」（全清重置）
 }) {
   const { resolvedTheme } = useTheme();
   const editorRef = useRef<MonacoNS.IStandaloneCodeEditor | null>(null);
@@ -232,6 +235,7 @@ export default function DualPaneEditor({
   });
 
   const [publishState, setPublishState] = useState<PublishState>({ status: 'idle' });
+  const [dupModal, setDupModal] = useState<DuplicatePaperInfo | null>(null);  // 同名卷确认
 
   const handleEditorChange = useCallback((value: string | undefined) => {
     const text = value ?? '';
@@ -290,13 +294,34 @@ export default function DualPaneEditor({
     }
   }, [resolvedTheme]);
 
-  const handlePublish = useCallback(async () => {
+  const handlePublish = useCallback(async (strategy?: DuplicateStrategy) => {
     if (parseError || !previewQuestions.length) return;
+    setDupModal(null);
     setPublishState({ status: 'publishing' });
 
-    const result = await publishQuestions(previewQuestions, meta);
+    let result;
+    try {
+      result = await publishQuestions(previewQuestions, meta, strategy);
+    } catch (e) {
+      // 关键止血：Server Action 抛错（dev 代理 socket hang up / Stale Action / 网络抖动）时，
+      // 旧代码无 try/catch → promise reject → 状态卡在 publishing 永久转圈。这里捕获并给出反馈。
+      const msg = e instanceof Error ? e.message : String(e);
+      if (/Server Action .* was not found/i.test(msg)) {
+        toast.error('版本不一致：服务端已更新，正在自动刷新页面…', { duration: 2000 });
+        setTimeout(() => window.location.reload(), 800);
+        return;
+      }
+      setPublishState({ status: 'error', message: `入库异常：${msg}` });
+      return;
+    }
 
     if (!result.success) {
+      // 同名卷 → 弹窗让用户选 跳过/替换（不直接报错）
+      if ('duplicate' in result) {
+        setDupModal(result.duplicate);
+        setPublishState({ status: 'idle' });
+        return;
+      }
       setPublishState({ status: 'error', message: result.error });
       return;
     }
@@ -440,7 +465,7 @@ export default function DualPaneEditor({
           className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           <RotateCcw className="h-3.5 w-3.5" />
-          重新上传
+          返回上一步
         </button>
 
         <div className="flex items-center gap-3">
@@ -463,12 +488,21 @@ export default function DualPaneEditor({
                 <Printer className="h-4 w-4" />
                 查看 / 打印试卷
               </a>
+              {onContinue && (
+                <button
+                  onClick={onContinue}
+                  className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors"
+                >
+                  <Upload className="h-4 w-4" />
+                  继续上传下一份
+                </button>
+              )}
             </>
           )}
 
           {!isDone && (
             <button
-              onClick={handlePublish}
+              onClick={() => handlePublish()}
               disabled={isPublishing || !!parseError || questionCount === 0}
               className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-sm font-semibold text-primary-foreground transition-all hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
             >
@@ -481,6 +515,37 @@ export default function DualPaneEditor({
           )}
         </div>
       </div>
+
+      {/* 同名卷确认弹窗 */}
+      {dupModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setDupModal(null)}>
+          <div className="w-full max-w-md rounded-xl border bg-card p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
+              <AlertCircle className="h-5 w-5" />
+              <h3 className="font-semibold">题库中已存在同名试卷</h3>
+            </div>
+            <p className="mt-3 text-sm text-muted-foreground">
+              《<span className="font-medium text-foreground">{dupModal.title}</span>》
+              {dupModal.year != null ? `（${dupModal.year}）` : ''} 已入库，含 {dupModal.existingCount} 道题。
+              <br />继续发布会产生重复。请选择：
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                onClick={() => setDupModal(null)}
+                className="rounded-md border px-4 py-2 text-sm text-muted-foreground hover:bg-muted transition-colors"
+              >
+                跳过（不发布）
+              </button>
+              <button
+                onClick={() => handlePublish('replace')}
+                className="rounded-md bg-destructive px-4 py-2 text-sm font-medium text-white hover:bg-destructive/90 transition-colors"
+              >
+                替换（删旧卷再发）
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

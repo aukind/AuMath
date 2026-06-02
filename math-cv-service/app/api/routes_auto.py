@@ -153,7 +153,9 @@ async def auto_figures_progress(job_id: str) -> dict:
 
 
 @router.post("/auto-figures-doc", response_model=AutoFiguresResponse)
-async def auto_figures_doc(req: AutoDocRequest) -> AutoFiguresResponse:
+def auto_figures_doc(req: AutoDocRequest) -> AutoFiguresResponse:
+    # 同步 def（非 async）：FastAPI 自动放进 threadpool 跑，事件循环空出来 →
+    # 检测期间 /auto-figures-progress 可正常响应（进度条实时动）；多文件请求各占一线程可并行。
     if not req.url.lower().startswith(("http://", "https://")):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "仅支持 http(s) URL")
     try:
