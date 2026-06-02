@@ -1,10 +1,13 @@
 'use client';
 
 import { Drawer } from 'vaul';
+import Link from 'next/link';
 import { Menu, PenLine } from 'lucide-react';
-import SidebarTabs from '@/components/SidebarTabs';
+import HomeSidebar from '@/components/HomeSidebar';
 import SiteViewsBadge from '@/components/SiteViewsBadge';
+import type { MainView } from '@/components/PageLayout';
 import type { TopicWithChildren, PaperRow } from '@/types/database';
+import type { LibraryItem } from '@/types/library';
 
 interface MobileMenuDrawerProps {
   topics: TopicWithChildren[];
@@ -14,6 +17,8 @@ interface MobileMenuDrawerProps {
   isAdmin: boolean;
   hasFilter: boolean;
   siteViews: number; // 接收访问量数据
+  libraryHighlights: LibraryItem[];
+  mainView: MainView;
 }
 
 export default function MobileMenuDrawer({
@@ -24,6 +29,8 @@ export default function MobileMenuDrawer({
   isAdmin,
   hasFilter,
   siteViews,
+  libraryHighlights,
+  mainView,
 }: MobileMenuDrawerProps) {
   return (
     <Drawer.Root direction="left">
@@ -61,31 +68,33 @@ export default function MobileMenuDrawer({
               data-vaul-no-drag
               style={{ WebkitOverflowScrolling: 'touch' }}
             >
-              <SidebarTabs
+              <HomeSidebar
                 topics={topics}
                 papers={papers}
                 selectedTopicId={selectedTopicId}
                 selectedPaperId={selectedPaperId}
                 isAdmin={isAdmin}
+                libraryHighlights={libraryHighlights}
+                mainView={mainView}
               />
 
               {/* 底部操作与统计区 */}
               <div className="mt-auto pt-4 border-t border-zinc-100 dark:border-zinc-800 space-y-3">
                 {hasFilter && (
-                  <a
+                  <Link
                     href="/"
                     className="block text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
                   >
                     ← 返回全部题目
-                  </a>
+                  </Link>
                 )}
                 {isAdmin && (
-                  <a
+                  <Link
                     href="/admin/add"
                     className="flex items-center gap-1.5 text-xs text-zinc-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
                   >
                     <PenLine size={11} /> 录入新题目
-                  </a>
+                  </Link>
                 )}
                 
                 {/* 网站访问量徽章 */}

@@ -104,7 +104,7 @@ export default function ForumPostList({ posts, canPost = true }: ForumPostListPr
           {filteredPosts.map((post) => (
             <li
               key={post.id}
-              className="group relative flex gap-3.5 rounded-xl border border-zinc-200 bg-white px-4 py-3.5 transition-colors hover:border-indigo-300 dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-indigo-700/80"
+              className="group relative flex gap-3.5 rounded-xl border border-zinc-200/80 bg-white px-4 py-3.5 transition-all hover:border-zinc-300 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
             >
               <Link href={`/forum/${post.id}`} className="absolute inset-0 z-0 rounded-xl" aria-label={post.title} />
               
@@ -130,7 +130,7 @@ export default function ForumPostList({ posts, canPost = true }: ForumPostListPr
                   </span>
                 </div>
 
-                <h2 className="mt-1 text-sm font-medium text-zinc-900 dark:text-zinc-100 leading-snug">
+                <h2 className="mt-1 text-[0.9375rem] font-semibold text-zinc-900 dark:text-zinc-100 leading-snug">
                   {post.tags.includes('公告') && <Pin size={13} className="mr-1.5 inline-block shrink-0 text-amber-500" />}
                   {post.title}
                 </h2>

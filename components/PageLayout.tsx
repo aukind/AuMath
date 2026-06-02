@@ -17,7 +17,7 @@ import {
   GripVertical, PenLine, CheckCircle2, Lock, LogIn,
   MessagesSquare, BookMarked, Star, XCircle, Clock, ChevronLeft, Plus, Loader2,
 } from 'lucide-react';
-import SidebarTabs from '@/components/SidebarTabs';
+import HomeSidebar from '@/components/HomeSidebar';
 import SortSelect from '@/components/SortSelect';
 import QuestionSearch from '@/components/QuestionSearch';
 import SiteViewsBadge from '@/components/SiteViewsBadge';
@@ -152,14 +152,16 @@ export default function PageLayout({
     <DndContext id={dndId} sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="mx-auto max-w-7xl w-full flex flex-1 overflow-hidden">
 
-        {/* ── Desktop sidebar ── */}
-        <aside className="hidden lg:flex flex-col w-56 xl:w-64 shrink-0 border-r border-zinc-200/70 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 px-3 py-5 gap-3 overflow-y-auto">
-          <SidebarTabs
+        {/* ── Desktop sidebar：Linear 风全局导航 + 资源大厅/题库 语境面板 ── */}
+        <aside className="hidden lg:flex flex-col w-56 xl:w-64 shrink-0 border-r border-zinc-200/70 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 px-3 py-5 gap-3 overflow-hidden">
+          <HomeSidebar
             topics={topics}
             papers={papers}
             selectedTopicId={paperId ? undefined : topicId}
             selectedPaperId={paperId}
             isAdmin={isAdmin}
+            libraryHighlights={libraryHighlights}
+            mainView={mainView}
           />
           <div className="mt-auto flex flex-col gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
             <SiteViewsBadge initialCount={siteViews} />

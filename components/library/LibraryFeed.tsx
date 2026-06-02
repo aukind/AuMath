@@ -80,6 +80,9 @@ const FEED_TITLE: Record<LibraryFilter, string> = {
 interface Props {
   initialItems: LibraryItem[];
   initialFilter?: LibraryFilter;
+  initialType?: ResourceType | null;
+  initialStage?: EduStage | null;
+  initialQuery?: string;
   isAdmin: boolean;
   currentUserId: string | null;
 }
@@ -99,6 +102,9 @@ function Avatar({ name, url }: { name: string; url?: string }) {
 export default function LibraryFeed({
   initialItems,
   initialFilter = 'all',
+  initialType = null,
+  initialStage = null,
+  initialQuery = '',
   isAdmin,
   currentUserId,
 }: Props) {
@@ -107,10 +113,10 @@ export default function LibraryFeed({
   const [isPending, startTransition] = useTransition();
   const [active, setActive] = useState<LibraryItem | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
-  // 检索 + 分类筛选（客户端即时，对已加载列表过滤）
-  const [query, setQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<ResourceType | null>(null);
-  const [stageFilter, setStageFilter] = useState<EduStage | null>(null);
+  // 检索 + 分类筛选（客户端即时，对已加载列表过滤）；初值可由首页导航深链注入
+  const [query, setQuery] = useState(initialQuery);
+  const [typeFilter, setTypeFilter] = useState<ResourceType | null>(initialType);
+  const [stageFilter, setStageFilter] = useState<EduStage | null>(initialStage);
 
   const refresh = useCallback((f: LibraryFilter) => {
     startTransition(async () => {

@@ -127,6 +127,8 @@ export default async function HomePage({
             isAdmin={isAdmin}
             hasFilter={mainView === 'browse'}
             siteViews={siteViews} /* 将访问次数传递给移动端菜单 */
+            libraryHighlights={libraryHighlights}
+            mainView={mainView}
           />
 
           <Link href="/" className="flex items-center gap-2">

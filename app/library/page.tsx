@@ -8,17 +8,39 @@ import LibraryMark from '@/components/library/LibraryMark';
 import { getLibraryItems } from '@/app/actions/library';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
+import {
+  RESOURCE_TYPES,
+  EDU_STAGES,
+  type EduStage,
+  type LibraryFilter,
+  type ResourceType,
+} from '@/types/library';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '资源大厅 · AuMath' };
 
-export default async function LibraryPage() {
+export default async function LibraryPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string; type?: string; stage?: string; q?: string }>;
+}) {
+  const { tab, type, stage, q } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const items = await getLibraryItems('all');
+  // 深链筛选（来自首页资源大厅导航）：校验白名单后作为初值
+  const filter: LibraryFilter =
+    tab === 'official' || tab === 'community' ? tab : 'all';
+  const initialType = (RESOURCE_TYPES as readonly string[]).includes(type ?? '')
+    ? (type as ResourceType)
+    : null;
+  const initialStage = (EDU_STAGES as readonly string[]).includes(stage ?? '')
+    ? (stage as EduStage)
+    : null;
+
+  const items = await getLibraryItems(filter);
   const isAdmin = isAdminUser(user);
 
   return (
@@ -47,7 +69,10 @@ export default async function LibraryPage() {
 
       <LibraryFeed
         initialItems={items}
-        initialFilter="all"
+        initialFilter={filter}
+        initialType={initialType}
+        initialStage={initialStage}
+        initialQuery={q ?? ''}
         isAdmin={isAdmin}
         currentUserId={user?.id ?? null}
       />
