@@ -30,6 +30,8 @@ class Settings(BaseSettings):
     detect_backend: str = "coreml"
     detect_conf: float = 0.2
     detect_imgsz: int = 1024
+    # 成组小图（如三视图 图①-⑤）裁剪时向下扩，把下方「图①」编号一起裁进图；孤图不扩。
+    caption_in_crop: bool = True
 
     # Pipeline A 引擎："mock"（默认）| "detikzify"（本地）| "hf-space"（云端，免本地部署）
     pipeline_a_engine: str = "mock"

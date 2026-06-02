@@ -1189,7 +1189,9 @@ function matchFiguresToQuestions(
         const urls = q.question_number != null ? qmap.get(q.question_number) : undefined;
         if (!urls?.length) return q;
         merged += urls.length;
-        return { ...q, content: `${q.content}${urls.map(u => `\n\n![几何图](${u})`).join('')}` };
+        // 一题多图放进同一段、空格分隔 → MathRenderer 里平铺换行成一行（一题多图不再竖向堆叠）。
+        const imgs = urls.map(u => `![几何图](${u})`).join(' ');
+        return { ...q, content: `${q.content}\n\n${imgs}` };
       }),
     };
   });

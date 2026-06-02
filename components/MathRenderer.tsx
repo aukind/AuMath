@@ -112,6 +112,12 @@ export default function MathRenderer({
         '[&_td]:border [&_td]:border-zinc-300 dark:[&_td]:border-zinc-600',
         '[&_th]:px-3! [&_th]:py-1.5! [&_td]:px-3! [&_td]:py-1.5!',
         '[&_th]:text-center [&_td]:text-center',
+        // 位图几何图（markdown ![](url)）：有界缩略图 + 白底卡片；inline-block 让一题多图
+        // 在同一段里平铺换行成一行（取代旧的竖向全宽堆叠），单图则是一张适中缩略图。
+        // 全站 markdown 图片只有几何图，故此样式范围安全。
+        '[&_img]:inline-block [&_img]:align-top [&_img]:my-2 [&_img]:mr-2',
+        '[&_img]:max-w-[260px] [&_img]:max-h-[240px] [&_img]:w-auto [&_img]:h-auto [&_img]:object-contain',
+        '[&_img]:rounded-md [&_img]:bg-white [&_img]:p-1.5 [&_img]:border [&_img]:border-zinc-200',
         // SVG 几何图：居中、限宽、亮色卡片背景便于阅读
         '[&_svg]:block [&_svg]:mx-auto [&_svg]:my-3 [&_svg]:max-w-full',
         '[&_svg]:bg-white dark:[&_svg]:bg-zinc-50 [&_svg]:rounded-md [&_svg]:p-2',

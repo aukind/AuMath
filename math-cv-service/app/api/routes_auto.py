@@ -25,6 +25,50 @@ _processor = PipelineBProcessor(return_clean_image=False)
 _MAX_FIGURES = 12  # 单页几何图上限，防异常页拖垮
 
 
+def _extend_caption_boxes(
+    boxes: list[tuple[int, int, int, int, float]],
+    page_h: int,
+    page_w: int,
+) -> list[tuple[int, int, int, int]]:
+    """为每张图算「裁剪框」：成组小图（如三视图 图①-⑤）向下扩，把下方「图①」编号裁进来；孤图不扩。
+
+    成组判定：存在另一 figure 框是它的同行邻居（纵向重叠 + 横向间隔小）或同列邻居（横向重叠 + 纵向间隔小）。
+    成组才扩——避免把单个立体几何图正下方的题干文字也裁进去。扩展量被「正下方且 x 重叠的图」的顶边夹住。
+    返回与 boxes 等长的 (x1,y1,x2,y2) 裁剪框（不含 conf）。
+    """
+    out: list[tuple[int, int, int, int]] = []
+    for i, (x1, y1, x2, y2, _c) in enumerate(boxes):
+        fw, fh = x2 - x1, y2 - y1
+        grouped = False
+        for j, (bx1, by1, bx2, by2, _) in enumerate(boxes):
+            if j == i:
+                continue
+            ow, oh = bx2 - bx1, by2 - by1
+            v_overlap = min(y2, by2) - max(y1, by1)      # 纵向重叠
+            h_overlap = min(x2, bx2) - max(x1, bx1)      # 横向重叠
+            h_gap = max(bx1 - x2, x1 - bx2)              # 横向间隔（负=重叠）
+            v_gap = max(by1 - y2, y1 - by2)              # 纵向间隔
+            same_row = v_overlap > 0.4 * min(fh, oh) and h_gap < 1.2 * max(fw, ow)
+            same_col = h_overlap > 0.4 * min(fw, ow) and v_gap < 1.2 * max(fh, oh)
+            if same_row or same_col:
+                grouped = True
+                break
+        if not grouped:
+            out.append((x1, y1, x2, y2))
+            continue
+        margin = min(max(int(0.6 * fh), 20), 50)
+        limit = page_h
+        for j, (bx1, by1, bx2, by2, _) in enumerate(boxes):
+            if j == i:
+                continue
+            # 正下方且 x 重叠的图 → 别扩进它
+            if by1 >= y2 and min(x2, bx2) - max(x1, bx1) > 0:
+                limit = min(limit, by1 - 3)
+        new_y2 = min(y2 + margin, limit, page_h)
+        out.append((x1, y1, x2, max(new_y2, y2)))
+    return out
+
+
 def _process_page(
     img_bgr,
     page_no: int | None = None,
@@ -42,8 +86,15 @@ def _process_page(
     """
     from app.detection.layout import detect_figure_boxes
 
+    settings = get_settings()
     h, w = img_bgr.shape[:2]
     boxes = detect_figure_boxes(img_bgr)[:_MAX_FIGURES]
+    # 裁剪框：成组小图向下扩把「图①」编号带进来；孤图= 原框。box 字段仍存原 figure 框。
+    crop_boxes = (
+        _extend_caption_boxes(boxes, h, w)
+        if settings.caption_in_crop
+        else [(b[0], b[1], b[2], b[3]) for b in boxes]
+    )
     if assign_anchors and boxes:
         from app.detection.associate import assign_figures, detect_question_anchors
 
@@ -56,12 +107,13 @@ def _process_page(
     out: list[AutoFigure] = []
     for i, box in enumerate(boxes):
         x1, y1, x2, y2, conf = box
-        crop_png = encode_png_bgr(img_bgr[y1:y2, x1:x2])
+        cx1, cy1, cx2, cy2 = crop_boxes[i]  # 裁剪用（可能向下扩含编号）
+        crop_png = encode_png_bgr(img_bgr[cy1:cy2, cx1:cx2])
         fig = AutoFigure(
             question_number=qnums[i],
             crop_base64=encode_base64(crop_png),  # 始终带原图裁剪做兜底
             confidence=round(conf, 3),
-            box=[x1, y1, x2, y2],
+            box=[x1, y1, x2, y2],  # 阅读顺序/归属用原 figure 框（不含扩展）
             page=page_no,
         )
         if mode == "cloud-vector":

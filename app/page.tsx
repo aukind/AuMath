@@ -4,6 +4,7 @@ import { getFavoritedQuestionIds, getErroredQuestionIds, getWorkspaceQuestions }
 import { getMyDifficultyRatings } from '@/app/actions/difficulty';
 import { getSiteViews } from '@/app/actions/site-stats';
 import { getForumPosts } from '@/app/actions/forum';
+import { getLibraryItems } from '@/app/actions/library';
 import { getMyAccount } from '@/app/actions/account';
 import { getUnreadNotificationCount } from '@/app/actions/notifications';
 import { createClient } from '@/lib/supabase/server';
@@ -12,12 +13,14 @@ import Link from 'next/link';
 import PageLayout, { type MainView } from '@/components/PageLayout';
 import { Infinity, PenLine, CalendarDays, Search as SearchIcon, FileText } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
+import LibraryMark from '@/components/library/LibraryMark';
 import AccountMenu from '@/components/AccountMenu';
 import NotificationBell from '@/components/NotificationBell';
 import CanvasScratchpad from '@/components/CanvasScratchpad';
 import MobileMenuDrawer from '@/components/MobileMenuDrawer';
 import type { QuestionWithTopics, WorkspaceType } from '@/types/database';
 import type { ForumPost } from '@/types/forum';
+import type { LibraryItem } from '@/types/library';
 
 export const dynamic = 'force-dynamic';
 
@@ -56,6 +59,7 @@ export default async function HomePage({
     siteViews,
     account,
     unreadCount,
+    libraryHighlights,
   ] = await Promise.all([
     supabase.auth.getUser(),
     getQuestionTopics(),
@@ -78,6 +82,10 @@ export default async function HomePage({
     getSiteViews(),
     getMyAccount(),
     getUnreadNotificationCount(),
+    // Hero 横幅只在默认社区视图展示，故仅该视图预取
+    mainView !== 'browse'
+      ? getLibraryItems('all')
+      : Promise.resolve<LibraryItem[]>([]),
   ]);
 
   const isAdmin = isAdminUser(user);
@@ -143,6 +151,13 @@ export default async function HomePage({
               <CalendarDays size={14} className="text-indigo-500" />
               <span className="hidden sm:inline">每日一题</span>
             </Link>
+            <Link
+              href="/library"
+              className="flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 px-2.5 py-1.5 text-xs font-semibold text-indigo-700 transition-colors hover:from-indigo-100 hover:to-violet-100 dark:border-indigo-500/30 dark:from-indigo-500/15 dark:to-violet-500/15 dark:text-indigo-300"
+            >
+              <LibraryMark size={16} />
+              <span className="hidden sm:inline">资源大厅</span>
+            </Link>
             <ThemeToggle />
             {isLoggedIn && userId ? (
               <>
@@ -182,6 +197,7 @@ export default async function HomePage({
         validSort={validSort}
         mainView={mainView}
         forumPosts={forumPosts}
+        libraryHighlights={libraryHighlights}
         mybankTab={mybankTab}
         favoritedIds={favoritedIds}
         erroredIds={erroredIds}

@@ -6,7 +6,7 @@ import MathRenderer from '@/components/MathRenderer';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import DifficultyRating from '@/components/DifficultyRating';
 import { toggleFavorite, markError, removeError, recordView } from '@/app/actions/user-workspace';
-import { stripInlineOptionTail, withAnswerBlank, isBlankOption } from '@/lib/questions/content';
+import { stripInlineOptionTail, withAnswerBlank, isBlankOption, normalizeOptions } from '@/lib/questions/content';
 import type { QuestionWithTopics } from '@/types/database';
 
 interface QuestionCardProps {
@@ -22,17 +22,6 @@ interface QuestionCardProps {
   initialErrored?: boolean;
   /** 当前用户对该题的难度评分（1–5），未评为 null */
   initialMyRating?: number | null;
-}
-
-function normalizeOptions(raw: unknown): string[] {
-  if (!raw) return [];
-  if (Array.isArray(raw)) return raw.map(String);
-  if (typeof raw === 'object') {
-    return Object.entries(raw as Record<string, unknown>).map(
-      ([k, v]) => `**${k}.** ${v}`,
-    );
-  }
-  return [];
 }
 
 export default function QuestionCard({ question, isAdmin = false, canModify, onDelete, isDragging = false, dragHandleProps, isLoggedIn = false, initialFavorited = false, initialErrored = false, initialMyRating = null }: QuestionCardProps) {

@@ -22,6 +22,7 @@ import SortSelect from '@/components/SortSelect';
 import QuestionSearch from '@/components/QuestionSearch';
 import SiteViewsBadge from '@/components/SiteViewsBadge';
 import ForumPostList from '@/components/forum/ForumPostList';
+import LibraryHeroBanner from '@/components/library/LibraryHeroBanner';
 import DashboardWorkspace from '@/components/dashboard/DashboardWorkspace';
 import EditPaperButton from '@/components/admin/EditPaperButton';
 import { useSoftNav, isPlainLeftClick } from '@/components/ui/useSoftNav';
@@ -30,6 +31,7 @@ import { deleteQuestion, updateQuestionCategory } from '@/app/actions/questions'
 import type { SortOrder } from '@/app/actions/questions';
 import type { TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceType } from '@/types/database';
 import type { ForumPost } from '@/types/forum';
+import type { LibraryItem } from '@/types/library';
 
 /** 主区显示模式：社区论坛 / 我的题库 / 题目浏览（点侧边栏知识点·真题·模拟题）。 */
 export type MainView = 'forum' | 'mybank' | 'browse';
@@ -48,6 +50,7 @@ interface PageLayoutProps {
   validSort: SortOrder;
   mainView: MainView;
   forumPosts: ForumPost[];
+  libraryHighlights: LibraryItem[];
   mybankTab: WorkspaceType;
   favoritedIds: string[];
   erroredIds: string[];
@@ -81,6 +84,7 @@ export default function PageLayout({
   validSort,
   mainView,
   forumPosts,
+  libraryHighlights,
   mybankTab,
   favoritedIds,
   erroredIds,
@@ -188,7 +192,12 @@ export default function PageLayout({
               tabs={WORKSPACE_TABS}
               defaultTab={mainView === 'mybank' ? 'bank' : 'forum'}
               onTabChange={syncWorkspaceUrl}
-              forum={<ForumPostList posts={forumPosts} canPost={isLoggedIn} />}
+              forum={
+                <>
+                  <LibraryHeroBanner highlights={libraryHighlights} />
+                  <ForumPostList posts={forumPosts} canPost={isLoggedIn} />
+                </>
+              }
               bank={
                 isLoggedIn ? (
                   <MyBankView
@@ -303,6 +312,7 @@ function BrowseView({
           favoritedIds={favoritedIds}
           erroredIds={erroredIds}
           myRatings={myRatings}
+          title={pageTitle}
         />
       )}
     </>

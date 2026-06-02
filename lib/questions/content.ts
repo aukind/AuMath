@@ -23,6 +23,23 @@ export function stripInlineOptionTail(content: string, hasOptions: boolean): str
   return content.replace(PAREN_OPTION_TAIL_RE, '').replace(LINE_OPTION_TAIL_RE, '').trimEnd();
 }
 
+/**
+ * 把 metadata.options 归一化成字符串数组。两种入库形态都兼容：
+ *  ① 数组 ["A. …","B. …"]：原样返回（已带标号）。
+ *  ② 对象 {"A":"…","B":"…"}：拼成 "**A.** …" 的 markdown（加粗标号）。
+ * 题卡（QuestionCard）与讲义 PDF（LectureDocument）共用，确保选项渲染逻辑完全一致。纯函数，前后端通用。
+ */
+export function normalizeOptions(raw: unknown): string[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw === 'object') {
+    return Object.entries(raw as Record<string, unknown>).map(
+      ([k, v]) => `**${k}.** ${v}`,
+    );
+  }
+  return [];
+}
+
 /** 高考选择题题干末尾的作答括号：全角括号 + 两个全角空格（U+3000），贴合试卷排版。 */
 export const ANSWER_BLANK = '（　　）';
 

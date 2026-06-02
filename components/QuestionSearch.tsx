@@ -1,10 +1,12 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { useDraggable } from '@dnd-kit/core';
-import { Search, X, SearchX, FileText } from 'lucide-react';
+import { Search, X, SearchX, FileText, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 import QuestionCard from '@/components/QuestionCard';
-import PrintContainer from '@/components/PrintContainer';
+import { generateLecturePdf } from '@/app/actions/lecture';
+import type { LectureQuestion } from '@/components/LectureDocument';
 import type { QuestionWithTopics } from '@/types/database';
 
 interface Props {
@@ -16,6 +18,27 @@ interface Props {
   favoritedIds?: string[];
   erroredIds?: string[];
   myRatings?: Record<string, number>;
+  /** 当前列表标题（如试卷名），用作讲义抬头与文件名 */
+  title?: string;
+}
+
+/** 把完整题目压成讲义 PDF 所需的精简投影（客户端已持有全量数据，无需服务端再查库）。 */
+function toLectureQuestion(q: QuestionWithTopics): LectureQuestion {
+  const primaryTopic = (
+    q.question_topic_relations.find(r => r.is_primary) ?? q.question_topic_relations[0]
+  )?.topics;
+  return {
+    id: q.id,
+    content: q.content,
+    options: q.metadata?.options ?? null,
+    answer: q.answer ?? null,
+    analysis: q.analysis ?? null,
+    solution: q.solution ?? null,
+    source: q.source ?? null,
+    year: q.year ?? null,
+    difficulty: q.difficulty,
+    topicName: primaryTopic?.name ?? null,
+  };
 }
 
 function stripLatex(text: string): string {
@@ -79,12 +102,12 @@ function DraggableCard({
   );
 }
 
-export default function QuestionSearch({ questions, isAdmin, userId, onDelete, isLoggedIn = false, favoritedIds = [], erroredIds = [], myRatings = {} }: Props) {
+export default function QuestionSearch({ questions, isAdmin, userId, onDelete, isLoggedIn = false, favoritedIds = [], erroredIds = [], myRatings = {}, title }: Props) {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [printQuestions, setPrintQuestions] = useState<QuestionWithTopics[]>([]);
-  const [showGuide, setShowGuide] = useState(false);
-  const [pendingPrint, setPendingPrint] = useState<QuestionWithTopics[]>([]);
+  const [showExport, setShowExport] = useState(false);
+  const [includeAnswers, setIncludeAnswers] = useState(false);
+  const [generating, setGenerating] = useState(false);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -96,15 +119,6 @@ export default function QuestionSearch({ questions, isAdmin, userId, onDelete, i
   const selectedCount = selectedIds.size;
   const allFilteredSelected =
     filtered.length > 0 && filtered.every(q => selectedIds.has(q.id));
-
-  useEffect(() => {
-    if (printQuestions.length === 0) return;
-    const timer = setTimeout(() => {
-      window.print();
-      setPrintQuestions([]);
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [printQuestions]);
 
   function toggleSelection(id: string) {
     setSelectedIds(prev => {
@@ -128,21 +142,42 @@ export default function QuestionSearch({ questions, isAdmin, userId, onDelete, i
   }
 
   function handleGeneratePDF() {
-    const selected = filtered.filter(q => selectedIds.has(q.id));
-    if (selected.length === 0) return;
-    setPendingPrint(selected);
-    setShowGuide(true);
+    if (selectedCount === 0) return;
+    setShowExport(true);
   }
 
-  function handleConfirmPrint() {
-    setShowGuide(false);
-    setPrintQuestions(pendingPrint);
+  async function handleDownload() {
+    // 用全量 questions（而非当前 filtered）筛选，避免弹窗开着时改搜索词丢掉已选题
+    const selected = questions.filter(q => selectedIds.has(q.id));
+    if (selected.length === 0) return;
+    setGenerating(true);
+    try {
+      const res = await generateLecturePdf(selected.map(toLectureQuestion), includeAnswers, title);
+      if (!res.ok) {
+        toast.error(res.error || 'PDF 生成失败');
+        return;
+      }
+      const bytes = Uint8Array.from(atob(res.base64), c => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = res.filename;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShowExport(false);
+      toast.success(`已生成讲义（${selected.length} 题）`);
+    } catch {
+      toast.error('PDF 生成失败，请重试');
+    } finally {
+      setGenerating(false);
+    }
   }
 
   return (
     <div>
-      {/* Search bar */}
-      <div className="flex gap-3 max-w-3xl mb-3 items-center">
+      {/* 吸顶工具栏：搜索 + 生成讲义按钮常驻顶部，选完底部的题也无需滑回最上面 */}
+      <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 mb-3 bg-zinc-50/85 dark:bg-zinc-950/85 backdrop-blur supports-[backdrop-filter]:bg-zinc-50/70 dark:supports-[backdrop-filter]:bg-zinc-950/70 border-b border-zinc-100 dark:border-zinc-800">
+      <div className="flex gap-3 max-w-3xl items-center">
         <div className="relative flex-1">
           <Search
             size={15}
@@ -182,6 +217,7 @@ export default function QuestionSearch({ questions, isAdmin, userId, onDelete, i
             </span>
           )}
         </button>
+      </div>
       </div>
 
       {/* Selection controls */}
@@ -245,57 +281,59 @@ export default function QuestionSearch({ questions, isAdmin, userId, onDelete, i
         </div>
       )}
 
-      <PrintContainer questions={printQuestions} />
-
-      {/* PDF guide modal */}
-      {showGuide && (
+      {/* 导出讲义弹窗：含答案开关 + 一键下载 */}
+      {showExport && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
-            onClick={() => setShowGuide(false)}
+            onClick={() => !generating && setShowExport(false)}
           />
           <div className="relative bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-sm p-6 border border-zinc-200 dark:border-zinc-800">
             <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/40 mb-4 mx-auto">
               <FileText size={22} className="text-blue-600 dark:text-blue-400" />
             </div>
             <h2 className="text-center font-semibold text-zinc-900 dark:text-zinc-100 mb-1">
-              即将打开打印对话框
+              生成讲义 PDF
             </h2>
             <p className="text-center text-sm text-zinc-500 dark:text-zinc-400 mb-5">
-              在对话框中选择「另存为 PDF」即可保存讲义
+              已选 {selectedCount} 题，将直接下载为 PDF 文件
             </p>
-            <div className="space-y-2 mb-6 text-sm">
-              <div className="flex items-baseline gap-3 px-3 py-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/60">
-                <span className="shrink-0 w-24 text-zinc-400 text-xs">Chrome / Edge</span>
-                <span className="text-zinc-600 dark:text-zinc-300">
-                  目标打印机 → <strong className="text-zinc-800 dark:text-zinc-200">另存为 PDF</strong> → 保存
-                </span>
-              </div>
-              <div className="flex items-baseline gap-3 px-3 py-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/60">
-                <span className="shrink-0 w-24 text-zinc-400 text-xs">Safari（Mac）</span>
-                <span className="text-zinc-600 dark:text-zinc-300">
-                  左下角 <strong className="text-zinc-800 dark:text-zinc-200">PDF</strong> → 存储为 PDF
-                </span>
-              </div>
-              <div className="flex items-baseline gap-3 px-3 py-2.5 rounded-xl bg-zinc-50 dark:bg-zinc-800/60">
-                <span className="shrink-0 w-24 text-zinc-400 text-xs">Firefox</span>
-                <span className="text-zinc-600 dark:text-zinc-300">
-                  打印机 → <strong className="text-zinc-800 dark:text-zinc-200">另存为 PDF</strong>
-                </span>
-              </div>
-            </div>
+
+            {/* 含答案/解析开关 */}
+            <label className="flex items-center justify-between gap-3 px-4 py-3 mb-5 rounded-xl border border-zinc-200 dark:border-zinc-700 cursor-pointer select-none">
+              <span className="flex flex-col">
+                <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">含答案与解析</span>
+                <span className="text-xs text-zinc-400">关：练习卷（留空白解答区）· 开：教师版</span>
+              </span>
+              <input
+                type="checkbox"
+                checked={includeAnswers}
+                onChange={e => setIncludeAnswers(e.target.checked)}
+                disabled={generating}
+                className="w-4 h-4 rounded accent-blue-600 shrink-0"
+              />
+            </label>
+
             <div className="flex gap-2.5">
               <button
-                onClick={() => setShowGuide(false)}
-                className="flex-1 py-2.5 rounded-xl text-sm font-medium border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                onClick={() => setShowExport(false)}
+                disabled={generating}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors disabled:opacity-50"
               >
                 取消
               </button>
               <button
-                onClick={handleConfirmPrint}
-                className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all"
+                onClick={handleDownload}
+                disabled={generating}
+                className="flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-70 disabled:active:scale-100"
               >
-                确定，继续
+                {generating ? (
+                  <>
+                    <Loader2 size={15} className="animate-spin" /> 生成中…
+                  </>
+                ) : (
+                  '下载 PDF'
+                )}
               </button>
             </div>
           </div>
