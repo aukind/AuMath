@@ -6,7 +6,7 @@ import { Search, X, SearchX, FileText, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import QuestionCard from '@/components/QuestionCard';
 import { generateLecturePdf } from '@/app/actions/lecture';
-import type { LectureQuestion } from '@/components/LectureDocument';
+import type { LectureQuestion } from '@/lib/lecture/types';
 import type { QuestionWithTopics } from '@/types/database';
 
 interface Props {

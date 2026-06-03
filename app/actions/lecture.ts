@@ -1,10 +1,11 @@
 'use server';
 
 // 讲义 PDF 生成的入口 Server Action（客户端调用）。
-// 本文件只做编排：实际的 renderToStaticMarkup + 无头 Chromium 渲染在 server-only 的 lib/lecture/render-pdf 里，
-// 且**动态 import**，以绕开 Next/Turbopack「server action 模块不得静态引入 react-dom/server」的限制。
+// 本文件只做编排：实际的「unified 渲染 HTML + 无头 Chromium 出 PDF」在 server-only 的 lib/lecture/render-pdf 里，
+// 且**动态 import**，把重型的 playwright-core / @sparticuz/chromium 推迟到真正生成时再加载（页面初次渲染不付出代价）。
+// 注：旧实现曾用 react-dom/server，在 Vercel 无头函数里因 react-dom 未被 trace 进 node_modules 而崩；已改用 unified 管线。
 
-import type { LectureQuestion } from '@/components/LectureDocument';
+import type { LectureQuestion } from '@/lib/lecture/types';
 
 export type GenerateLectureResult =
   | { ok: true; base64: string; filename: string }

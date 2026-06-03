@@ -23,7 +23,9 @@ export interface MathRendererProps {
   dropCap?: boolean;
 }
 
-const defaultKatexOptions: KatexOptions = {
+// 导出以便讲义 PDF 的服务端 unified 渲染管线（lib/lecture/md-to-html）复用同一套 KaTeX 宏，
+// 保证 PDF 与题卡的公式（平行符号、\R \N 等）完全一致。
+export const defaultKatexOptions: KatexOptions = {
   throwOnError: false,
   strict:       'ignore',
   trust:        false,
