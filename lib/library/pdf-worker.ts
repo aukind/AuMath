@@ -1,8 +1,8 @@
 'use client';
 
-// 资源大厅共享的 PDF.js 配置（阅读器 PdfViewerModal 与封面生成 generateCover 共用）。
+// 资源大厅共享的 PDF.js 配置（阅读器 ImmersiveReader 与封面生成 generateCover 共用）。
 // ⚠️ 仅可在客户端运行路径里被加载：
-//   · PdfViewerModal 经 dynamic(ssr:false) 懒载 → 其静态 import 此模块 OK；
+//   · ImmersiveReader 经 dynamic(ssr:false) 懒载 → 其静态 import 此模块 OK；
 //   · generateCover 经运行时 import() 动态加载 → 不会在 SSR 阶段求值。
 // 用 pdfjs.version 拼 CDN worker，保证 API 与 Worker 版本永远一致。
 

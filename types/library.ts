@@ -34,6 +34,8 @@ export interface LibraryItem {
   view_count: number;
   download_count: number;
   report_count: number;
+  /** 点赞数（迁移 020；由 toggle_library_upvote 原子维护） */
+  upvote_count: number;
   tags: string[];
   /** 资料类型（见 RESOURCE_TYPES） */
   resource_type: ResourceType;
@@ -78,4 +80,12 @@ export interface LibraryActions {
   reportItem(itemId: string): Promise<{ success: boolean; hidden?: boolean }>;
   /** Admin only：加精，转为官方精选 */
   promoteItem(itemId: string): Promise<boolean>;
+  /**
+   * 点赞 / 取消点赞（迁移 020）。原子 toggle，DB 端推导计数。
+   * 注：字段名规格作 `upvotes`，但库内计数列统一 `_count`（见 LibraryItem.upvote_count）；
+   *     此处返回值用 `upvotes` 贴合规格调用方。
+   */
+  toggleUpvote(
+    itemId: string,
+  ): Promise<{ success: boolean; upvoted: boolean; upvotes: number }>;
 }

@@ -1,6 +1,7 @@
 import { getQuestions, getQuestionTopics, getPapers, getQuestionsByPaperId } from '@/app/actions/questions';
 import type { PaperQuestionsResult, SortOrder } from '@/app/actions/questions';
 import { getFavoritedQuestionIds, getErroredQuestionIds, getWorkspaceQuestions } from '@/app/actions/user-workspace';
+import { getTodayDueCount } from '@/app/actions/fsrs';
 import { getMyDifficultyRatings } from '@/app/actions/difficulty';
 import { getSiteViews } from '@/app/actions/site-stats';
 import { getForumPosts } from '@/app/actions/forum';
@@ -60,6 +61,7 @@ export default async function HomePage({
     account,
     unreadCount,
     libraryHighlights,
+    dueCount,
   ] = await Promise.all([
     supabase.auth.getUser(),
     getQuestionTopics(),
@@ -86,6 +88,10 @@ export default async function HomePage({
     mainView !== 'browse'
       ? getLibraryItems('all')
       : Promise.resolve<LibraryItem[]>([]),
+    // FSRS 今日复习徽标，仅我的题库可见的非浏览视图预取（未登录内部返回 0）
+    mainView !== 'browse'
+      ? getTodayDueCount()
+      : Promise.resolve(0),
   ]);
 
   const isAdmin = isAdminUser(user);
@@ -115,9 +121,14 @@ export default async function HomePage({
   const pageTitle = activePaper?.title ?? activeTopicName ?? '全部题目';
 
   return (
-    <div className="h-screen overflow-hidden flex flex-col bg-zinc-50 dark:bg-zinc-950">
+    // data-lenis-prevent：本页是固定视口外壳（h-screen overflow-hidden），真正滚动的是
+    // 内部 <main>/侧栏的 overflow-y-auto。全局 Lenis(root) 接管的是 document 滚动，会吞掉
+    // 滚轮事件却无处可滚 → 内层滚不动。让 Lenis 忽略整个本页子树，内层恢复原生滚动。
+    // （其余页面走 document 滚动，Lenis 平滑照常生效。）
+    <div data-lenis-prevent className="h-screen overflow-hidden flex flex-col bg-zinc-50 dark:bg-zinc-950">
       {/* ── 顶部导航 ── */}
-      <header className="shrink-0 sticky top-0 z-30 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm">
+      {/* data-zen-chrome="top"：沉浸模式下由 globals.css 平滑上移淡出 */}
+      <header data-zen-chrome="top" className="shrink-0 sticky top-0 z-30 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm">
         <div className="mx-auto max-w-7xl flex items-center gap-3 px-4 h-14">
           <MobileMenuDrawer
             topics={topics}
@@ -205,6 +216,7 @@ export default async function HomePage({
         erroredIds={erroredIds}
         myRatings={myRatings}
         siteViews={siteViews}
+        dueCount={dueCount}
       />
 
       <CanvasScratchpad />

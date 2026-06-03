@@ -33,6 +33,8 @@ export interface ForumComment {
   author: ForumUser;
   createdAt: string;
   upvotes: number;
+  /** 当前登录用户是否已赞此回复（匿名为 false）；用于高亮与正确切换 +1/-1 */
+  upvotedByMe?: boolean;
   /** 挂载的楼中楼数据 */
   subComments: SubComment[];
 }
@@ -47,6 +49,12 @@ export interface ForumPost {
   createdAt: string;
   viewCount: number;
   commentCount: number;
+  /** 帖子点赞数（公开计数，仿评论点赞） */
+  upvotes: number;
+  /** 当前登录用户是否已赞此帖（匿名/未取时 false） */
+  upvotedByMe?: boolean;
+  /** 当前登录用户是否已收藏此帖（私有书签；匿名/未取时 false） */
+  favoritedByMe?: boolean;
   /** 例如：["微积分", "每日一题"] */
   tags: string[];
 }

@@ -27,6 +27,39 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ─────────────────────────────────────────────────────────────
+   呼吸态流体光晕（Ambient Fluid Aura）—— 由 BackgroundProvider 挂载。
+   基线 opacity 过渡让主题/Zen 切换更顺滑；Zen Mode 下淡出至 0，
+   阅读区回归纯净单色，最大化 LaTeX 公式专注度。
+   ───────────────────────────────────────────────────────────── */
+[data-ambient-aura] {
+  transition: opacity 0.6s ease;
+}
+.zen-active [data-ambient-aura] {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-ambient-aura] {
+    transition: none;
+  }
+}
+
+/* 共享元素弹窗（论坛/题目）开启时，背景 app-shell 轻微缩小后移营造纵深；
+   模糊由弹窗遮罩的 backdrop-blur 提供。无弹窗时零 transform，不影响常态浏览与 sticky 定位。 */
+[data-app-shell] {
+  transition: transform 420ms cubic-bezier(0.32, 0.72, 0, 1), border-radius 420ms ease;
+  transform-origin: center 22%;
+}
+body:has([data-app-modal]) [data-app-shell] {
+  transform: scale(0.965);
+  border-radius: 1.25rem;
+  overflow: clip;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-app-shell] { transition: none; }
+  body:has([data-app-modal]) [data-app-shell] { transform: none; border-radius: 0; }
+}
+
 /* KaTeX 公式块防止宽屏溢出，允许横向滚动 */
 .katex-display {
   overflow-x: auto;
@@ -58,4 +91,56 @@ body {
 .prose h2,
 .prose h3 {
   line-height: 1.6;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   学术排版留白 —— 由 MathRenderer 的 academicTypography 注入。
+   （衬线字体已撤回：正文沿用 Geist，此处只控行高与公式留白。）
+   ───────────────────────────────────────────────────────────── */
+
+/* 放宽行高 + 加大独立公式块上下外边距，给高密度推导「呼吸感」 */
+.academic-prose :where(p, li) {
+  line-height: 2;
+}
+.academic-prose .katex-display {
+  margin-block: 1.75rem;
+}
+
+/* 首字下沉（opt-in：需 .academic-prose.drop-cap 同时存在）。
+   ::first-letter 对中文首字同样生效。 */
+.academic-prose.drop-cap > p:first-of-type::first-letter {
+  float: left;
+  font-weight: 700;
+  font-size: 3.1em;
+  line-height: 0.8;
+  margin: 0.04em 0.1em 0 0;
+  color: var(--foreground);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   沉浸阅读模式（Zen Mode）—— 由 <html>.zen-active 驱动，纯 CSS 淡出 chrome
+   ───────────────────────────────────────────────────────────── */
+[data-zen-chrome] {
+  transition: opacity 0.45s ease, transform 0.45s ease;
+}
+.zen-active [data-zen-chrome] {
+  opacity: 0;
+  pointer-events: none;
+}
+.zen-active [data-zen-chrome="top"] {
+  transform: translateY(-100%);
+}
+.zen-active [data-zen-chrome="left"] {
+  transform: translateX(-100%);
+}
+/* 进入 Zen：阅读区转极简单色画布 */
+.zen-active [data-zen-reading] {
+  background: var(--background);
+}
+
+/* 尊重「减少动态效果」偏好：去掉 chrome 过渡动画 */
+@media (prefers-reduced-motion: reduce) {
+  [data-zen-chrome] {
+    transition: none;
+  }
 }

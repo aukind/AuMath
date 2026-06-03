@@ -5,7 +5,7 @@ import { ChevronDown, GripVertical, Layers, Pencil, Star, Trash2, X } from 'luci
 import MathRenderer from '@/components/MathRenderer';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import DifficultyRating from '@/components/DifficultyRating';
-import { toggleFavorite, markError, removeError, recordView } from '@/app/actions/user-workspace';
+import { toggleFavorite, markError, removeError, recordView, recordAttempt } from '@/app/actions/user-workspace';
 import { stripInlineOptionTail, withAnswerBlank, isBlankOption, normalizeOptions } from '@/lib/questions/content';
 import type { QuestionWithTopics } from '@/types/database';
 
@@ -31,6 +31,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
   const [deleting, setDeleting] = useState(false);
   const [favorited, setFavorited] = useState(initialFavorited);
   const [errored, setErrored] = useState(initialErrored);
+  const [gradedCorrect, setGradedCorrect] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   function handleToggleSolution() {
@@ -58,6 +59,14 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
         const result = await markError(question.id);
         if (result.success) setErrored(true);
       }
+    });
+  }
+
+  // 自评「我做对了」—— 知识星图绿色(已掌握)节点的数据来源。
+  function handleMarkCorrect() {
+    startTransition(async () => {
+      const result = await recordAttempt(question.id, true);
+      if (result.success) setGradedCorrect(true);
     });
   }
 
@@ -170,7 +179,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
 
         {/* Question body */}
         <div className="px-5 pt-5 pb-1 text-[15px]">
-          <MathRenderer content={displayContent} />
+          <MathRenderer content={displayContent} academicTypography />
         </div>
 
         {/* Interactive Rive sandbox — 仅当题目配置了交互动画时渲染 */}
@@ -184,7 +193,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
           <div className={`px-5 pb-4 pt-2 grid gap-x-8 gap-y-2 ${visibleOptions.length <= 2 ? 'grid-cols-1' : 'grid-cols-2'}`}>
             {visibleOptions.map((opt, i) => (
               <div key={i} className="text-[15px] [&_.prose_p]:my-0 [&_.prose_p]:leading-[1.85]">
-                <MathRenderer content={opt} />
+                <MathRenderer content={opt} academicTypography />
               </div>
             ))}
           </div>
@@ -218,6 +227,22 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
               {errored ? '✓ 已记录' : '我做错了'}
             </button>
           )}
+          {isLoggedIn && (
+            <button
+              onClick={handleMarkCorrect}
+              disabled={isPending}
+              title="标记为已掌握（计入知识星图）"
+              className={[
+                'flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors',
+                gradedCorrect
+                  ? 'border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30'
+                  : 'border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-emerald-300 dark:hover:border-emerald-700 hover:text-emerald-600 dark:hover:text-emerald-400',
+                isPending && 'opacity-50 cursor-not-allowed',
+              ].join(' ')}
+            >
+              {gradedCorrect ? '✓ 已掌握' : '我做对了'}
+            </button>
+          )}
           <VariantButton count={question.variations?.length ?? 0} />
         </div>
 
@@ -227,7 +252,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
             <p className="text-[0.6875rem] font-semibold uppercase tracking-widest text-blue-600 dark:text-blue-400 mb-3">
               参考答案与解析
             </p>
-            <MathRenderer content={solutionContent} />
+            <MathRenderer content={solutionContent} academicTypography />
           </div>
         )}
       </article>

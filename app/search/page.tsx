@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { ChevronLeft, Infinity as InfinityIcon, FileQuestion, Users } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import SearchBox from '@/components/SearchBox';
-import QuestionCard from '@/components/QuestionCard';
+import MotionQuestionCard from '@/components/question/MotionQuestionCard';
 import { searchAll } from '@/app/actions/search';
 import { getFavoritedQuestionIds, getErroredQuestionIds } from '@/app/actions/user-workspace';
 import { getMyDifficultyRatings } from '@/app/actions/difficulty';
@@ -123,7 +123,7 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
                 </h2>
                 <div className="space-y-3">
                   {result.questions.map((qq) => (
-                    <QuestionCard
+                    <MotionQuestionCard
                       key={qq.id}
                       question={qq}
                       isLoggedIn={!!user}

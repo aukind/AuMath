@@ -5,7 +5,7 @@ import { ChevronLeft, Infinity as InfinityIcon } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import LibraryFeed from '@/components/library/LibraryFeed';
 import LibraryMark from '@/components/library/LibraryMark';
-import { getLibraryItems } from '@/app/actions/library';
+import { getLibraryItems, getMyLibraryUpvotes } from '@/app/actions/library';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
 import {
@@ -40,7 +40,10 @@ export default async function LibraryPage({
     ? (stage as EduStage)
     : null;
 
-  const items = await getLibraryItems(filter);
+  const [items, votedIds] = await Promise.all([
+    getLibraryItems(filter),
+    getMyLibraryUpvotes(),
+  ]);
   const isAdmin = isAdminUser(user);
 
   return (
@@ -73,6 +76,7 @@ export default async function LibraryPage({
         initialType={initialType}
         initialStage={initialStage}
         initialQuery={q ?? ''}
+        initialVotedIds={votedIds}
         isAdmin={isAdmin}
         currentUserId={user?.id ?? null}
       />

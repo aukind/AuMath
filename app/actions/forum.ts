@@ -45,7 +45,13 @@ function first<T>(v: T | T[] | null | undefined): T | null {
   return v ?? null;
 }
 
-function mapPost(d: any, commentCount: number): ForumPost {
+function mapPost(
+  d: any,
+  commentCount: number,
+  upvotes = 0,
+  upvotedByMe = false,
+  favoritedByMe = false,
+): ForumPost {
   return {
     id: d.id,
     title: d.title,
@@ -54,8 +60,55 @@ function mapPost(d: any, commentCount: number): ForumPost {
     createdAt: d.created_at,
     viewCount: d.view_count,
     commentCount,
+    upvotes,
+    upvotedByMe,
+    favoritedByMe,
     tags: d.tags ?? [],
   };
+}
+
+// 帖子点赞/收藏聚合（分离查询，表未建/出错时降级为 0/false，绝不炸论坛页）。
+async function getPostInteractions(
+  sb: any,
+  postId: string,
+  uid: string | null,
+): Promise<{ upvotes: number; upvotedByMe: boolean; favoritedByMe: boolean }> {
+  let upvotes = 0;
+  let upvotedByMe = false;
+  let favoritedByMe = false;
+  try {
+    const { count } = await sb
+      .from('forum_post_votes')
+      .select('post_id', { count: 'exact', head: true })
+      .eq('post_id', postId);
+    upvotes = count ?? 0;
+    if (uid) {
+      const [voteRes, favRes] = await Promise.all([
+        sb.from('forum_post_votes').select('post_id').eq('post_id', postId).eq('user_id', uid).maybeSingle(),
+        sb.from('forum_post_favorites').select('post_id').eq('post_id', postId).eq('user_id', uid).maybeSingle(),
+      ]);
+      upvotedByMe = !!voteRes.data;
+      favoritedByMe = !!favRes.data;
+    }
+  } catch {
+    // 迁移 022 未运行 → 默认 0/false
+  }
+  return { upvotes, upvotedByMe, favoritedByMe };
+}
+
+// 列表批量点赞计数：一把查所有帖的点赞行后按 post_id 计数（表未建 → 空 Map）。
+async function getPostVoteCounts(sb: any, postIds: string[]): Promise<Map<string, number>> {
+  const m = new Map<string, number>();
+  if (postIds.length === 0) return m;
+  try {
+    const { data } = await sb.from('forum_post_votes').select('post_id').in('post_id', postIds);
+    for (const row of (data ?? []) as { post_id: string }[]) {
+      m.set(row.post_id, (m.get(row.post_id) ?? 0) + 1);
+    }
+  } catch {
+    // 迁移 022 未运行 → 空
+  }
+  return m;
 }
 
 // ── 当前登录用户（供页面决定按钮可见性 / 作者归属）──────────
@@ -95,9 +148,14 @@ export async function getForumPosts(): Promise<ForumPost[]> {
     .limit(50);
 
   if (error) throw new Error('帖子列表加载失败');
-  
+
+  // 批量点赞计数（单独一把查，表未建时降级为 0，不影响列表）
+  const voteCountByPost = await getPostVoteCounts(sb, (data ?? []).map((d: any) => d.id));
+
   // d.comments 返回的是类似 [{ count: 2 }] 的数组，提取并传给 mapPost
-  return (data ?? []).map((d: any) => mapPost(d, d.comments?.[0]?.count ?? 0));
+  return (data ?? []).map((d: any) =>
+    mapPost(d, d.comments?.[0]?.count ?? 0, voteCountByPost.get(d.id) ?? 0),
+  );
 }
 
 // ── 发布新主贴，返回新帖 id（供客户端跳转）──────────────────
@@ -135,6 +193,9 @@ export async function createForumPost(input: {
 export async function getForumPost(postId: string): Promise<ForumPost> {
   const supabase = await createClient();
   const sb = supabase as any;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { data, error } = await sb
     .from('forum_posts')
@@ -152,13 +213,18 @@ export async function getForumPost(postId: string): Promise<ForumPost> {
     .select('id', { count: 'exact', head: true })
     .eq('post_id', postId);
 
-  return mapPost(data, count ?? 0);
+  const { upvotes, upvotedByMe, favoritedByMe } = await getPostInteractions(sb, postId, user?.id ?? null);
+
+  return mapPost(data, count ?? 0, upvotes, upvotedByMe, favoritedByMe);
 }
 
 // ── 读取评论树（一级 + 楼中楼 + 点赞数）────────────────────
 export async function getForumComments(postId: string): Promise<ForumComment[]> {
   const supabase = await createClient();
   const sb = supabase as any;
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const { data, error } = await sb
     .from('forum_comments')
@@ -177,7 +243,7 @@ export async function getForumComments(postId: string): Promise<ForumComment[]> 
 
   if (error) throw new Error('评论加载失败');
 
-  return (data ?? []).map(
+  const comments: ForumComment[] = (data ?? []).map(
     (c: any): ForumComment => ({
       id: c.id,
       postId: c.post_id,
@@ -185,6 +251,7 @@ export async function getForumComments(postId: string): Promise<ForumComment[]> 
       author: toUser(first(c.author) as ProfileRow | null),
       createdAt: c.created_at,
       upvotes: c.votes?.[0]?.count ?? 0,
+      upvotedByMe: false,
       subComments: (c.sub_comments ?? []).map(
         (s: any): SubComment => ({
           id: s.id,
@@ -197,6 +264,19 @@ export async function getForumComments(postId: string): Promise<ForumComment[]> 
       ),
     }),
   );
+
+  // 登录态：一把查出当前用户在这些评论里赞过哪些，置 upvotedByMe 供高亮 + 正确切换
+  if (user && comments.length > 0) {
+    const { data: votes } = await sb
+      .from('forum_comment_votes')
+      .select('comment_id')
+      .eq('user_id', user.id)
+      .in('comment_id', comments.map((c) => c.id));
+    const voted = new Set((votes ?? []).map((v: { comment_id: string }) => v.comment_id));
+    for (const c of comments) c.upvotedByMe = voted.has(c.id);
+  }
+
+  return comments;
 }
 
 // ── 浏览数自增（每次进入详情页调用一次）────────────────────
@@ -292,8 +372,8 @@ export async function submitForumReply(
   };
 }
 
-// ── 点赞 / 取消点赞，返回最新计数 ───────────────────────────
-export async function toggleForumUpvote(commentId: string): Promise<number> {
+// ── 评论点赞 / 取消点赞，返回最新计数 + 切换后状态 ───────────
+export async function toggleForumUpvote(commentId: string): Promise<{ upvotes: number; upvoted: boolean }> {
   const supabase = await createClient();
   const sb = supabase as any;
   const uid = await requireUserId();
@@ -305,12 +385,14 @@ export async function toggleForumUpvote(commentId: string): Promise<number> {
     .eq('user_id', uid)
     .maybeSingle();
 
+  let upvoted: boolean;
   if (existing) {
     await sb
       .from('forum_comment_votes')
       .delete()
       .eq('comment_id', commentId)
       .eq('user_id', uid);
+    upvoted = false;
   } else {
     await sb.from('forum_comment_votes').insert({ comment_id: commentId, user_id: uid });
     // 新点赞 → 通知被赞回复的作者
@@ -320,13 +402,68 @@ export async function toggleForumUpvote(commentId: string): Promise<number> {
       .eq('id', commentId)
       .maybeSingle();
     await notify(sb, { recipientId: comment?.author_id, actorId: uid, type: 'like', postId: comment?.post_id });
+    upvoted = true;
   }
 
   const { count } = await sb
     .from('forum_comment_votes')
     .select('comment_id', { count: 'exact', head: true })
     .eq('comment_id', commentId);
-  return count ?? 0;
+  return { upvotes: count ?? 0, upvoted };
+}
+
+// ── 帖子点赞 / 取消点赞（公开计数，仿评论点赞）──────────────
+export async function toggleForumPostUpvote(postId: string): Promise<{ upvotes: number; upvoted: boolean }> {
+  const supabase = await createClient();
+  const sb = supabase as any;
+  const uid = await requireUserId();
+
+  const { data: existing } = await sb
+    .from('forum_post_votes')
+    .select('post_id')
+    .eq('post_id', postId)
+    .eq('user_id', uid)
+    .maybeSingle();
+
+  let upvoted: boolean;
+  if (existing) {
+    await sb.from('forum_post_votes').delete().eq('post_id', postId).eq('user_id', uid);
+    upvoted = false;
+  } else {
+    await sb.from('forum_post_votes').insert({ post_id: postId, user_id: uid });
+    // 新点赞 → 通知帖主
+    const { data: post } = await sb.from('forum_posts').select('author_id').eq('id', postId).maybeSingle();
+    await notify(sb, { recipientId: post?.author_id, actorId: uid, type: 'like', postId });
+    upvoted = true;
+  }
+
+  const { count } = await sb
+    .from('forum_post_votes')
+    .select('post_id', { count: 'exact', head: true })
+    .eq('post_id', postId);
+  revalidatePath(`/forum/${postId}`);
+  return { upvotes: count ?? 0, upvoted };
+}
+
+// ── 帖子收藏 / 取消收藏（私有书签，仿题目收藏）──────────────
+export async function toggleForumPostFavorite(postId: string): Promise<{ favorited: boolean }> {
+  const supabase = await createClient();
+  const sb = supabase as any;
+  const uid = await requireUserId();
+
+  const { data: existing } = await sb
+    .from('forum_post_favorites')
+    .select('post_id')
+    .eq('post_id', postId)
+    .eq('user_id', uid)
+    .maybeSingle();
+
+  if (existing) {
+    await sb.from('forum_post_favorites').delete().eq('post_id', postId).eq('user_id', uid);
+    return { favorited: false };
+  }
+  await sb.from('forum_post_favorites').insert({ post_id: postId, user_id: uid });
+  return { favorited: true };
 }
 
 // ── 删除评论（作者或管理员；RLS 最终把关）──────────────────

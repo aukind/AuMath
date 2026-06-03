@@ -126,17 +126,21 @@ export default function CommentSection({
     [currentUser, postId, mutate, closeReply, virtualizer, comments.length],
   );
 
-  // -------- 乐观点赞 --------
+  // -------- 乐观点赞（按当前 upvotedByMe 决定 +1/-1 并翻转高亮）--------
   const handleUpvote = useCallback(
     (commentId: string) => {
       mutate(
         async (cur: ForumComment[] = []) => {
-          const next = await toggleForumUpvote(commentId);
-          return cur.map((c) => (c.id === commentId ? { ...c, upvotes: next } : c));
+          const { upvotes, upvoted } = await toggleForumUpvote(commentId);
+          return cur.map((c) => (c.id === commentId ? { ...c, upvotes, upvotedByMe: upvoted } : c));
         },
         {
           optimisticData: (cur: ForumComment[] = []) =>
-            cur.map((c) => (c.id === commentId ? { ...c, upvotes: c.upvotes + 1 } : c)),
+            cur.map((c) =>
+              c.id === commentId
+                ? { ...c, upvotes: c.upvotes + (c.upvotedByMe ? -1 : 1), upvotedByMe: !c.upvotedByMe }
+                : c,
+            ),
           rollbackOnError: true,
           populateCache: true,
           revalidate: false,

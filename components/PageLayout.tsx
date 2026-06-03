@@ -16,8 +16,11 @@ import {
 import {
   GripVertical, PenLine, CheckCircle2, Lock, LogIn,
   MessagesSquare, BookMarked, Star, XCircle, Clock, ChevronLeft, Plus, Loader2,
+  BrainCircuit, ArrowRight,
 } from 'lucide-react';
 import HomeSidebar from '@/components/HomeSidebar';
+import { ZenModeProvider, useZenMode } from '@/components/layout/ZenModeProvider';
+import ZenModeToggle from '@/components/layout/ZenModeToggle';
 import SortSelect from '@/components/SortSelect';
 import QuestionSearch from '@/components/QuestionSearch';
 import SiteViewsBadge from '@/components/SiteViewsBadge';
@@ -56,6 +59,7 @@ interface PageLayoutProps {
   erroredIds: string[];
   myRatings: Record<string, number>;
   siteViews: number;
+  dueCount?: number;
 }
 
 const MYBANK_TABS: { key: WorkspaceType; label: string; icon: typeof Star }[] = [
@@ -70,7 +74,17 @@ const WORKSPACE_TABS: TabItem[] = [
   { id: 'bank', label: '我的题库', icon: <BookMarked size={14} /> },
 ];
 
-export default function PageLayout({
+// 默认导出薄包装：注入 ZenModeProvider，使内部 aside/main 能 useZenMode()，
+// 同时把 isZenMode 反射到 <html>.zen-active 驱动顶栏（位于 app/page.tsx）淡出。
+export default function PageLayout(props: PageLayoutProps) {
+  return (
+    <ZenModeProvider>
+      <PageLayoutInner {...props} />
+    </ZenModeProvider>
+  );
+}
+
+function PageLayoutInner({
   topics,
   papers,
   questions,
@@ -90,7 +104,11 @@ export default function PageLayout({
   erroredIds,
   myRatings,
   siteViews,
+  dueCount = 0,
 }: PageLayoutProps) {
+  // ── 沉浸阅读模式 ──────────────────────────────────────────────
+  const { isZenMode } = useZenMode();
+
   // ── Optimistic delete ────────────────────────────────────────
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
   const visibleQuestions = questions.filter(q => !deletedIds.has(q.id));
@@ -153,7 +171,16 @@ export default function PageLayout({
       <div className="mx-auto max-w-7xl w-full flex flex-1 overflow-hidden">
 
         {/* ── Desktop sidebar：Linear 风全局导航 + 资源大厅/题库 语境面板 ── */}
-        <aside className="hidden lg:flex flex-col w-56 xl:w-64 shrink-0 border-r border-zinc-200/70 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 px-3 py-5 gap-3 overflow-hidden">
+        {/* Zen 时 track 折叠（w-0/px-0/border-0）让出整屏；淡出滑走由 globals.css
+            的 [data-zen-chrome="left"] 接管。transition-all 保证宽度/内边距也平滑。 */}
+        <aside
+          data-zen-chrome="left"
+          className={[
+            'hidden lg:flex flex-col shrink-0 border-r border-zinc-200/70 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/40 py-5 gap-3 overflow-hidden',
+            'transition-all duration-500',
+            isZenMode ? 'lg:w-0 lg:px-0 lg:border-0' : 'w-56 xl:w-64 px-3',
+          ].join(' ')}
+        >
           <HomeSidebar
             topics={topics}
             papers={papers}
@@ -169,7 +196,19 @@ export default function PageLayout({
         </aside>
 
         {/* ── Main content ── */}
-        <main className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 py-6">
+        {/* scrollbar-gutter:stable 预留滚动条槽位，避免 chrome 淡出时横向位移抖动。 */}
+        <main
+          data-zen-reading
+          className="flex-1 min-w-0 overflow-y-auto px-4 sm:px-6 py-6 [scrollbar-gutter:stable]"
+        >
+          {/* 固定阅读列宽：Zen 收成 max-w-3xl 居中，普通态保持原 max-w-none。
+              侧栏 track 折叠只改变两侧留白、不改变文本换行点 → 无回流。 */}
+          <div
+            className={[
+              'mx-auto w-full transition-[max-width] duration-500',
+              isZenMode ? 'max-w-3xl' : 'max-w-none',
+            ].join(' ')}
+          >
 
           {mainView === 'browse' ? (
             <BrowseView
@@ -211,6 +250,7 @@ export default function PageLayout({
                     favoritedIds={favoritedIds}
                     erroredIds={erroredIds}
                     myRatings={myRatings}
+                    dueCount={dueCount}
                     onDelete={handleDelete}
                   />
                 ) : (
@@ -219,6 +259,7 @@ export default function PageLayout({
               }
             />
           )}
+          </div>
         </main>
       </div>
 
@@ -233,6 +274,9 @@ export default function PageLayout({
           </div>
         )}
       </DragOverlay>
+
+      {/* ── 沉浸阅读开关（右下角悬浮）── */}
+      <ZenModeToggle />
 
       {/* ── Toast notification ── */}
       {toast && (
@@ -323,7 +367,7 @@ function BrowseView({
 
 // ── 我的题库（收藏 / 错题 / 最近浏览）────────────────────────
 function MyBankView({
-  tab, questions, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, myRatings, onDelete,
+  tab, questions, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, myRatings, dueCount = 0, onDelete,
 }: {
   tab: WorkspaceType;
   questions: QuestionWithTopics[];
@@ -333,6 +377,7 @@ function MyBankView({
   favoritedIds: string[];
   erroredIds: string[];
   myRatings: Record<string, number>;
+  dueCount?: number;
   onDelete: (id: string) => void;
 }) {
   const meta: Record<WorkspaceType, { title: string; empty: string }> = {
@@ -394,6 +439,41 @@ function MyBankView({
           )}
         </div>
       </LayoutGroup>
+
+      {/* 错题本专属：FSRS 今日复习入口 */}
+      {tab === 'errors' && (
+        dueCount > 0 ? (
+          <Link
+            href="/mybank/review"
+            className="group mb-5 flex items-center gap-3 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 px-4 py-3.5 transition-colors hover:from-indigo-100 hover:to-violet-100 dark:border-indigo-500/30 dark:from-indigo-500/10 dark:to-violet-500/10 dark:hover:from-indigo-500/20 dark:hover:to-violet-500/20"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
+              <BrainCircuit size={20} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-indigo-900 dark:text-indigo-100">
+                开始今日复习
+                <span className="ml-1.5 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[0.7rem] font-bold text-white tabular-nums">
+                  {dueCount}
+                </span>
+              </span>
+              <span className="block text-xs text-indigo-500/80 dark:text-indigo-300/70">
+                FSRS 间隔重复 · 按记忆曲线精准召回到期错题
+              </span>
+            </span>
+            <ArrowRight size={18} className="shrink-0 text-indigo-400 transition-transform group-hover:translate-x-0.5" />
+          </Link>
+        ) : (
+          <div className="mb-5 flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3.5 dark:border-zinc-800 dark:bg-zinc-900/50">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-200 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500">
+              <CheckCircle2 size={20} />
+            </span>
+            <span className="text-sm text-zinc-500 dark:text-zinc-400">
+              今日复习已清空 🎉 暂无到期错题，明天再来。
+            </span>
+          </div>
+        )
+      )}
 
       {questions.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 py-24 text-center max-w-sm mx-auto">

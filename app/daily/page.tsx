@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { CalendarDays, ChevronLeft, Infinity as InfinityIcon } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
-import QuestionCard from '@/components/QuestionCard';
+import MotionQuestionCard from '@/components/question/MotionQuestionCard';
 import { getDailyQuestion } from '@/app/actions/daily';
 import { getFavoritedQuestionIds, getErroredQuestionIds } from '@/app/actions/user-workspace';
 import { getMyDifficultyRatings } from '@/app/actions/difficulty';
@@ -53,7 +53,7 @@ export default async function DailyPage() {
         </div>
 
         {question ? (
-          <QuestionCard
+          <MotionQuestionCard
             question={question}
             isLoggedIn={!!user}
             initialFavorited={favoritedIds.includes(question.id)}

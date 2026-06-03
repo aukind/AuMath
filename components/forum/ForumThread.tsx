@@ -15,6 +15,7 @@ import {
 } from '@/app/actions/forum';
 import MathContent from './MathContent';
 import CommentSection from './CommentSection';
+import PostActions from './PostActions';
 import { ReplyProvider } from './ReplyContext';
 
 // ── 带有极客专属头像框的 Avatar 组件 ──
@@ -147,9 +148,16 @@ export default function ForumThread({
 
           {/* 底部数据统计与操作 */}
           <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 text-xs text-zinc-500 dark:border-zinc-800">
-            <div className="flex gap-4">
+            <div className="flex flex-wrap items-center gap-4">
               <span className="inline-flex items-center gap-1.5"><Eye className="h-4 w-4" />{post.viewCount}</span>
               <span className="inline-flex items-center gap-1.5"><MessageSquare className="h-4 w-4" />{post.commentCount}</span>
+              <PostActions
+                postId={postId}
+                initialUpvotes={post.upvotes}
+                initialUpvotedByMe={!!post.upvotedByMe}
+                initialFavoritedByMe={!!post.favoritedByMe}
+                canInteract={!!currentUser}
+              />
             </div>
             {(isAdmin || canDeletePost) && (
               <div className="flex gap-3">

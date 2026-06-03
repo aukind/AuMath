@@ -190,9 +190,13 @@ function CommentItem({ comment, currentUser, onUpvote, onAdminAction }: CommentI
             type="button"
             onClick={() => onUpvote(comment.id)}
             disabled={!currentUser}
-            className="inline-flex items-center gap-1 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+            aria-pressed={!!comment.upvotedByMe}
+            className={[
+              'inline-flex items-center gap-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+              comment.upvotedByMe ? 'font-medium text-blue-600 dark:text-blue-400' : 'hover:text-blue-600',
+            ].join(' ')}
           >
-            <ThumbsUp className="h-4 w-4" />
+            <ThumbsUp className="h-4 w-4" fill={comment.upvotedByMe ? 'currentColor' : 'none'} />
             <span>{comment.upvotes}</span>
           </button>
           <button

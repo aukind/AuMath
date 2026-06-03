@@ -13,6 +13,7 @@ import {
   Library as LibraryIcon,
   CalendarDays,
   BookMarked,
+  Orbit,
 } from 'lucide-react';
 import AnimatedTabs from '@/components/ui/AnimatedTabs';
 import SidebarTabs from '@/components/SidebarTabs';
@@ -52,6 +53,7 @@ export default function HomeSidebar({
   const NAV: { id: string; label: string; href: string; icon: IconType; active: boolean }[] = [
     { id: 'community', label: '社区', href: '/', icon: MessagesSquare, active: pathname === '/' && mainView === 'forum' },
     { id: 'library', label: '资源大厅', href: '/library', icon: LibraryIcon, active: pathname.startsWith('/library') },
+    { id: 'graph', label: '知识星图', href: '/explore', icon: Orbit, active: pathname.startsWith('/explore') },
     { id: 'daily', label: '每日一题', href: '/daily', icon: CalendarDays, active: pathname.startsWith('/daily') },
     { id: 'mybank', label: '我的题库', href: '/?view=mybank', icon: BookMarked, active: pathname === '/' && mainView === 'mybank' },
   ];

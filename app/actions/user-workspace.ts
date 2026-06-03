@@ -123,6 +123,58 @@ export async function recordView(questionId: string): Promise<void> {
     );
 }
 
+// ── Record attempt (self-grade) ───────────────────────────────────────────────
+// 知识星图「已掌握(绿)」的唯一数据来源：做对过(correct_count>0) 且不在错题本。
+// 滚动累加每用户每题一行（迁移 021）。
+export async function recordAttempt(
+  questionId: string,
+  isCorrect: boolean,
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { success: false, error: '未登录' };
+
+  const sb = supabase as any;
+  const { data: existing } = await sb
+    .from('user_question_attempts')
+    .select('attempt_count, correct_count')
+    .eq('user_id', user.id)
+    .eq('question_id', questionId)
+    .maybeSingle();
+
+  const row = {
+    user_id: user.id,
+    question_id: questionId,
+    attempt_count: (existing?.attempt_count ?? 0) + 1,
+    correct_count: (existing?.correct_count ?? 0) + (isCorrect ? 1 : 0),
+    last_correct: isCorrect,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await sb
+    .from('user_question_attempts')
+    .upsert(row, { onConflict: 'user_id,question_id' });
+  if (error) return { success: false, error: error.message };
+
+  revalidatePath('/explore');
+  return { success: true };
+}
+
+// ── Get mastered question IDs ─────────────────────────────────────────────────
+// 做对过的题（correct_count>0）。星图染色时再与错题本做差集（错题优先级更高）。
+export async function getMasteredQuestionIds(): Promise<string[]> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data } = await (supabase as any)
+    .from('user_question_attempts')
+    .select('question_id')
+    .eq('user_id', user.id)
+    .gt('correct_count', 0);
+  return (data ?? []).map((r: { question_id: string }) => r.question_id);
+}
+
 // ── Get workspace counts ──────────────────────────────────────────────────────
 
 export async function getWorkspaceCounts(): Promise<WorkspaceCounts> {

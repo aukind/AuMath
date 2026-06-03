@@ -1,13 +1,16 @@
 'use client';
 
-// 资源大厅交互主体（客户端）。
+// 资源大厅交互主体（客户端编排器）。
 //   · AnimatedTabs（复用 components/ui/AnimatedTabs）弹簧切换 全部/官方/社区；
-//   · 顶部官方严选横向大卡片 + 下方瀑布流（CSS columns）；
-//   · 点击卡片 → 懒载 PdfViewerModal（dynamic ssr:false）当前页弹出；
-//   · 登录上传 / 举报 / 管理员加精，均走 Server Actions + sonner 反馈。
+//   · 检索 + 类型/学段筛选（客户端即时）；
+//   · 官方区 → <OfficialBookshelf>（3D 视差橱窗）；社区区 → <CommunityMasonry>（瀑布流 + 点赞）；
+//   · 点击卡片 → 懒载 <ImmersiveReader>（dynamic ssr:false），经 layoutId 从卡片放大展开；
+//   · 登录上传 / 点赞 / 举报 / 管理员加精，均走 Server Actions + sonner 反馈。
+//   · <LayoutGroup> 包裹卡片与阅读器，保证封面 ↔ 阅读器共享布局动画在同一组内。
 
 import { useCallback, useRef, useState, useTransition } from 'react';
 import dynamic from 'next/dynamic';
+import { LayoutGroup } from 'framer-motion';
 import { useDropzone } from 'react-dropzone';
 import { Drawer } from 'vaul';
 import { toast } from 'sonner';
@@ -17,15 +20,13 @@ import {
   Users,
   LayoutGrid,
   Upload,
-  Eye,
-  Flag,
-  Sparkles,
   Loader2,
   Search,
   X,
 } from 'lucide-react';
 import AnimatedTabs from '@/components/ui/AnimatedTabs';
-import CoverArt from '@/components/library/CoverArt';
+import OfficialBookshelf from '@/components/library/OfficialBookshelf';
+import CommunityMasonry from '@/components/library/CommunityMasonry';
 import { createClient } from '@/lib/supabase/client';
 import {
   getLibraryItems,
@@ -33,6 +34,7 @@ import {
   uploadLibraryCover,
   reportItem,
   promoteItem,
+  toggleUpvote,
 } from '@/app/actions/library';
 import {
   RESOURCE_TYPES,
@@ -48,7 +50,7 @@ const TUS_CHUNK = 6 * 1024 * 1024; // Supabase TUS 硬性要求固定 6MB 分片
 const MAX_BYTES = 5 * 1024 * 1024 * 1024; // 5GB
 
 // 阅读器只在点击后懒载，禁 SSR（react-pdf 需要浏览器环境）。
-const PdfViewerModal = dynamic(() => import('./PdfViewerModal'), { ssr: false });
+const ImmersiveReader = dynamic(() => import('./ImmersiveReader'), { ssr: false });
 
 // 后台生成第1页封面：动态 import 把 pdfjs 留到运行时（不进 SSR/首屏 bundle）。失败静默（封面是增强项）。
 async function generateAndUploadCover(itemId: string, pdfUrl: string, onDone: () => void) {
@@ -83,20 +85,9 @@ interface Props {
   initialType?: ResourceType | null;
   initialStage?: EduStage | null;
   initialQuery?: string;
+  initialVotedIds?: string[];
   isAdmin: boolean;
   currentUserId: string | null;
-}
-
-function Avatar({ name, url }: { name: string; url?: string }) {
-  if (url) {
-    // eslint-disable-next-line @next/next/no-img-element
-    return <img src={url} alt={name} className="h-6 w-6 rounded-full object-cover" />;
-  }
-  return (
-    <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-[11px] font-bold text-white">
-      {name.slice(0, 1).toUpperCase()}
-    </span>
-  );
 }
 
 export default function LibraryFeed({
@@ -105,6 +96,7 @@ export default function LibraryFeed({
   initialType = null,
   initialStage = null,
   initialQuery = '',
+  initialVotedIds = [],
   isAdmin,
   currentUserId,
 }: Props) {
@@ -113,6 +105,7 @@ export default function LibraryFeed({
   const [isPending, startTransition] = useTransition();
   const [active, setActive] = useState<LibraryItem | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [votedIds, setVotedIds] = useState<Set<string>>(() => new Set(initialVotedIds));
   // 检索 + 分类筛选（客户端即时，对已加载列表过滤）；初值可由首页导航深链注入
   const [query, setQuery] = useState(initialQuery);
   const [typeFilter, setTypeFilter] = useState<ResourceType | null>(initialType);
@@ -145,10 +138,49 @@ export default function LibraryFeed({
   });
 
   const officialItems = visible.filter((i) => i.is_official);
-  const feedItems =
-    filter === 'all' ? visible.filter((i) => !i.is_official) : visible;
+  const feedItems = filter === 'all' ? visible.filter((i) => !i.is_official) : visible;
   const showcase = filter === 'all' && officialItems.length > 0;
   const isFiltering = !!q || !!typeFilter || !!stageFilter;
+
+  // ── 点赞（乐观更新，失败回滚，成功对齐服务端真值） ─────────────
+  const onToggleUpvote = async (item: LibraryItem) => {
+    if (!currentUserId) {
+      toast.error('请先登录后点赞');
+      return;
+    }
+    const wasVoted = votedIds.has(item.id);
+    const bump = (delta: number) =>
+      setItems((prev) =>
+        prev.map((i) =>
+          i.id === item.id ? { ...i, upvote_count: Math.max(0, i.upvote_count + delta) } : i,
+        ),
+      );
+    const setVoted = (on: boolean) =>
+      setVotedIds((prev) => {
+        const n = new Set(prev);
+        if (on) n.add(item.id);
+        else n.delete(item.id);
+        return n;
+      });
+
+    // 乐观
+    setVoted(!wasVoted);
+    bump(wasVoted ? -1 : 1);
+
+    const res = await toggleUpvote(item.id);
+    if (!res.success) {
+      // 回滚
+      setVoted(wasVoted);
+      bump(wasVoted ? 1 : -1);
+      toast.error('操作失败，请重试');
+      return;
+    }
+    // 对齐服务端真值
+    setVoted(res.upvoted);
+    setItems((prev) =>
+      prev.map((i) => (i.id === item.id ? { ...i, upvote_count: res.upvotes } : i)),
+    );
+  };
 
   // ── 举报 ──────────────────────────────────────────────
   const onReport = async (item: LibraryItem) => {
@@ -229,54 +261,44 @@ export default function LibraryFeed({
         />
       </div>
 
-      {/* 官方严选横向区 */}
-      {showcase && (
-        <section className="mb-8">
-          <h2 className="mb-3 flex items-center gap-1.5 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-            <Sparkles size={15} className="text-indigo-500" /> 官方严选
+      <LayoutGroup>
+        {/* 官方严选 3D 橱窗 */}
+        {showcase && <OfficialBookshelf items={officialItems} onOpen={setActive} />}
+
+        {/* 社区瀑布流 */}
+        <section>
+          <h2 className="mb-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+            {FEED_TITLE[filter]}
+            {isPending && (
+              <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin text-zinc-400" />
+            )}
           </h2>
-          <div className="-mx-4 flex snap-x gap-4 overflow-x-auto px-4 pb-2">
-            {officialItems.map((item) => (
-              <ShowcaseCard key={item.id} item={item} onOpen={() => setActive(item)} />
-            ))}
-          </div>
-        </section>
-      )}
 
-      {/* 瀑布流 */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-          {FEED_TITLE[filter]}
-          {isPending && (
-            <Loader2 className="ml-2 inline h-3.5 w-3.5 animate-spin text-zinc-400" />
+          {feedItems.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-zinc-300 py-16 text-center text-sm text-zinc-400 dark:border-zinc-700">
+              {isFiltering
+                ? '没有匹配的资料，换个关键词或分类试试'
+                : `还没有资料，${currentUserId ? '点击右上角上传第一份吧' : '登录后即可上传'}`}
+            </div>
+          ) : (
+            <CommunityMasonry
+              items={feedItems}
+              isAdmin={isAdmin}
+              currentUserId={currentUserId}
+              votedIds={votedIds}
+              onOpen={setActive}
+              onReport={onReport}
+              onPromote={onPromote}
+              onToggleUpvote={onToggleUpvote}
+            />
           )}
-        </h2>
+        </section>
 
-        {feedItems.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-zinc-300 py-16 text-center text-sm text-zinc-400 dark:border-zinc-700">
-            {isFiltering
-              ? '没有匹配的资料，换个关键词或分类试试'
-              : `还没有资料，${currentUserId ? '点击右上角上传第一份吧' : '登录后即可上传'}`}
-          </div>
-        ) : (
-          <div className="gap-4 [column-fill:_balance] sm:columns-2 lg:columns-3">
-            {feedItems.map((item) => (
-              <FeedCard
-                key={item.id}
-                item={item}
-                isAdmin={isAdmin}
-                canReport={!!currentUserId && item.author_id !== currentUserId}
-                onOpen={() => setActive(item)}
-                onReport={() => onReport(item)}
-                onPromote={() => onPromote(item)}
-              />
-            ))}
-          </div>
+        {/* 阅读器（懒载，layoutId 从卡片放大展开） */}
+        {active && (
+          <ImmersiveReader key={active.id} item={active} onClose={() => setActive(null)} />
         )}
-      </section>
-
-      {/* 阅读器（懒载） */}
-      {active && <PdfViewerModal item={active} onClose={() => setActive(null)} />}
+      </LayoutGroup>
 
       {/* 上传抽屉 */}
       <UploadDrawer
@@ -285,118 +307,6 @@ export default function LibraryFeed({
         userId={currentUserId}
         onUploaded={() => refresh(filter)}
       />
-    </div>
-  );
-}
-
-// ── 官方严选大卡片 ────────────────────────────────────────
-function ShowcaseCard({ item, onOpen }: { item: LibraryItem; onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group relative w-52 shrink-0 snap-start overflow-hidden rounded-xl border border-zinc-200 bg-white text-left shadow-sm transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900"
-    >
-      <CoverArt item={item} className="h-28" />
-      <div className="p-3">
-        <div className="mb-1 flex items-center gap-1">
-          <BadgeCheck size={14} className="shrink-0 text-sky-500" />
-          <span className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-            {item.title}
-          </span>
-        </div>
-        <p className="line-clamp-2 text-xs text-zinc-500">{item.description ?? '官方精选资料'}</p>
-      </div>
-    </button>
-  );
-}
-
-// ── 瀑布流卡片 ────────────────────────────────────────────
-function FeedCard({
-  item,
-  isAdmin,
-  canReport,
-  onOpen,
-  onReport,
-  onPromote,
-}: {
-  item: LibraryItem;
-  isAdmin: boolean;
-  canReport: boolean;
-  onOpen: () => void;
-  onReport: () => void;
-  onPromote: () => void;
-}) {
-  return (
-    <div className="mb-4 break-inside-avoid overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <button type="button" onClick={onOpen} className="block w-full text-left">
-        <CoverArt item={item} className="h-32" />
-        <div className="p-3">
-          <div className="mb-1 flex items-center gap-1">
-            {item.is_official && <BadgeCheck size={14} className="shrink-0 text-sky-500" />}
-            <span className="line-clamp-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-              {item.title}
-            </span>
-          </div>
-          {item.description && (
-            <p className="line-clamp-2 text-xs text-zinc-500">{item.description}</p>
-          )}
-          {/* 类型 / 学段徽章 */}
-          <div className="mt-2 flex flex-wrap gap-1">
-            <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-300">
-              {item.resource_type}
-            </span>
-            <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-300">
-              {item.edu_stage}
-            </span>
-            {item.tags.slice(0, 2).map((t) => (
-              <span
-                key={t}
-                className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-500 dark:bg-zinc-800"
-              >
-                #{t}
-              </span>
-            ))}
-          </div>
-        </div>
-      </button>
-
-      {/* 底栏：作者 / 浏览 / 操作 */}
-      <div className="flex items-center gap-2 border-t border-zinc-100 px-3 py-2 dark:border-zinc-800">
-        {item.is_official ? (
-          <span className="flex items-center gap-1 text-xs font-medium text-sky-600 dark:text-sky-400">
-            <BadgeCheck size={13} /> 官方
-          </span>
-        ) : (
-          <span className="flex min-w-0 items-center gap-1.5">
-            <Avatar name={item.author?.username ?? '匿名'} url={item.author?.avatarUrl} />
-            <span className="truncate text-xs text-zinc-500">{item.author?.username ?? '匿名'}</span>
-          </span>
-        )}
-        <span className="ml-auto flex items-center gap-1 text-xs text-zinc-400">
-          <Eye size={12} /> {item.view_count}
-        </span>
-        {isAdmin && !item.is_official && (
-          <button
-            type="button"
-            onClick={onPromote}
-            title="加精为官方"
-            className="rounded p-1 text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10"
-          >
-            <Sparkles size={14} />
-          </button>
-        )}
-        {canReport && (
-          <button
-            type="button"
-            onClick={onReport}
-            title="举报"
-            className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-rose-500 dark:hover:bg-zinc-800"
-          >
-            <Flag size={14} />
-          </button>
-        )}
-      </div>
     </div>
   );
 }

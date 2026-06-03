@@ -59,6 +59,7 @@ function mapItem(row: any): LibraryItem {
     view_count: row.view_count ?? 0,
     download_count: row.download_count ?? 0,
     report_count: row.report_count ?? 0,
+    upvote_count: row.upvote_count ?? 0,
     tags: row.tags ?? [],
     resource_type: safeType(row.resource_type),
     edu_stage: safeStage(row.edu_stage),
@@ -192,6 +193,52 @@ export async function reportItem(
   const hidden = (data as any)?.status === 'pending_review';
   if (hidden) revalidatePath('/library');
   return { success: true, hidden };
+}
+
+/**
+ * 点赞 / 取消点赞（迁移 020）。原子 toggle 走 SECURITY DEFINER RPC，DB 端推导计数，
+ * 镜像 reportItem 的写法。未登录返回失败，由前端引导登录。
+ */
+export async function toggleUpvote(
+  itemId: string,
+): Promise<{ success: boolean; upvoted: boolean; upvotes: number }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { success: false, upvoted: false, upvotes: 0 };
+
+  const sb = supabase as any;
+  const { data, error } = await sb.rpc('toggle_library_upvote', { p_id: itemId });
+  if (error) {
+    console.error('[toggleUpvote]', error.message);
+    return { success: false, upvoted: false, upvotes: 0 };
+  }
+  return {
+    success: true,
+    upvoted: !!(data as any)?.upvoted,
+    upvotes: (data as any)?.upvote_count ?? 0,
+  };
+}
+
+/** 当前用户点过赞的资料 id 列表（访客返回空）。供大厅初始填充爱心实心态。 */
+export async function getMyLibraryUpvotes(): Promise<string[]> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const sb = supabase as any;
+  const { data, error } = await sb
+    .from('library_item_upvotes')
+    .select('item_id')
+    .eq('user_id', user.id);
+  if (error) {
+    console.error('[getMyLibraryUpvotes]', error.message);
+    return [];
+  }
+  return (data ?? []).map((r: { item_id: string }) => r.item_id);
 }
 
 /** 加精（Admin only）：转官方精选并确保公开。走 service_role 绕 RLS。 */

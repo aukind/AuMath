@@ -8,12 +8,19 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import type { KatexOptions } from 'katex';
 import { preprocessMathContent } from '@/lib/utils/mathPreprocess';
 
-interface MathRendererProps {
+export interface MathRendererProps {
   content: string;
   /** 附加到外层 div 的 Tailwind 类名 */
   className?: string;
   /** 透传给 rehype-katex 的配置，如 { throwOnError: false } */
   katexOptions?: KatexOptions;
+  /**
+   * 学术衬线排版模式：题面/解析正文切换为思源宋体、行高放宽、公式块大留白。
+   * 仅作用于 .prose 文本元素，不触碰 KaTeX（具体规则见 globals.css 的 .academic-prose）。
+   */
+  academicTypography?: boolean;
+  /** 首字下沉（仅 academicTypography 为真时生效，作用于第一段首字）。 */
+  dropCap?: boolean;
 }
 
 const defaultKatexOptions: KatexOptions = {
@@ -88,6 +95,8 @@ export default function MathRenderer({
   content,
   className,
   katexOptions,
+  academicTypography = false,
+  dropCap = false,
 }: MathRendererProps) {
   const katexOpts  = { ...defaultKatexOptions, ...katexOptions };
   const normalized = preprocessMathContent(content);
@@ -131,6 +140,10 @@ export default function MathRenderer({
         '[&_.katex_svg]:rounded-none! [&_.katex_svg]:max-w-none! [&_.katex_svg]:fill-current!',
         // KaTeX 内的 text 元素跟随当前文字颜色
         '[&_.katex_svg_text]:fill-current!',
+        // 学术衬线排版：宋体正文 + 大留白（样式见 globals.css 的 .academic-prose，
+        // 精准避开 .katex，公式仍用数学字体）。
+        academicTypography ? 'academic-prose' : '',
+        academicTypography && dropCap ? 'drop-cap' : '',
         className ?? '',
       ].join(' ')}
     >
