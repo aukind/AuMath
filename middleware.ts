@@ -39,8 +39,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
-  // 已登录用户访问 /login，重定向回首页
-  if (user && request.nextUrl.pathname === '/login') {
+  // 已登录用户访问 /login，重定向回首页。
+  // 仅对 GET 导航生效：登录表单的 Server Action 也 POST 到 /login，若把这个 POST 也重定向，
+  // 客户端会收到无法解析为 action 结果的响应 → "An unexpected response was received from the server."
+  if (user && request.nextUrl.pathname === '/login' && request.method === 'GET') {
     const homeUrl = request.nextUrl.clone();
     homeUrl.pathname = '/';
     homeUrl.search = '';

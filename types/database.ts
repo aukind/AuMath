@@ -225,6 +225,12 @@ export interface PaperRow {
   type?: PaperType;
   /** 仅模拟题有值，区分高一/高二/高三 */
   grade?: PaperGrade | null;
+  /** 'gaokao'(默认) = 高考题库；'competition' = 竞赛（资源大厅）。migration 024 前为 undefined（按 gaokao 处理）。 */
+  track?: 'gaokao' | 'competition';
+  /** 竞赛分区：'domestic'=国内 / 'international'=国外。仅 track='competition' 有值。 */
+  region?: 'domestic' | 'international' | null;
+  /** 赛事名，如 'AMC 12A' / 'IMO' / '全国高中数学联赛'。仅竞赛有值。 */
+  contest?: string | null;
   created_at: string;
   updated_at: string;
   /** 题目总数，由 getPapers() 聚合计算后附加，DB 中无此列 */

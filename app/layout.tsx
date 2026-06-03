@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 // KaTeX 字体与符号样式必须全局引入，MathRenderer 渲染的数学公式才能正确显示
 import "katex/dist/katex.min.css";
@@ -11,16 +10,6 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import SmoothScrollProvider from "@/components/providers/SmoothScrollProvider";
 import BackgroundProvider from "@/components/background/BackgroundProvider";
 import { Toaster } from "sonner";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://aumath.com"),
@@ -44,7 +33,7 @@ export default function RootLayout({
     <html
       lang="zh-CN"
       suppressHydrationWarning
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className="h-full antialiased"
     >
       <body className="min-h-full flex flex-col">
         {/* Lenis 全局平滑滚动须在最外层，先于主题水合接管文档滚动器 */}

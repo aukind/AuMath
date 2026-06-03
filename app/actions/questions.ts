@@ -329,12 +329,13 @@ export async function getQuestionTopics(): Promise<TopicWithChildren[]> {
 
 // 试卷列表（含每卷题数徽章）—— 与用户无关。题数需要翻页扫描整张 paper_questions（可能上千行），
 // 是切卷「转圈圈」的主要成本，故用 unstable_cache 缓存；失效靠 tag 'papers' 或 1 小时 TTL。
-const getPapersCached = unstable_cache(
+const getAllPapersCached = unstable_cache(
   async (): Promise<PaperRow[]> => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const sb = createPublicClient() as any;
 
-  type PaperRaw = { id: string; title: string; year: number | null; type: 'real' | 'mock'; grade: string | null; created_at: string; updated_at: string };
+  // track/region/contest 由 migration 024 引入；select '*' 在迁移前后都不报错（缺列即缺字段）。
+  type PaperRaw = { id: string; title: string; year: number | null; type: 'real' | 'mock'; grade: string | null; track?: 'gaokao' | 'competition'; region?: string | null; contest?: string | null; created_at: string; updated_at: string };
   type PqRaw = { paper_id: string };
 
   // 分页拉全 paper_questions —— Supabase 默认 range 0-999，行数破千后会被悄悄截断，
@@ -360,7 +361,7 @@ const getPapersCached = unstable_cache(
 
   const [papersResult, pqRows] = await Promise.all([
     sb.from('papers')
-      .select('id, title, year, type, grade, created_at, updated_at')
+      .select('*')
       .order('year', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false }) as Promise<{ data: PaperRaw[] | null; error: { message: string } | null }>,
     fetchAllPaperQuestionIds(),
@@ -385,8 +386,16 @@ const getPapersCached = unstable_cache(
   { tags: ['papers'], revalidate: 3600 },
 );
 
+/** 高考题库：仅高考卷（排除竞赛）。migration 024 前所有卷 track 为 undefined → 全部按高考显示。 */
 export async function getPapers(): Promise<PaperRow[]> {
-  return getPapersCached();
+  const all = await getAllPapersCached();
+  return all.filter(p => p.track !== 'competition');
+}
+
+/** 资源大厅·竞赛：仅竞赛卷（track='competition'）。migration 024 前返回空。 */
+export async function getCompetitionPapers(): Promise<PaperRow[]> {
+  const all = await getAllPapersCached();
+  return all.filter(p => p.track === 'competition');
 }
 
 export interface PaperQuestionsResult {

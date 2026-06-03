@@ -37,12 +37,8 @@ import {
   toggleUpvote,
 } from '@/app/actions/library';
 import {
-  RESOURCE_TYPES,
-  EDU_STAGES,
-  type EduStage,
   type LibraryFilter,
   type LibraryItem,
-  type ResourceType,
 } from '@/types/library';
 
 const BUCKET = 'library-pdfs';
@@ -82,8 +78,6 @@ const FEED_TITLE: Record<LibraryFilter, string> = {
 interface Props {
   initialItems: LibraryItem[];
   initialFilter?: LibraryFilter;
-  initialType?: ResourceType | null;
-  initialStage?: EduStage | null;
   initialQuery?: string;
   initialVotedIds?: string[];
   isAdmin: boolean;
@@ -93,8 +87,6 @@ interface Props {
 export default function LibraryFeed({
   initialItems,
   initialFilter = 'all',
-  initialType = null,
-  initialStage = null,
   initialQuery = '',
   initialVotedIds = [],
   isAdmin,
@@ -106,10 +98,8 @@ export default function LibraryFeed({
   const [active, setActive] = useState<LibraryItem | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [votedIds, setVotedIds] = useState<Set<string>>(() => new Set(initialVotedIds));
-  // 检索 + 分类筛选（客户端即时，对已加载列表过滤）；初值可由首页导航深链注入
+  // 检索（客户端即时，对已加载列表过滤）；初值可由首页导航深链注入。分类已交由侧栏分级目录承载。
   const [query, setQuery] = useState(initialQuery);
-  const [typeFilter, setTypeFilter] = useState<ResourceType | null>(initialType);
-  const [stageFilter, setStageFilter] = useState<EduStage | null>(initialStage);
 
   const refresh = useCallback((f: LibraryFilter) => {
     startTransition(async () => {
@@ -126,8 +116,6 @@ export default function LibraryFeed({
   // 检索 + 分类组合过滤
   const q = query.trim().toLowerCase();
   const visible = items.filter((i) => {
-    if (typeFilter && i.resource_type !== typeFilter) return false;
-    if (stageFilter && i.edu_stage !== stageFilter) return false;
     if (q) {
       const hay = [i.title, i.description ?? '', i.tags.join(' '), i.author?.username ?? '']
         .join(' ')
@@ -140,7 +128,7 @@ export default function LibraryFeed({
   const officialItems = visible.filter((i) => i.is_official);
   const feedItems = filter === 'all' ? visible.filter((i) => !i.is_official) : visible;
   const showcase = filter === 'all' && officialItems.length > 0;
-  const isFiltering = !!q || !!typeFilter || !!stageFilter;
+  const isFiltering = !!q;
 
   // ── 点赞（乐观更新，失败回滚，成功对齐服务端真值） ─────────────
   const onToggleUpvote = async (item: LibraryItem) => {
@@ -245,21 +233,7 @@ export default function LibraryFeed({
         )}
       </div>
 
-      {/* 分类筛选 chips：类型 + 学段 */}
-      <div className="mb-5 space-y-2">
-        <FilterChips
-          label="类型"
-          values={RESOURCE_TYPES}
-          active={typeFilter}
-          onChange={(v) => setTypeFilter(v as ResourceType | null)}
-        />
-        <FilterChips
-          label="学段"
-          values={EDU_STAGES}
-          active={stageFilter}
-          onChange={(v) => setStageFilter(v as EduStage | null)}
-        />
-      </div>
+      <div className="mb-5" />
 
       <LayoutGroup>
         {/* 官方严选 3D 橱窗 */}
@@ -311,42 +285,6 @@ export default function LibraryFeed({
   );
 }
 
-// 分类筛选 chips（单选，再点一次取消）
-function FilterChips({
-  label,
-  values,
-  active,
-  onChange,
-}: {
-  label: string;
-  values: readonly string[];
-  active: string | null;
-  onChange: (v: string | null) => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="mr-0.5 text-xs text-zinc-400">{label}</span>
-      {values.map((v) => {
-        const on = active === v;
-        return (
-          <button
-            key={v}
-            type="button"
-            onClick={() => onChange(on ? null : v)}
-            className={`rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
-              on
-                ? 'bg-indigo-600 text-white'
-                : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
-            }`}
-          >
-            {v}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 // ── 上传抽屉（tus 断点续传直传 ≤5GB） ───────────────────────
 function UploadDrawer({
   open,
@@ -363,8 +301,6 @@ function UploadDrawer({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState('');
-  const [resourceType, setResourceType] = useState<ResourceType>('教材');
-  const [eduStage, setEduStage] = useState<EduStage>('高中');
   const [progress, setProgress] = useState<number | null>(null); // null=未开始
   const [submitting, setSubmitting] = useState(false);
   const uploadRef = useRef<tus.Upload | null>(null);
@@ -388,8 +324,6 @@ function UploadDrawer({
     setTitle('');
     setDescription('');
     setTags('');
-    setResourceType('教材');
-    setEduStage('高中');
     setProgress(null);
   };
 
@@ -432,8 +366,6 @@ function UploadDrawer({
     const meta = {
       title: title.trim(),
       description: description.trim(),
-      resourceType,
-      eduStage,
       tags: Array.from(
         new Set(tags.split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean)),
       ).slice(0, 8),
@@ -549,40 +481,6 @@ function UploadDrawer({
               rows={2}
               className="w-full resize-none rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-800"
             />
-            {/* 类型 / 学段 */}
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className="mb-1 block text-xs text-zinc-500">类型</span>
-                <select
-                  value={resourceType}
-                  onChange={(e) => setResourceType(e.target.value as ResourceType)}
-                  disabled={submitting}
-                  className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-800"
-                >
-                  {RESOURCE_TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs text-zinc-500">学段</span>
-                <select
-                  value={eduStage}
-                  onChange={(e) => setEduStage(e.target.value as EduStage)}
-                  disabled={submitting}
-                  className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-500 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-800"
-                >
-                  {EDU_STAGES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
             <input
               value={tags}
               onChange={(e) => setTags(e.target.value)}

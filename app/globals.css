@@ -17,14 +17,16 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* 系统字体栈：零下载，UI 用无衬线（含中文黑体）。 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei",
+    "Noto Sans CJK SC", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -94,9 +96,18 @@ body:has([data-app-modal]) [data-app-shell] {
 }
 
 /* ─────────────────────────────────────────────────────────────
-   学术排版留白 —— 由 MathRenderer 的 academicTypography 注入。
-   （衬线字体已撤回：正文沿用 Geist，此处只控行高与公式留白。）
+   学术排版 —— 由 MathRenderer 的 academicTypography 注入（题目正文/选项/解析）。
+   高考排版：题目中文用宋体衬线（系统字体，零下载），更贴近高考试卷观感。
+   ⚠️ 仅作用于题目文本元素，严禁触碰 .katex —— 数学公式保持 KaTeX 自带字体。
    ───────────────────────────────────────────────────────────── */
+
+/* 题目中文 = 宋体衬线（系统字体栈，不下载）。
+   只设在文本元素上；KaTeX 自身在 .katex 上声明了 font-family，公式 span 不会继承此衬线，
+   故无需（也绝不可）对 .katex 设 font-family —— 那会打乱 KaTeX 的 Size/AMS/Caligraphic 分字族。 */
+.academic-prose :where(p, li, h1, h2, h3, h4, blockquote, td, th) {
+  font-family: "Songti SC", "SimSun", "Noto Serif CJK SC", "Source Han Serif SC",
+    "Source Han Serif CN", STSong, serif;
+}
 
 /* 放宽行高 + 加大独立公式块上下外边距，给高密度推导「呼吸感」 */
 .academic-prose :where(p, li) {

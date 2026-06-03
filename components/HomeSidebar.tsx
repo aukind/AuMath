@@ -9,7 +9,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   MessagesSquare,
   Library as LibraryIcon,
@@ -18,6 +18,11 @@ import {
   BookOpen,
   Orbit,
   ChevronDown,
+  BadgeCheck,
+  Users,
+  Newspaper,
+  GraduationCap,
+  Trophy,
 } from 'lucide-react';
 import Magnetic from '@/components/motion/Magnetic';
 import SidebarTabs from '@/components/SidebarTabs';
@@ -69,6 +74,39 @@ function RowInner({ Icon, label, active, loading }: { Icon: IconType; label: str
   );
 }
 
+/** 资源树分组标题（不可点，仅分隔）。 */
+function LibGroup({ Icon, label }: { Icon: IconType; label: string }) {
+  return (
+    <div className="mt-1.5 flex items-center gap-1.5 px-2 pb-0.5 pt-1 text-[0.7rem] font-semibold uppercase tracking-wider text-zinc-400 first:mt-0">
+      <Icon size={12} className="text-zinc-400" />
+      {label}
+    </div>
+  );
+}
+
+/** 资源树叶子（可点，软导航到 /library?cat=…）。 */
+function LibLeaf({
+  Icon, label, href, active, onClick, loading,
+}: { Icon: IconType; label: string; href: string; active: boolean; onClick: (e: React.MouseEvent) => void; loading: boolean }) {
+  return (
+    <Link
+      href={href}
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      className={[
+        'flex items-center gap-2 rounded-md px-2 py-1.5 text-[0.82rem] transition-colors',
+        active
+          ? 'bg-indigo-50 font-semibold text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-300'
+          : 'font-medium text-zinc-500 hover:bg-zinc-100/70 hover:text-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-800/40 dark:hover:text-zinc-200',
+      ].join(' ')}
+    >
+      <Icon size={14} className={active ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400'} />
+      {label}
+      {loading && <span className="ml-auto h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-400" />}
+    </Link>
+  );
+}
+
 export default function HomeSidebar({
   topics,
   papers,
@@ -81,8 +119,11 @@ export default function HomeSidebar({
   onNavigate,
 }: Props) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { navigate, pendingHref } = useSoftNav();
   const [bankOpen, setBankOpen] = useState(mainView === 'browse');
+  const [libOpen, setLibOpen] = useState(pathname.startsWith('/library'));
+  const currentCat = pathname.startsWith('/library') ? (searchParams.get('cat') ?? 'all') : null;
 
   // 工作区高亮：受控实例认 activeWorkspace；非受控（移动端）回退 mainView。browse 时两者皆不亮。
   const wsActive = (w: Workspace) =>
@@ -144,15 +185,33 @@ export default function HomeSidebar({
           />
         </button>
 
-        {/* 资源大厅 */}
-        <Link
-          href="/library"
-          onClick={goLink('/library')}
-          aria-current={libraryActive ? 'page' : undefined}
-          className={rowClass(libraryActive)}
+        {/* 资源大厅（手风琴：展开分级目录树） */}
+        <button
+          type="button"
+          onClick={() => setLibOpen((o) => !o)}
+          aria-expanded={libOpen}
+          aria-controls="sidebar-library-tree"
+          className={`${rowClass(libraryActive)} cursor-pointer`}
         >
-          <RowInner Icon={LibraryIcon} label="资源大厅" active={libraryActive} loading={pendingHref === '/library'} />
-        </Link>
+          <RowInner Icon={LibraryIcon} label="资源大厅" active={libraryActive} loading={(pendingHref ?? '').startsWith('/library')} />
+          <ChevronDown
+            size={14}
+            aria-hidden
+            className={['ml-auto text-zinc-400 transition-transform duration-200', libOpen ? 'rotate-180' : ''].join(' ')}
+          />
+        </button>
+        {libOpen && (
+          <div id="sidebar-library-tree" className="mb-0.5 ml-3 flex flex-col gap-0.5 border-l border-zinc-200/70 pl-2 dark:border-zinc-800">
+            {/* 官方严选 ─ 期刊 / 教材 / 竞赛 */}
+            <LibGroup Icon={BadgeCheck} label="官方严选" />
+            <LibLeaf Icon={Newspaper} label="期刊" href="/library?cat=journal" active={currentCat === 'journal'} onClick={goLink('/library?cat=journal')} loading={pendingHref === '/library?cat=journal'} />
+            <LibLeaf Icon={GraduationCap} label="教材" href="/library?cat=textbook" active={currentCat === 'textbook'} onClick={goLink('/library?cat=textbook')} loading={pendingHref === '/library?cat=textbook'} />
+            <LibLeaf Icon={Trophy} label="竞赛" href="/library?cat=competition" active={currentCat === 'competition'} onClick={goLink('/library?cat=competition')} loading={pendingHref === '/library?cat=competition'} />
+            {/* 社区共享 */}
+            <LibGroup Icon={Users} label="社区共享" />
+            <LibLeaf Icon={Users} label="社区资料" href="/library?cat=community" active={currentCat === 'community'} onClick={goLink('/library?cat=community')} loading={pendingHref === '/library?cat=community'} />
+          </div>
+        )}
 
         {/* 知识星图 */}
         <Link
