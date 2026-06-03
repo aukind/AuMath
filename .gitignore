@@ -36,6 +36,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# claude code (agent 计划文件 / 本地状态)
+.claude/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
