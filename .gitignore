@@ -42,3 +42,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# rust / wasm
+/rust/latex-normalizer/target/
+# wasm-pack 产物**入库**：Vercel 云端不编译 Rust，提交 32KB .wasm 当静态资源用。
+# 改了 rust/latex-normalizer/src 后需重跑 npm run build:wasm[:web] 并提交。
