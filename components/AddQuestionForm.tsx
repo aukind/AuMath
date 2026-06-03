@@ -4,6 +4,7 @@ import { useState, useTransition, useCallback, useRef, type RefObject, type Reac
 import { useRouter } from 'next/navigation';
 import { ArrowLeft, Eye, EyeOff, Loader2, Send, Save, X } from 'lucide-react';
 import MathRenderer from '@/components/MathRenderer';
+import LatexNormalizeHint from '@/components/editor/LatexNormalizeHint';
 import AiFigureButton from '@/components/admin/AiFigureButton';
 import { ScreenshotToLatexButton } from '@/components/admin/ScreenshotToLatexButton';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
@@ -98,7 +99,11 @@ function SplitFieldNoLabel({
       {/* 预览区 */}
       <div className="bg-white dark:bg-zinc-900 px-5 py-4 overflow-y-auto min-h-0">
         {value.trim() ? (
-          <MathRenderer content={value} />
+          <>
+            <MathRenderer content={value} />
+            {/* Rust→WASM 实时规范化提示：检测到非规范写法时浮出「一键规范化」 */}
+            <LatexNormalizeHint value={value} onApply={onChange} />
+          </>
         ) : (
           <div className="h-full flex items-center justify-center">
             <p className="text-xs text-zinc-300 dark:text-zinc-600 italic text-center leading-relaxed">

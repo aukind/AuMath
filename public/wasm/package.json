@@ -1,0 +1,21 @@
+{
+  "name": "latex-normalizer",
+  "type": "module",
+  "description": "Rust→WASM LaTeX 规范化器（aumath.com 骨架）",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://aumath.com"
+  },
+  "files": [
+    "latex_normalizer_bg.wasm",
+    "latex_normalizer.js",
+    "latex_normalizer.d.ts"
+  ],
+  "main": "latex_normalizer.js",
+  "types": "latex_normalizer.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

@@ -1,0 +1,22 @@
+[package]
+name = "latex-normalizer"
+version = "0.1.0"
+edition = "2021"
+description = "Rust→WASM LaTeX 规范化器（aumath.com 骨架）"
+license = "MIT"
+repository = "https://aumath.com"
+
+# cdylib 产出 .wasm；rlib 让 `cargo test` 能在原生平台跑单测。
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# 只引一个依赖：JS ↔ Rust 的绑定胶水。词法逻辑全部手写，保持骨架轻量。
+wasm-bindgen = "0.2"
+
+# WASM 体积优化：opt-level=s + LTO，产物通常 < 50KB。
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"

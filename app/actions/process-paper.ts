@@ -2,7 +2,8 @@
 
 import { GoogleGenAI } from '@google/genai';
 import { revalidatePath, revalidateTag } from 'next/cache';
-import { normalizeLaTeX } from '@/lib/normalizeLatex';
+// 录入流程统一走 Smart 入口：默认 TS AST 版，USE_WASM_NORMALIZER=1 时切 Rust→WASM 版。
+import { normalizeLaTeXSmart as normalizeLaTeX } from '@/lib/normalizeLatexSmart';
 import { stripInlineOptionTail } from '@/lib/questions/content';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
