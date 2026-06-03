@@ -387,14 +387,18 @@ export async function toggleForumUpvote(commentId: string): Promise<{ upvotes: n
 
   let upvoted: boolean;
   if (existing) {
-    await sb
+    const { error: delErr } = await sb
       .from('forum_comment_votes')
       .delete()
       .eq('comment_id', commentId)
       .eq('user_id', uid);
+    if (delErr) throw new Error('取消点赞失败：' + delErr.message);
     upvoted = false;
   } else {
-    await sb.from('forum_comment_votes').insert({ comment_id: commentId, user_id: uid });
+    // 检查 insert 错误：若线上表约束异常（如旧版 user_id 单列唯一键）会在此抛出，
+    // 触发客户端回滚 + toast，而非静默挤掉用户在其它评论上的赞。
+    const { error: insErr } = await sb.from('forum_comment_votes').insert({ comment_id: commentId, user_id: uid });
+    if (insErr) throw new Error('点赞失败：' + insErr.message);
     // 新点赞 → 通知被赞回复的作者
     const { data: comment } = await sb
       .from('forum_comments')
@@ -427,10 +431,12 @@ export async function toggleForumPostUpvote(postId: string): Promise<{ upvotes: 
 
   let upvoted: boolean;
   if (existing) {
-    await sb.from('forum_post_votes').delete().eq('post_id', postId).eq('user_id', uid);
+    const { error: delErr } = await sb.from('forum_post_votes').delete().eq('post_id', postId).eq('user_id', uid);
+    if (delErr) throw new Error('取消点赞失败：' + delErr.message);
     upvoted = false;
   } else {
-    await sb.from('forum_post_votes').insert({ post_id: postId, user_id: uid });
+    const { error: insErr } = await sb.from('forum_post_votes').insert({ post_id: postId, user_id: uid });
+    if (insErr) throw new Error('点赞失败：' + insErr.message);
     // 新点赞 → 通知帖主
     const { data: post } = await sb.from('forum_posts').select('author_id').eq('id', postId).maybeSingle();
     await notify(sb, { recipientId: post?.author_id, actorId: uid, type: 'like', postId });
@@ -459,10 +465,12 @@ export async function toggleForumPostFavorite(postId: string): Promise<{ favorit
     .maybeSingle();
 
   if (existing) {
-    await sb.from('forum_post_favorites').delete().eq('post_id', postId).eq('user_id', uid);
+    const { error: delErr } = await sb.from('forum_post_favorites').delete().eq('post_id', postId).eq('user_id', uid);
+    if (delErr) throw new Error('取消收藏失败：' + delErr.message);
     return { favorited: false };
   }
-  await sb.from('forum_post_favorites').insert({ post_id: postId, user_id: uid });
+  const { error: insErr } = await sb.from('forum_post_favorites').insert({ post_id: postId, user_id: uid });
+  if (insErr) throw new Error('收藏失败：' + insErr.message);
   return { favorited: true };
 }
 

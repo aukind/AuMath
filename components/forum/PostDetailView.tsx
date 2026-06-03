@@ -11,7 +11,6 @@
 // 挂载 MathContent 正文与评论，且正文容器用 layout="position" 不缩放 SVG。
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   AnimatePresence,
@@ -208,9 +207,11 @@ export default function PostDetailView({
                           initialFavoritedByMe={!!post.favoritedByMe}
                           canInteract={!!currentUser}
                         />
-                        <Link href={`/forum/${postId}`} className="ml-auto text-indigo-600 hover:underline dark:text-indigo-400">
+                        {/* 弹窗 URL 已是 /forum/[id]（被 @modal 拦截）；用原生 <a> 强制硬导航，
+                            整页加载绕过拦截器 → 渲染全页详情（<Link> 软导航到同 URL 是 no-op）。 */}
+                        <a href={`/forum/${postId}`} className="ml-auto text-indigo-600 hover:underline dark:text-indigo-400">
                           独立页面打开 →
-                        </Link>
+                        </a>
                       </div>
 
                       <div className="mt-2">
