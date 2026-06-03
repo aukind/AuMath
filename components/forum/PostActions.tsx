@@ -7,6 +7,7 @@ import { useState, useTransition } from 'react';
 import { toast } from 'sonner';
 import { Bookmark, ThumbsUp } from 'lucide-react';
 import { toggleForumPostUpvote, toggleForumPostFavorite } from '@/app/actions/forum';
+import SquishyButton from '@/components/motion/SquishyButton';
 
 interface PostActionsProps {
   postId: string;
@@ -73,7 +74,7 @@ export default function PostActions({
 
   return (
     <>
-      <button
+      <SquishyButton
         type="button"
         onClick={handleUpvote}
         disabled={pending}
@@ -86,9 +87,9 @@ export default function PostActions({
       >
         <ThumbsUp className="h-4 w-4" fill={upvoted ? 'currentColor' : 'none'} />
         <span className="tabular-nums">{upvotes}</span>
-      </button>
+      </SquishyButton>
 
-      <button
+      <SquishyButton
         type="button"
         onClick={handleFavorite}
         disabled={pending}
@@ -101,7 +102,7 @@ export default function PostActions({
       >
         <Bookmark className="h-4 w-4" fill={favorited ? 'currentColor' : 'none'} />
         <span>{favorited ? '已收藏' : '收藏'}</span>
-      </button>
+      </SquishyButton>
     </>
   );
 }

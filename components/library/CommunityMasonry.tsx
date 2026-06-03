@@ -10,6 +10,7 @@ import { motion } from 'framer-motion';
 import { BadgeCheck, Eye, Flag, Heart, Sparkles } from 'lucide-react';
 import CoverArt from '@/components/library/CoverArt';
 import { Avatar, coverLayoutId } from '@/components/library/shared';
+import SquishyButton from '@/components/motion/SquishyButton';
 import type { LibraryItem } from '@/types/library';
 
 export default function CommunityMasonry({
@@ -119,7 +120,7 @@ function FeedCard({
         )}
 
         <div className="ml-auto flex items-center gap-1">
-          <button
+          <SquishyButton
             type="button"
             onClick={onToggleUpvote}
             title={voted ? '取消点赞' : '点赞'}
@@ -132,31 +133,31 @@ function FeedCard({
           >
             <Heart size={13} className={voted ? 'fill-current' : ''} />
             <span className="tabular-nums">{item.upvote_count}</span>
-          </button>
+          </SquishyButton>
 
           <span className="flex items-center gap-1 px-1 text-xs text-zinc-400">
             <Eye size={12} /> {item.view_count}
           </span>
 
           {isAdmin && !item.is_official && (
-            <button
+            <SquishyButton
               type="button"
               onClick={onPromote}
               title="加精为官方"
               className="rounded p-1 text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10"
             >
               <Sparkles size={14} />
-            </button>
+            </SquishyButton>
           )}
           {canReport && (
-            <button
+            <SquishyButton
               type="button"
               onClick={onReport}
               title="举报"
               className="rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-rose-500 dark:hover:bg-zinc-800"
             >
               <Flag size={14} />
-            </button>
+            </SquishyButton>
           )}
         </div>
       </div>

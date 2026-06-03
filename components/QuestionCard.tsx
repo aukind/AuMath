@@ -5,6 +5,8 @@ import { ChevronDown, GripVertical, Layers, Pencil, Star, Trash2, X } from 'luci
 import MathRenderer from '@/components/MathRenderer';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import DifficultyRating from '@/components/DifficultyRating';
+import Magnetic from '@/components/motion/Magnetic';
+import SquishyButton from '@/components/motion/SquishyButton';
 import { toggleFavorite, markError, removeError, recordView, recordAttempt } from '@/app/actions/user-workspace';
 import { stripInlineOptionTail, withAnswerBlank, isBlankOption, normalizeOptions } from '@/lib/questions/content';
 import type { QuestionWithTopics } from '@/types/database';
@@ -116,20 +118,22 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
           )}
           {/* 收藏键 —— 最左 */}
           {isLoggedIn && (
-            <button
-              onClick={handleToggleFavorite}
-              disabled={isPending}
-              title={favorited ? '取消收藏' : '收藏此题'}
-              className={[
-                'flex items-center justify-center w-6 h-6 rounded-md transition-colors shrink-0',
-                favorited
-                  ? 'text-amber-400 hover:text-amber-500'
-                  : 'text-zinc-300 dark:text-zinc-600 hover:text-amber-400 dark:hover:text-amber-500',
-                isPending && 'opacity-50 cursor-not-allowed',
-              ].join(' ')}
-            >
-              <Star size={14} fill={favorited ? 'currentColor' : 'none'} />
-            </button>
+            <Magnetic intensity={0.3} range={6}>
+              <SquishyButton
+                onClick={handleToggleFavorite}
+                disabled={isPending}
+                title={favorited ? '取消收藏' : '收藏此题'}
+                className={[
+                  'flex items-center justify-center w-6 h-6 rounded-md transition-colors shrink-0',
+                  favorited
+                    ? 'text-amber-400 hover:text-amber-500'
+                    : 'text-zinc-300 dark:text-zinc-600 hover:text-amber-400 dark:hover:text-amber-500',
+                  isPending && 'opacity-50 cursor-not-allowed',
+                ].join(' ')}
+              >
+                <Star size={14} fill={favorited ? 'currentColor' : 'none'} />
+              </SquishyButton>
+            </Magnetic>
           )}
           {/* 题目来源（完整卷名，含年份）—— 收藏键右侧 */}
           {question.source && (
@@ -201,7 +205,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
 
         {/* Action bar */}
         <div className="flex items-center gap-2 px-5 py-3 border-t border-zinc-100 dark:border-zinc-800">
-          <button
+          <SquishyButton
             onClick={handleToggleSolution}
             className="flex items-center gap-1.5 text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
           >
@@ -210,9 +214,9 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
               className={`transition-transform duration-200 ${solutionOpen ? 'rotate-180' : ''}`}
             />
             {solutionOpen ? '收起解析' : '查看解析'}
-          </button>
+          </SquishyButton>
           {isLoggedIn && (
-            <button
+            <SquishyButton
               onClick={handleToggleError}
               disabled={isPending}
               title={errored ? '点击从错题本移除' : '标记为错题'}
@@ -225,10 +229,10 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
               ].join(' ')}
             >
               {errored ? '✓ 已记录' : '我做错了'}
-            </button>
+            </SquishyButton>
           )}
           {isLoggedIn && (
-            <button
+            <SquishyButton
               onClick={handleMarkCorrect}
               disabled={isPending}
               title="标记为已掌握（计入知识星图）"
@@ -241,7 +245,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
               ].join(' ')}
             >
               {gradedCorrect ? '✓ 已掌握' : '我做对了'}
-            </button>
+            </SquishyButton>
           )}
           <VariantButton count={question.variations?.length ?? 0} />
         </div>

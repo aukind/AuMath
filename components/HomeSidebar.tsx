@@ -15,6 +15,7 @@ import {
   BookMarked,
   Orbit,
 } from 'lucide-react';
+import Magnetic from '@/components/motion/Magnetic';
 import AnimatedTabs from '@/components/ui/AnimatedTabs';
 import SidebarTabs from '@/components/SidebarTabs';
 import LibrarySidebar from '@/components/library/LibrarySidebar';
@@ -91,7 +92,9 @@ export default function HomeSidebar({
                   active || loading ? 'opacity-100' : 'opacity-0',
                 ].join(' ')}
               />
-              <Icon size={16} className={active ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400'} strokeWidth={2} />
+              <Magnetic intensity={0.35} range={10}>
+                <Icon size={16} className={active ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400'} strokeWidth={2} />
+              </Magnetic>
               {label}
             </Link>
           );
