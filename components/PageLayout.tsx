@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState, useCallback, useEffect } from 'react';
+import { useId, useState, useCallback, useEffect, useTransition } from 'react';
 import Link from 'next/link';
 import { motion, LayoutGroup } from 'framer-motion';
 import {
@@ -15,7 +15,7 @@ import {
 } from '@dnd-kit/core';
 import {
   GripVertical, PenLine, CheckCircle2, Lock, LogIn,
-  MessagesSquare, BookMarked, Star, XCircle, Clock, ChevronLeft, Plus, Loader2,
+  Star, XCircle, Clock, ChevronLeft, Plus, Loader2,
   BrainCircuit, ArrowRight,
 } from 'lucide-react';
 import HomeSidebar from '@/components/HomeSidebar';
@@ -25,16 +25,13 @@ import SortSelect from '@/components/SortSelect';
 import QuestionSearch from '@/components/QuestionSearch';
 import SiteViewsBadge from '@/components/SiteViewsBadge';
 import ForumPostList from '@/components/forum/ForumPostList';
-import LibraryHeroBanner from '@/components/library/LibraryHeroBanner';
-import DashboardWorkspace from '@/components/dashboard/DashboardWorkspace';
+import HeavyContentContainer from '@/components/dashboard/HeavyContentContainer';
 import EditPaperButton from '@/components/admin/EditPaperButton';
 import { useSoftNav, isPlainLeftClick } from '@/components/ui/useSoftNav';
-import type { TabItem } from '@/components/ui/AnimatedTabs';
 import { deleteQuestion, updateQuestionCategory } from '@/app/actions/questions';
 import type { SortOrder } from '@/app/actions/questions';
 import type { TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceType } from '@/types/database';
 import type { ForumPost } from '@/types/forum';
-import type { LibraryItem } from '@/types/library';
 
 /** 主区显示模式：社区论坛 / 我的题库 / 题目浏览（点侧边栏知识点·真题·模拟题）。 */
 export type MainView = 'forum' | 'mybank' | 'browse';
@@ -53,7 +50,6 @@ interface PageLayoutProps {
   validSort: SortOrder;
   mainView: MainView;
   forumPosts: ForumPost[];
-  libraryHighlights: LibraryItem[];
   mybankTab: WorkspaceType;
   favoritedIds: string[];
   erroredIds: string[];
@@ -66,12 +62,6 @@ const MYBANK_TABS: { key: WorkspaceType; label: string; icon: typeof Star }[] = 
   { key: 'favorites', label: '我的收藏', icon: Star },
   { key: 'errors', label: '我的错题', icon: XCircle },
   { key: 'history', label: '最近浏览', icon: Clock },
-];
-
-/** 顶层工作区切换：社区论坛 / 我的题库（Magic Tab）。 */
-const WORKSPACE_TABS: TabItem[] = [
-  { id: 'forum', label: '社区论坛', icon: <MessagesSquare size={14} /> },
-  { id: 'bank', label: '我的题库', icon: <BookMarked size={14} /> },
 ];
 
 // 默认导出薄包装：注入 ZenModeProvider，使内部 aside/main 能 useZenMode()，
@@ -98,7 +88,6 @@ function PageLayoutInner({
   validSort,
   mainView,
   forumPosts,
-  libraryHighlights,
   mybankTab,
   favoritedIds,
   erroredIds,
@@ -126,11 +115,32 @@ function PageLayoutInner({
     }
   }, []);
 
-  // ── 顶层 论坛/题库 切换：纯客户端态，软更新 URL（不触发服务端导航，刷新/分享仍保留当前页）──
-  const syncWorkspaceUrl = useCallback((tabId: string) => {
-    const url = tabId === 'bank' ? '/?view=mybank' : '/';
-    window.history.replaceState(window.history.state, '', url);
-  }, []);
+  // ── 论坛/我的题库 切换：状态提升至此，由左栏主导航驱动；保留 0ms keep-alive 秒切 ──
+  // workspace（urgent）驱动左栏高亮与 URL 软更新；contentWorkspace（transition）驱动重子树显隐。
+  const [workspace, setWorkspace] = useState<'forum' | 'bank'>(mainView === 'mybank' ? 'bank' : 'forum');
+  const [contentWorkspace, setContentWorkspace] = useState<'forum' | 'bank'>(mainView === 'mybank' ? 'bank' : 'forum');
+  const [isWorkspacePending, startWorkspaceTransition] = useTransition();
+
+  const switchWorkspace = useCallback((w: 'forum' | 'bank') => {
+    if (w === workspace) return;
+    setWorkspace(w); // 立即：左栏高亮瞬时响应（高优先级）
+    // 软更新 URL（不触发服务端导航，刷新/分享仍保留当前视图）
+    window.history.replaceState(window.history.state, '', w === 'bank' ? '/?view=mybank' : '/');
+    startWorkspaceTransition(() => setContentWorkspace(w)); // 降级：重子树显隐（可中断的低优先级）
+  }, [workspace]);
+
+  // 服务端导航改变 mainView（如从 browse 返回、移动端跳转、刷新）时，于渲染期回灌工作区态
+  // —— React 推荐的「随 prop 调整 state」模式，避免 effect 内 setState 的级联渲染。
+  // 客户端秒切只走 replaceState、不改 mainView，故此处不会覆盖它。
+  const [syncedMainView, setSyncedMainView] = useState(mainView);
+  if (mainView !== syncedMainView) {
+    setSyncedMainView(mainView);
+    if (mainView !== 'browse') {
+      const w: 'forum' | 'bank' = mainView === 'mybank' ? 'bank' : 'forum';
+      setWorkspace(w);
+      setContentWorkspace(w);
+    }
+  }
 
   // ── Toast ────────────────────────────────────────────────────
   const [toast, setToast] = useState<{ msg: string; kind: 'success' | 'error' } | null>(null);
@@ -187,8 +197,9 @@ function PageLayoutInner({
             selectedTopicId={paperId ? undefined : topicId}
             selectedPaperId={paperId}
             isAdmin={isAdmin}
-            libraryHighlights={libraryHighlights}
             mainView={mainView}
+            activeWorkspace={workspace}
+            onWorkspaceChange={switchWorkspace}
           />
           <div className="mt-auto flex flex-col gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
             <SiteViewsBadge initialCount={siteViews} />
@@ -228,36 +239,32 @@ function PageLayoutInner({
               onDelete={handleDelete}
             />
           ) : (
-            // ── 论坛 / 我的题库：Magic Tab + 伪 Keep-Alive，两棵子树常驻、0ms 秒切 ──
-            <DashboardWorkspace
-              tabs={WORKSPACE_TABS}
-              defaultTab={mainView === 'mybank' ? 'bank' : 'forum'}
-              onTabChange={syncWorkspaceUrl}
-              forum={
-                <>
-                  <LibraryHeroBanner highlights={libraryHighlights} />
-                  <ForumPostList posts={forumPosts} canPost={isLoggedIn} />
-                </>
-              }
-              bank={
-                isLoggedIn ? (
-                  <MyBankView
-                    tab={mybankTab}
-                    questions={visibleQuestions}
-                    isAdmin={isAdmin}
-                    isLoggedIn={isLoggedIn}
-                    userId={userId}
-                    favoritedIds={favoritedIds}
-                    erroredIds={erroredIds}
-                    myRatings={myRatings}
-                    dueCount={dueCount}
-                    onDelete={handleDelete}
-                  />
-                ) : (
-                  <MyBankGate />
-                )
-              }
-            />
+            // ── 论坛 / 我的题库：左栏驱动 + 伪 Keep-Alive，两棵子树常驻、0ms 秒切 ──
+            // isWorkspacePending 时容器轻微降透明，给「正在切」反馈而不阻塞点击。
+            <div className={isWorkspacePending ? 'opacity-70 transition-opacity duration-200' : 'opacity-100 transition-opacity duration-200'}>
+              <HeavyContentContainer
+                activeTab={contentWorkspace}
+                forum={<ForumPostList posts={forumPosts} canPost={isLoggedIn} />}
+                bank={
+                  isLoggedIn ? (
+                    <MyBankView
+                      tab={mybankTab}
+                      questions={visibleQuestions}
+                      isAdmin={isAdmin}
+                      isLoggedIn={isLoggedIn}
+                      userId={userId}
+                      favoritedIds={favoritedIds}
+                      erroredIds={erroredIds}
+                      myRatings={myRatings}
+                      dueCount={dueCount}
+                      onDelete={handleDelete}
+                    />
+                  ) : (
+                    <MyBankGate />
+                  )
+                }
+              />
+            </div>
           )}
           </div>
         </main>
@@ -492,6 +499,7 @@ function MyBankView({
             onDelete={onDelete}
             favoritedIds={favoritedIds}
             erroredIds={erroredIds}
+            myRatings={myRatings}
           />
         </>
       )}

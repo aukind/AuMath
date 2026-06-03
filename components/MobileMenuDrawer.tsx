@@ -7,7 +7,6 @@ import HomeSidebar from '@/components/HomeSidebar';
 import SiteViewsBadge from '@/components/SiteViewsBadge';
 import type { MainView } from '@/components/PageLayout';
 import type { TopicWithChildren, PaperRow } from '@/types/database';
-import type { LibraryItem } from '@/types/library';
 
 interface MobileMenuDrawerProps {
   topics: TopicWithChildren[];
@@ -17,7 +16,6 @@ interface MobileMenuDrawerProps {
   isAdmin: boolean;
   hasFilter: boolean;
   siteViews: number; // 接收访问量数据
-  libraryHighlights: LibraryItem[];
   mainView: MainView;
 }
 
@@ -29,7 +27,6 @@ export default function MobileMenuDrawer({
   isAdmin,
   hasFilter,
   siteViews,
-  libraryHighlights,
   mainView,
 }: MobileMenuDrawerProps) {
   return (
@@ -74,7 +71,6 @@ export default function MobileMenuDrawer({
                 selectedTopicId={selectedTopicId}
                 selectedPaperId={selectedPaperId}
                 isAdmin={isAdmin}
-                libraryHighlights={libraryHighlights}
                 mainView={mainView}
               />
 

@@ -1,9 +1,11 @@
 'use client';
 
-// 首页左栏主体（Linear 风「全局导航 + 语境面板」）。
-//   · 顶部全局 nav：社区 / 资源大厅 / 每日一题 / 我的题库（accent 竖条高亮）。
-//   · 下方 [资源大厅 | 题库] 外层切换：默认资源大厅导航；切「题库」显原知识点/真题/模拟题树。
-//     —— 默认 tab 随 mainView 语境：浏览题库时落「题库」，其余落「资源大厅」。
+// 首页左栏主体（Linear 风主导航 + 高考题库手风琴）。
+//   · 主导航 6 项：社区 / 高考题库 / 资源大厅 / 知识星图 / 每日一题 / 我的题库（accent 竖条高亮）。
+//   · 社区 · 我的题库：由 PageLayout 提升的工作区状态驱动（0ms keep-alive 秒切）；
+//     无 onWorkspaceChange 时（移动抽屉 / 当前在 browse 视图）回退为服务端软导航。
+//   · 高考题库：手风琴开关，展开后在下方滚动区显示 知识点/真题/模拟题 树（原 SidebarTabs）。
+//     资源大厅筛选已交由 /library 页承载，此处不再内嵌预览。
 
 import { useState } from 'react';
 import Link from 'next/link';
@@ -13,18 +15,18 @@ import {
   Library as LibraryIcon,
   CalendarDays,
   BookMarked,
+  BookOpen,
   Orbit,
+  ChevronDown,
 } from 'lucide-react';
 import Magnetic from '@/components/motion/Magnetic';
-import AnimatedTabs from '@/components/ui/AnimatedTabs';
 import SidebarTabs from '@/components/SidebarTabs';
-import LibrarySidebar from '@/components/library/LibrarySidebar';
 import { useSoftNav, isPlainLeftClick } from '@/components/ui/useSoftNav';
 import type { MainView } from '@/components/PageLayout';
 import type { TopicWithChildren, PaperRow } from '@/types/database';
-import type { LibraryItem } from '@/types/library';
 
 type IconType = React.ComponentType<{ size?: number | string; className?: string; strokeWidth?: number }>;
+type Workspace = 'forum' | 'bank';
 
 interface Props {
   topics: TopicWithChildren[];
@@ -32,9 +34,39 @@ interface Props {
   selectedTopicId?: string;
   selectedPaperId?: string;
   isAdmin?: boolean;
-  libraryHighlights: LibraryItem[];
   mainView: MainView;
+  /** 受控工作区（仅桌面端 PageLayout 注入，用于 0ms 秒切高亮）。 */
+  activeWorkspace?: Workspace;
+  /** 工作区切换回调；存在即走客户端秒切，缺省则回退服务端软导航。 */
+  onWorkspaceChange?: (w: Workspace) => void;
   onNavigate?: () => void; // 移动端抽屉内点击后关闭
+}
+
+const rowClass = (active: boolean) =>
+  [
+    'group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
+    active
+      ? 'bg-zinc-100 font-semibold text-zinc-900 dark:bg-zinc-800/70 dark:text-zinc-50'
+      : 'font-medium text-zinc-600 hover:bg-zinc-100/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/40 dark:hover:text-zinc-200',
+  ].join(' ');
+
+/** 行内容：accent 竖条 + 磁吸图标 + 标签（fragment，模块级稳定，无重挂载）。 */
+function RowInner({ Icon, label, active, loading }: { Icon: IconType; label: string; active: boolean; loading: boolean }) {
+  return (
+    <>
+      <span
+        aria-hidden
+        className={[
+          'absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-indigo-500 transition-opacity',
+          active || loading ? 'opacity-100' : 'opacity-0',
+        ].join(' ')}
+      />
+      <Magnetic intensity={0.35} range={10}>
+        <Icon size={16} className={active ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400'} strokeWidth={2} />
+      </Magnetic>
+      {label}
+    </>
+  );
 }
 
 export default function HomeSidebar({
@@ -43,89 +75,131 @@ export default function HomeSidebar({
   selectedTopicId,
   selectedPaperId,
   isAdmin = false,
-  libraryHighlights,
   mainView,
+  activeWorkspace,
+  onWorkspaceChange,
   onNavigate,
 }: Props) {
   const pathname = usePathname();
   const { navigate, pendingHref } = useSoftNav();
-  const [tab, setTab] = useState<'lib' | 'bank'>(mainView === 'browse' ? 'bank' : 'lib');
+  const [bankOpen, setBankOpen] = useState(mainView === 'browse');
 
-  const NAV: { id: string; label: string; href: string; icon: IconType; active: boolean }[] = [
-    { id: 'community', label: '社区', href: '/', icon: MessagesSquare, active: pathname === '/' && mainView === 'forum' },
-    { id: 'library', label: '资源大厅', href: '/library', icon: LibraryIcon, active: pathname.startsWith('/library') },
-    { id: 'graph', label: '知识星图', href: '/explore', icon: Orbit, active: pathname.startsWith('/explore') },
-    { id: 'daily', label: '每日一题', href: '/daily', icon: CalendarDays, active: pathname.startsWith('/daily') },
-    { id: 'mybank', label: '我的题库', href: '/?view=mybank', icon: BookMarked, active: pathname === '/' && mainView === 'mybank' },
-  ];
+  // 工作区高亮：受控实例认 activeWorkspace；非受控（移动端）回退 mainView。browse 时两者皆不亮。
+  const wsActive = (w: Workspace) =>
+    mainView === 'browse'
+      ? false
+      : onWorkspaceChange
+        ? activeWorkspace === w
+        : pathname === '/' && (w === 'forum' ? mainView === 'forum' : mainView === 'mybank');
 
-  const go = (href: string) => (e: React.MouseEvent) => {
+  const goLink = (href: string) => (e: React.MouseEvent) => {
     if (!isPlainLeftClick(e)) return;
     e.preventDefault();
     onNavigate?.();
     navigate(href);
   };
 
+  const goWorkspace = (w: Workspace, href: string) => (e: React.MouseEvent) => {
+    if (!isPlainLeftClick(e)) return;
+    e.preventDefault();
+    onNavigate?.();
+    // 有常驻容器（非 browse）且受控 → 客户端秒切；否则服务端软导航离开当前视图。
+    if (onWorkspaceChange && mainView !== 'browse') onWorkspaceChange(w);
+    else navigate(href);
+  };
+
+  const communityActive = wsActive('forum');
+  const mybankActive = wsActive('bank');
+  const bankActive = mainView === 'browse';
+  const libraryActive = pathname.startsWith('/library');
+  const graphActive = pathname.startsWith('/explore');
+  const dailyActive = pathname.startsWith('/daily');
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
-      {/* 全局导航 */}
       <nav aria-label="主导航" className="flex flex-col gap-0.5">
-        {NAV.map(({ id, label, href, icon: Icon, active }) => {
-          const loading = pendingHref === href;
-          return (
-            <Link
-              key={id}
-              href={href}
-              onClick={go(href)}
-              aria-current={active ? 'page' : undefined}
-              className={[
-                'group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors',
-                active
-                  ? 'bg-zinc-100 font-semibold text-zinc-900 dark:bg-zinc-800/70 dark:text-zinc-50'
-                  : 'font-medium text-zinc-600 hover:bg-zinc-100/70 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-800/40 dark:hover:text-zinc-200',
-              ].join(' ')}
-            >
-              <span
-                aria-hidden
-                className={[
-                  'absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-indigo-500 transition-opacity',
-                  active || loading ? 'opacity-100' : 'opacity-0',
-                ].join(' ')}
-              />
-              <Magnetic intensity={0.35} range={10}>
-                <Icon size={16} className={active ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400'} strokeWidth={2} />
-              </Magnetic>
-              {label}
-            </Link>
-          );
-        })}
+        {/* 社区（工作区驱动） */}
+        <Link
+          href="/"
+          onClick={goWorkspace('forum', '/')}
+          aria-current={communityActive ? 'page' : undefined}
+          className={rowClass(communityActive)}
+        >
+          <RowInner Icon={MessagesSquare} label="社区" active={communityActive} loading={pendingHref === '/'} />
+        </Link>
+
+        {/* 高考题库（手风琴开关：展开下方题目树） */}
+        <button
+          type="button"
+          onClick={() => setBankOpen((o) => !o)}
+          aria-expanded={bankOpen}
+          aria-controls="sidebar-bank-tree"
+          className={`${rowClass(bankActive)} cursor-pointer`}
+        >
+          <RowInner Icon={BookOpen} label="高考题库" active={bankActive} loading={false} />
+          <ChevronDown
+            size={14}
+            aria-hidden
+            className={['ml-auto text-zinc-400 transition-transform duration-200', bankOpen ? 'rotate-180' : ''].join(' ')}
+          />
+        </button>
+
+        {/* 资源大厅 */}
+        <Link
+          href="/library"
+          onClick={goLink('/library')}
+          aria-current={libraryActive ? 'page' : undefined}
+          className={rowClass(libraryActive)}
+        >
+          <RowInner Icon={LibraryIcon} label="资源大厅" active={libraryActive} loading={pendingHref === '/library'} />
+        </Link>
+
+        {/* 知识星图 */}
+        <Link
+          href="/explore"
+          onClick={goLink('/explore')}
+          aria-current={graphActive ? 'page' : undefined}
+          className={rowClass(graphActive)}
+        >
+          <RowInner Icon={Orbit} label="知识星图" active={graphActive} loading={pendingHref === '/explore'} />
+        </Link>
+
+        {/* 每日一题 */}
+        <Link
+          href="/daily"
+          onClick={goLink('/daily')}
+          aria-current={dailyActive ? 'page' : undefined}
+          className={rowClass(dailyActive)}
+        >
+          <RowInner Icon={CalendarDays} label="每日一题" active={dailyActive} loading={pendingHref === '/daily'} />
+        </Link>
+
+        {/* 我的题库（工作区驱动） */}
+        <Link
+          href="/?view=mybank"
+          onClick={goWorkspace('bank', '/?view=mybank')}
+          aria-current={mybankActive ? 'page' : undefined}
+          className={rowClass(mybankActive)}
+        >
+          <RowInner Icon={BookMarked} label="我的题库" active={mybankActive} loading={pendingHref === '/?view=mybank'} />
+        </Link>
       </nav>
 
-      {/* 语境面板：资源大厅 / 题库 */}
-      <div className="flex min-h-0 flex-1 flex-col gap-3 border-t border-zinc-200/70 pt-4 dark:border-zinc-800">
-        <AnimatedTabs
-          tabs={[
-            { id: 'lib', label: '资源大厅', icon: <LibraryIcon size={13} /> },
-            { id: 'bank', label: '题库', icon: <BookMarked size={13} /> },
-          ]}
-          activeTab={tab}
-          onChange={(id) => setTab(id as 'lib' | 'bank')}
-          className="w-full justify-stretch [&>button]:flex-1"
-        />
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          {tab === 'lib' ? (
-            <LibrarySidebar highlights={libraryHighlights} />
-          ) : (
-            <SidebarTabs
-              topics={topics}
-              papers={papers}
-              selectedTopicId={selectedTopicId}
-              selectedPaperId={selectedPaperId}
-              isAdmin={isAdmin}
-            />
-          )}
+      {/* 高考题库语境面板：知识点 / 真题 / 模拟题 树（手风琴展开后置于滚动区，避免顶出后续 nav 项） */}
+      {bankOpen && (
+        <div
+          id="sidebar-bank-tree"
+          className="min-h-0 flex-1 overflow-y-auto border-t border-zinc-200/70 pt-4 dark:border-zinc-800"
+        >
+          <SidebarTabs
+            topics={topics}
+            papers={papers}
+            selectedTopicId={selectedTopicId}
+            selectedPaperId={selectedPaperId}
+            isAdmin={isAdmin}
+          />
         </div>
-      </div>
+      )}
     </div>
   );
 }
