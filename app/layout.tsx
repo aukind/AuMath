@@ -3,6 +3,9 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 // KaTeX 字体与符号样式必须全局引入，MathRenderer 渲染的数学公式才能正确显示
 import "katex/dist/katex.min.css";
+// Lenis 必需样式：html.lenis{height:auto} 覆盖 <html> 的 h-full(height:100%)，
+// 否则文档被锁死在视口高度，所有 min-h-screen 文档流页(/library 等)无法滚动。
+import "lenis/dist/lenis.css";
 import { LayoutGroup } from "framer-motion";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import SmoothScrollProvider from "@/components/providers/SmoothScrollProvider";
