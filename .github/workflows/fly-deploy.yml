@@ -1,0 +1,53 @@
+# 在 GitHub 云端部署 services/tex-compiler 到 Fly.io（本机/代理完全不参与）。
+# 触发：services/tex-compiler 有改动时自动跑，或在 Actions 页手动 Run workflow。
+# 需要的 GitHub Secrets：
+#   FLY_API_TOKEN        —— Fly 控制台 https://fly.io/user/personal_access_tokens 网页生成
+#   LATEX_COMPILE_TOKEN  —— 自己生成的随机串（同一串也要填进 Vercel 环境变量）
+name: Deploy tex-compiler to Fly
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/tex-compiler/**'
+      - '.github/workflows/fly-deploy.yml'
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-tex-compiler
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/tex-compiler
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: 确保 Fly app 已存在（首次自动创建，app 名读自 fly.toml）
+        run: |
+          APP=$(awk -F'"' '/^app *=/{print $2; exit}' fly.toml)
+          echo "Fly app: $APP"
+          flyctl status --app "$APP" >/dev/null 2>&1 \
+            || flyctl apps create "$APP" --org personal \
+            || flyctl apps create "$APP" \
+            || true
+
+      - name: 注入编译鉴权密钥（来自 GitHub Secret，缺失则告警而非留空开放）
+        env:
+          TOKEN: ${{ secrets.LATEX_COMPILE_TOKEN }}
+        run: |
+          if [ -n "$TOKEN" ]; then
+            flyctl secrets set LATEX_COMPILE_TOKEN="$TOKEN" --stage
+          else
+            echo "::warning::未设置 LATEX_COMPILE_TOKEN —— 编译服务将不校验鉴权（公网可调用）。请在 GitHub Secrets 补上后重跑。"
+          fi
+
+      - name: 远程构建并部署（镜像在 Fly 云端构建，不经本机/CI 上传 GB 级镜像）
+        run: flyctl deploy --remote-only

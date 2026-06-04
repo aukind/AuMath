@@ -1,0 +1,15 @@
+{
+  "name": "tex-compiler",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted latexcgi-compatible TeX Live compile service for /studio (XeLaTeX/pdfLaTeX/LuaLaTeX).",
+  "main": "server.mjs",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^2.0.1"
+  }
+}

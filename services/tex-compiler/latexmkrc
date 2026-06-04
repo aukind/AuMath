@@ -1,0 +1,10 @@
+# latexmk 配置：每个引擎统一注入非交互/出错即停/精确行号/禁 shell-escape，并多遍解析交叉引用与目录。
+# 这是"对齐本地 TeXStudio"的关键：nonstopmode 不再问终端要输入（根除 Emergency stop），
+# 多遍跑通 \ref/\cite/目录，no-shell-escape 封死 \write18 任意命令执行。
+$pdflatex = 'pdflatex -interaction=nonstopmode -halt-on-error -file-line-error -no-shell-escape %O %S';
+$xelatex  = 'xelatex  -interaction=nonstopmode -halt-on-error -file-line-error -no-shell-escape %O %S';
+$lualatex = 'lualatex -interaction=nonstopmode -halt-on-error -file-line-error -no-shell-escape %O %S';
+
+# 最多重跑 5 遍以收敛引用/目录；按需自动跑 bibtex（无 .bib 也不报错）。
+$max_repeat = 5;
+$bibtex_use = 1.5;

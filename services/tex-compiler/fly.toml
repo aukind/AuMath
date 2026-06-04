@@ -1,0 +1,25 @@
+# Fly.io：自托管 TeX Live 编译服务。app 名以 `fly launch` 实际创建为准（同步改这里）。
+app = "aumath-tex"
+primary_region = "hkg"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # 常驻保活：避免冷启动 + 首次编译重建字体/格式缓存的卡顿，贴近本地即时编译体验。
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "40s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2048mb"
