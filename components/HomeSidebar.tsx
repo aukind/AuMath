@@ -169,7 +169,7 @@ export default function HomeSidebar({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
-      <nav aria-label="主导航" className="flex flex-col gap-0.5">
+      <nav aria-label="主导航" className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto">
         {/* 社区（工作区驱动） */}
         <Link
           href="/"
@@ -195,6 +195,22 @@ export default function HomeSidebar({
             className={['ml-auto text-zinc-400 transition-transform duration-200', bankOpen ? 'rotate-180' : ''].join(' ')}
           />
         </button>
+        {/* 高考题库语境面板：紧贴「高考题库」下方显示 知识点 / 真题 / 模拟题 树。
+            自身限高内部滚动，后续 nav 项（资源大厅等）仍可见。 */}
+        {bankOpen && (
+          <div
+            id="sidebar-bank-tree"
+            className="mb-0.5 ml-3 max-h-[50vh] overflow-y-auto border-l border-zinc-200/70 pl-2 dark:border-zinc-800"
+          >
+            <SidebarTabs
+              topics={topics}
+              papers={papers}
+              selectedTopicId={selectedTopicId}
+              selectedPaperId={selectedPaperId}
+              isAdmin={isAdmin}
+            />
+          </div>
+        )}
 
         {/* 资源大厅（手风琴：展开分级目录树） */}
         <button
@@ -277,22 +293,6 @@ export default function HomeSidebar({
           </>
         )}
       </nav>
-
-      {/* 高考题库语境面板：知识点 / 真题 / 模拟题 树（手风琴展开后置于滚动区，避免顶出后续 nav 项） */}
-      {bankOpen && (
-        <div
-          id="sidebar-bank-tree"
-          className="min-h-0 flex-1 overflow-y-auto border-t border-zinc-200/70 pt-4 dark:border-zinc-800"
-        >
-          <SidebarTabs
-            topics={topics}
-            papers={papers}
-            selectedTopicId={selectedTopicId}
-            selectedPaperId={selectedPaperId}
-            isAdmin={isAdmin}
-          />
-        </div>
-      )}
     </div>
   );
 }
