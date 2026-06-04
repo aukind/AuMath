@@ -12,7 +12,7 @@ import Link from 'next/link';
 import { usePathname, useSearchParams } from 'next/navigation';
 import {
   MessagesSquare,
-  Library as LibraryIcon,
+  Landmark as LibraryIcon,
   CalendarDays,
   BookMarked,
   BookOpen,
