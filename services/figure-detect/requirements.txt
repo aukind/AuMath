@@ -1,0 +1,12 @@
+# figure-detect 运行依赖（detection-only，slim）。
+# torch / torchvision 由 Dockerfile 先用 CPU 轮子单独装（见 Dockerfile），这里不再列，
+# 避免 pip 装到带 CUDA 的巨型默认轮子。doclayout-yolo 会复用已装好的 torch。
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+pydantic-settings>=2.3
+numpy>=1.26
+Pillow>=10.4
+opencv-python-headless>=4.10
+doclayout-yolo>=0.0.3
+huggingface-hub>=0.24

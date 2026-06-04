@@ -1,0 +1,32 @@
+# Fly.io：自托管 DocLayout-YOLO 版面检测服务。app 名以 `fly launch` 实际创建为准（同步改这里）。
+app = "aumath-figure-detect"
+# hkg(香港) 已被 Fly 下线、不能新建资源；改 sin(新加坡)，对国内延迟接近。
+primary_region = "sin"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  # 默认 0.2 会漏掉稀疏虚线图（圆锥曲线/坐标系）；降到 0.12 提升召回，误检由校对页人工删。
+  DETECT_CONF = "0.12"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # 省钱模式：闲置即挂起(suspend，存内存快照不计算费)，来请求自动唤醒(~数秒，模型仍在内存)。
+  # 录题不频繁场景：闲时几乎 0 成本，代价是闲很久后第一张图要等几秒唤醒。
+  auto_stop_machines = "suspend"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "60s"
+    method = "GET"
+    path = "/healthz"
+
+[[vm]]
+  # torch CPU 推理 + 200MB 模型 + imgsz1024：4GB 稳。
+  size = "shared-cpu-2x"
+  memory = "4096mb"
