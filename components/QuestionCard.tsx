@@ -137,7 +137,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
           )}
           {/* 题目来源（完整卷名，含年份）—— 收藏键右侧 */}
           {question.source && (
-            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200 truncate">
+            <span className="exam-serif text-sm font-medium text-zinc-700 dark:text-zinc-200 truncate">
               {question.source}
             </span>
           )}
