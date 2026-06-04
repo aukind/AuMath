@@ -33,10 +33,13 @@ export const defaultKatexOptions: KatexOptions = {
   // 让它降级为「可读文本」。错误信息仍写进 span 的 title 便于排查。
   errorColor:   '#71717a', // zinc-500
   macros: {
-    '\\R':  '\\mathbb{R}',
-    '\\N':  '\\mathbb{N}',
-    '\\Z':  '\\mathbb{Z}',
-    '\\Q':  '\\mathbb{Q}',
+    // 数集用「实心黑体」\mathbf（高考/人教版标准：R N Z Q C 是粗体大写字母），
+    // 而非国际数学常见的「空心黑板粗体」\mathbb（ℝ ℕ …）。预处理里也把字面量 \mathbb{R} 一并改 \mathbf。
+    '\\R':  '\\mathbf{R}',
+    '\\N':  '\\mathbf{N}',
+    '\\Z':  '\\mathbf{Z}',
+    '\\Q':  '\\mathbf{Q}',
+    '\\C':  '\\mathbf{C}',
     '\\dd': '\\,\\mathrm{d}',
     '\\eu': '\\mathrm{e}',
     '\\iu': '\\mathrm{i}',

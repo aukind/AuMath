@@ -229,6 +229,16 @@ function normalizeVectors(body: string): string {
   return body.replace(/\\vec\s*\{\s*([A-Za-z]{2,})\s*\}/g, '\\overrightarrow{$1}');
 }
 
+/**
+ * 数集字体规范化：高考/人教版用「实心黑体」\mathbf 表示数集（R N Z Q C 是粗体大写字母），
+ * 而非国际数学的「空心黑板粗体」\mathbb（ℝ ℕ ℤ ℚ ℂ）。把模型/OCR 写出的 \mathbb{R/N/Z/Q/C} 统一改 \mathbf。
+ * ⚠️ 必须在 normalizeComplement 之后调用——补集 \mathbb{C}_X 已先被还原成 \complement，
+ * 此处剩下的 \mathbb{C} 才是「复数集」，可安全改成 \mathbf{C}。
+ */
+function normalizeNumberSets(body: string): string {
+  return body.replace(/\\mathbb\s*\{\s*([RNZQC])\s*\}/g, '\\mathbf{$1}');
+}
+
 function transformMathBody(body: string): string {
   let out = repairDegenerateScripts(body);
 
@@ -252,6 +262,10 @@ function transformMathBody(body: string): string {
 
   // 3. 补集符号归一化
   out = normalizeComplement(out);
+
+  // 4. 数集字体：\mathbb{R/N/Z/Q/C} → \mathbf（高考实心黑体）。须在补集归一化之后，
+  //    避免把补集 \mathbb{C}_X 误当复数集改写。
+  out = normalizeNumberSets(out);
 
   return out;
 }
