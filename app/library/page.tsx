@@ -1,6 +1,7 @@
 // 资源大厅内容区（外壳 + 常驻侧栏由 app/library/layout.tsx 提供）。
 // 按侧栏分级目录的 cat 参数路由：期刊 / 教材 / 竞赛 / 社区共享 / 全部。
 import { getLibraryItems, getMyLibraryUpvotes } from '@/app/actions/library';
+import { getMyKnowledgeItemIds } from '@/app/actions/knowledge';
 import { getCompetitionPapers } from '@/app/actions/questions';
 import { getJournalArticles } from '@/app/actions/journals';
 import { createClient } from '@/lib/supabase/server';
@@ -38,9 +39,10 @@ export default async function LibraryPage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  const [items, votedIds] = await Promise.all([
+  const [items, votedIds, savedIds] = await Promise.all([
     getLibraryItems(filter),
     getMyLibraryUpvotes(),
+    getMyKnowledgeItemIds(),
   ]);
 
   return (
@@ -49,6 +51,7 @@ export default async function LibraryPage({
       initialFilter={filter}
       initialQuery={q ?? ''}
       initialVotedIds={votedIds}
+      initialSavedIds={savedIds}
       isAdmin={isAdminUser(user)}
       currentUserId={user?.id ?? null}
     />

@@ -126,8 +126,12 @@ export default function HomeSidebar({
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { navigate, pendingHref } = useSoftNav();
-  const [bankOpen, setBankOpen] = useState(mainView === 'browse');
-  const [libOpen, setLibOpen] = useState(pathname.startsWith('/library'));
+  // 互斥单开手风琴：同一时刻只展开「高考题库」或「资源大厅」之一。
+  const [openSection, setOpenSection] = useState<'bank' | 'library' | null>(
+    mainView === 'browse' ? 'bank' : pathname.startsWith('/library') ? 'library' : null,
+  );
+  const bankOpen = openSection === 'bank';
+  const libOpen = openSection === 'library';
   const currentCat = pathname.startsWith('/library') ? (searchParams.get('cat') ?? 'all') : null;
 
   // 工作区高亮：受控实例认 activeWorkspace；非受控（移动端）回退 mainView。browse 时两者皆不亮。
@@ -179,7 +183,7 @@ export default function HomeSidebar({
         {/* 高考题库（手风琴开关：展开下方题目树） */}
         <button
           type="button"
-          onClick={() => setBankOpen((o) => !o)}
+          onClick={() => setOpenSection((s) => (s === 'bank' ? null : 'bank'))}
           aria-expanded={bankOpen}
           aria-controls="sidebar-bank-tree"
           className={`${rowClass(bankActive)} cursor-pointer`}
@@ -195,7 +199,7 @@ export default function HomeSidebar({
         {/* 资源大厅（手风琴：展开分级目录树） */}
         <button
           type="button"
-          onClick={() => setLibOpen((o) => !o)}
+          onClick={() => setOpenSection((s) => (s === 'library' ? null : 'library'))}
           aria-expanded={libOpen}
           aria-controls="sidebar-library-tree"
           className={`${rowClass(libraryActive)} cursor-pointer`}

@@ -7,7 +7,7 @@
 //   · XSS：标题/简介全程 React 文本渲染（天然转义），禁 dangerouslySetInnerHTML。
 
 import { motion } from 'framer-motion';
-import { BadgeCheck, Eye, Flag, Heart, Sparkles } from 'lucide-react';
+import { BadgeCheck, Bookmark, Eye, Flag, Heart, Sparkles } from 'lucide-react';
 import CoverArt from '@/components/library/CoverArt';
 import { Avatar, coverLayoutId } from '@/components/library/shared';
 import SquishyButton from '@/components/motion/SquishyButton';
@@ -18,19 +18,23 @@ export default function CommunityMasonry({
   isAdmin,
   currentUserId,
   votedIds,
+  savedIds,
   onOpen,
   onReport,
   onPromote,
   onToggleUpvote,
+  onToggleSave,
 }: {
   items: LibraryItem[];
   isAdmin: boolean;
   currentUserId: string | null;
   votedIds: Set<string>;
+  savedIds: Set<string>;
   onOpen: (item: LibraryItem) => void;
   onReport: (item: LibraryItem) => void;
   onPromote: (item: LibraryItem) => void;
   onToggleUpvote: (item: LibraryItem) => void;
+  onToggleSave: (item: LibraryItem) => void;
 }) {
   return (
     <div className="gap-4 [column-fill:_balance] sm:columns-2 lg:columns-3">
@@ -40,11 +44,13 @@ export default function CommunityMasonry({
           item={item}
           isAdmin={isAdmin}
           voted={votedIds.has(item.id)}
+          saved={savedIds.has(item.id)}
           canReport={!!currentUserId && item.author_id !== currentUserId}
           onOpen={() => onOpen(item)}
           onReport={() => onReport(item)}
           onPromote={() => onPromote(item)}
           onToggleUpvote={() => onToggleUpvote(item)}
+          onToggleSave={() => onToggleSave(item)}
         />
       ))}
     </div>
@@ -55,20 +61,24 @@ function FeedCard({
   item,
   isAdmin,
   voted,
+  saved,
   canReport,
   onOpen,
   onReport,
   onPromote,
   onToggleUpvote,
+  onToggleSave,
 }: {
   item: LibraryItem;
   isAdmin: boolean;
   voted: boolean;
+  saved: boolean;
   canReport: boolean;
   onOpen: () => void;
   onReport: () => void;
   onPromote: () => void;
   onToggleUpvote: () => void;
+  onToggleSave: () => void;
 }) {
   return (
     <div className="mb-4 break-inside-avoid overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md hover:ring-1 hover:ring-indigo-500/20 dark:border-zinc-800 dark:bg-zinc-900">
@@ -133,6 +143,20 @@ function FeedCard({
           >
             <Heart size={13} className={voted ? 'fill-current' : ''} />
             <span className="tabular-nums">{item.upvote_count}</span>
+          </SquishyButton>
+
+          <SquishyButton
+            type="button"
+            onClick={onToggleSave}
+            title={saved ? '已在我的知识库 · 点击移除' : '收藏到我的知识库'}
+            aria-pressed={saved}
+            className={`rounded-full p-1 text-xs transition-colors ${
+              saved
+                ? 'text-indigo-500'
+                : 'text-zinc-400 hover:bg-zinc-100 hover:text-indigo-500 dark:hover:bg-zinc-800'
+            }`}
+          >
+            <Bookmark size={13} className={saved ? 'fill-current' : ''} />
           </SquishyButton>
 
           <span className="flex items-center gap-1 px-1 text-xs text-zinc-400">

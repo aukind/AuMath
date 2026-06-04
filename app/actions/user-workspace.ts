@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { createQuestion } from '@/app/actions/questions';
-import type { QuestionWithTopics, WorkspaceType, WorkspaceCounts, Difficulty } from '@/types/database';
+import type { QuestionWithTopics, WorkspaceType, WorkspaceCounts, Difficulty, QuestionType } from '@/types/database';
 
 // ── Toggle favorite ───────────────────────────────────────────────────────────
 
@@ -237,26 +237,40 @@ export async function getWorkspaceQuestions(type: WorkspaceType): Promise<Questi
 
 export async function createPersonalQuestion(
   target: 'favorites' | 'errors',
-  input: { content: string; answer: string; analysis: string; difficulty: Difficulty },
+  input: {
+    content: string;
+    answer: string;
+    analysis: string;
+    question_type?: QuestionType;
+    difficulty?: Difficulty;
+    year?: number | null;
+    source?: string | null;
+    topic_ids?: string[];
+    options?: string[] | null;
+    choice_type?: 'single' | 'multi' | null;
+  },
 ): Promise<{ success: boolean; error?: string }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: '请先登录' };
 
-  if (!input.content.trim() || !input.answer.trim()) {
-    return { success: false, error: '题目内容和答案不能为空' };
+  // 录题只录题面；答案可后补，故仅校验题面非空（与公共录题 createQuestion 一致）。
+  if (!input.content.trim()) {
+    return { success: false, error: '题目内容不能为空' };
   }
 
   const res = await createQuestion({
     content:       input.content,
     answer:        input.answer,
     analysis:      input.analysis,
-    question_type: 'calculation',
+    question_type: input.question_type ?? 'calculation',
     difficulty:    input.difficulty,
-    year:          null,
-    source:        null,
-    topic_ids:     [],
+    year:          input.year ?? null,
+    source:        input.source ?? null,
+    topic_ids:     input.topic_ids ?? [],
     status:        'published',
+    options:       input.options ?? null,
+    choice_type:   input.choice_type ?? null,
   });
   if (!res.success || !res.id) return { success: false, error: res.error ?? '创建失败' };
 

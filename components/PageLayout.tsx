@@ -16,7 +16,7 @@ import {
 import {
   GripVertical, PenLine, CheckCircle2, Lock, LogIn,
   Star, XCircle, Clock, ChevronLeft, Plus, Loader2,
-  BrainCircuit, ArrowRight,
+  BrainCircuit, ArrowRight, Library,
 } from 'lucide-react';
 import HomeSidebar from '@/components/HomeSidebar';
 import { ZenModeProvider, useZenMode } from '@/components/layout/ZenModeProvider';
@@ -27,10 +27,12 @@ import SiteViewsBadge from '@/components/SiteViewsBadge';
 import ForumPostList from '@/components/forum/ForumPostList';
 import HeavyContentContainer from '@/components/dashboard/HeavyContentContainer';
 import EditPaperButton from '@/components/admin/EditPaperButton';
+import MyKnowledgeView from '@/components/knowledge/MyKnowledgeView';
 import { useSoftNav, isPlainLeftClick } from '@/components/ui/useSoftNav';
 import { deleteQuestion, updateQuestionCategory } from '@/app/actions/questions';
 import type { SortOrder } from '@/app/actions/questions';
 import type { TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceType } from '@/types/database';
+import type { KnowledgeDoc } from '@/types/library';
 import type { ForumPost } from '@/types/forum';
 
 /** 主区显示模式：社区论坛 / 我的题库 / 题目浏览（点侧边栏知识点·真题·模拟题）。 */
@@ -51,6 +53,9 @@ interface PageLayoutProps {
   mainView: MainView;
   forumPosts: ForumPost[];
   mybankTab: WorkspaceType;
+  /** 我的题库当前在「知识库」标签页（workspace=documents），渲染 PDF 知识库而非题目。 */
+  isDocsTab?: boolean;
+  knowledgeDocs?: KnowledgeDoc[];
   favoritedIds: string[];
   erroredIds: string[];
   myRatings: Record<string, number>;
@@ -89,6 +94,8 @@ function PageLayoutInner({
   mainView,
   forumPosts,
   mybankTab,
+  isDocsTab = false,
+  knowledgeDocs = [],
   favoritedIds,
   erroredIds,
   myRatings,
@@ -250,6 +257,8 @@ function PageLayoutInner({
                   isLoggedIn ? (
                     <MyBankView
                       tab={mybankTab}
+                      isDocsTab={isDocsTab}
+                      knowledgeDocs={knowledgeDocs}
                       questions={visibleQuestions}
                       isAdmin={isAdmin}
                       isLoggedIn={isLoggedIn}
@@ -375,9 +384,11 @@ function BrowseView({
 
 // ── 我的题库（收藏 / 错题 / 最近浏览）────────────────────────
 function MyBankView({
-  tab, questions, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, myRatings, dueCount = 0, onDelete,
+  tab, isDocsTab = false, knowledgeDocs = [], questions, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, myRatings, dueCount = 0, onDelete,
 }: {
   tab: WorkspaceType;
+  isDocsTab?: boolean;
+  knowledgeDocs?: KnowledgeDoc[];
   questions: QuestionWithTopics[];
   isAdmin: boolean;
   isLoggedIn: boolean;
@@ -396,6 +407,9 @@ function MyBankView({
 
   const { navigate, isPending, pendingHref } = useSoftNav();
   const underlineId = useId();
+  // 知识库标签页 href（独立于三个题目 tab）；激活态在导航期间也要乐观点亮。
+  const docsHref = '/?view=mybank&workspace=documents';
+  const docsActive = isPending ? pendingHref === docsHref : isDocsTab;
 
   return (
     <div>
@@ -406,7 +420,8 @@ function MyBankView({
             const href = `/?view=mybank&workspace=${key}`;
             const isLoading = isPending && pendingHref === href;
             // 乐观激活：导航期间只认 pendingHref（下划线点击即滑过去），否则认服务端确认的 tab
-            const active = isPending ? pendingHref === href : tab === key;
+            // 知识库标签页激活时，三个题目 tab 一律不亮。
+            const active = isPending ? pendingHref === href : (!isDocsTab && tab === key);
             return (
               <Link
                 key={key}
@@ -437,7 +452,34 @@ function MyBankView({
               </Link>
             );
           })}
-          {tab !== 'history' && (
+
+          {/* 第 4 个 tab：知识库（PDF 文档，独立于三个题目 tab） */}
+          <Link
+            href={docsHref}
+            aria-current={docsActive ? 'page' : undefined}
+            onClick={(e) => {
+              if (!isPlainLeftClick(e)) return;
+              e.preventDefault();
+              navigate(docsHref);
+            }}
+            className={[
+              'relative flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors',
+              docsActive ? 'text-indigo-600 dark:text-indigo-400' : 'text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300',
+            ].join(' ')}
+          >
+            {isPending && pendingHref === docsHref ? <Loader2 size={14} className="animate-spin" /> : <Library size={14} />}
+            知识库
+            {docsActive && (
+              <motion.span
+                aria-hidden
+                layoutId={`${underlineId}-underline`}
+                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                className="absolute -bottom-px left-0 right-0 h-0.5 rounded-full bg-indigo-500"
+              />
+            )}
+          </Link>
+
+          {!isDocsTab && tab !== 'history' && (
             <Link
               href={`/mybank/new?target=${tab}`}
               className="ml-auto mb-1 inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-3 py-1 text-xs font-medium text-white hover:bg-indigo-700"
@@ -447,6 +489,12 @@ function MyBankView({
           )}
         </div>
       </LayoutGroup>
+
+      {/* 知识库标签页：渲染个人 PDF 知识库，取代题目区 */}
+      {isDocsTab ? (
+        <MyKnowledgeView docs={knowledgeDocs} />
+      ) : (
+      <>{/* 题目三 tab 内容 */}
 
       {/* 错题本专属：FSRS 今日复习入口 */}
       {tab === 'errors' && (
@@ -503,6 +551,8 @@ function MyBankView({
             myRatings={myRatings}
           />
         </>
+      )}
+      </>
       )}
     </div>
   );

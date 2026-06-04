@@ -36,6 +36,7 @@ import {
   promoteItem,
   toggleUpvote,
 } from '@/app/actions/library';
+import { saveLibraryItemToKnowledge, unsaveLibraryItem } from '@/app/actions/knowledge';
 import {
   type LibraryFilter,
   type LibraryItem,
@@ -80,6 +81,7 @@ interface Props {
   initialFilter?: LibraryFilter;
   initialQuery?: string;
   initialVotedIds?: string[];
+  initialSavedIds?: string[];
   isAdmin: boolean;
   currentUserId: string | null;
 }
@@ -89,6 +91,7 @@ export default function LibraryFeed({
   initialFilter = 'all',
   initialQuery = '',
   initialVotedIds = [],
+  initialSavedIds = [],
   isAdmin,
   currentUserId,
 }: Props) {
@@ -98,6 +101,7 @@ export default function LibraryFeed({
   const [active, setActive] = useState<LibraryItem | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [votedIds, setVotedIds] = useState<Set<string>>(() => new Set(initialVotedIds));
+  const [savedIds, setSavedIds] = useState<Set<string>>(() => new Set(initialSavedIds));
   // 检索（客户端即时，对已加载列表过滤）；初值可由首页导航深链注入。分类已交由侧栏分级目录承载。
   const [query, setQuery] = useState(initialQuery);
 
@@ -168,6 +172,33 @@ export default function LibraryFeed({
     setItems((prev) =>
       prev.map((i) => (i.id === item.id ? { ...i, upvote_count: res.upvotes } : i)),
     );
+  };
+
+  // ── 收藏到我的知识库（乐观更新，失败回滚） ─────────────
+  const onToggleSave = async (item: LibraryItem) => {
+    if (!currentUserId) {
+      toast.error('请先登录后收藏');
+      return;
+    }
+    const wasSaved = savedIds.has(item.id);
+    const setSaved = (on: boolean) =>
+      setSavedIds((prev) => {
+        const n = new Set(prev);
+        if (on) n.add(item.id);
+        else n.delete(item.id);
+        return n;
+      });
+
+    setSaved(!wasSaved); // 乐观
+    const res = wasSaved
+      ? await unsaveLibraryItem(item.id)
+      : await saveLibraryItemToKnowledge(item.id);
+    if (!res.success) {
+      setSaved(wasSaved); // 回滚
+      toast.error(res.error ?? '操作失败，请重试');
+      return;
+    }
+    toast.success(wasSaved ? '已从知识库移除' : '已收藏到我的知识库');
   };
 
   // ── 举报 ──────────────────────────────────────────────
@@ -260,17 +291,25 @@ export default function LibraryFeed({
               isAdmin={isAdmin}
               currentUserId={currentUserId}
               votedIds={votedIds}
+              savedIds={savedIds}
               onOpen={setActive}
               onReport={onReport}
               onPromote={onPromote}
               onToggleUpvote={onToggleUpvote}
+              onToggleSave={onToggleSave}
             />
           )}
         </section>
 
-        {/* 阅读器（懒载，layoutId 从卡片放大展开） */}
+        {/* 阅读器（懒载，layoutId 从卡片放大展开）。传入收藏态 → 官方/社区任意 PDF 均可一键收藏。 */}
         {active && (
-          <ImmersiveReader key={active.id} item={active} onClose={() => setActive(null)} />
+          <ImmersiveReader
+            key={active.id}
+            item={active}
+            onClose={() => setActive(null)}
+            saved={savedIds.has(active.id)}
+            onToggleSave={() => onToggleSave(active)}
+          />
         )}
       </LayoutGroup>
 

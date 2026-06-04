@@ -49,6 +49,23 @@ export interface LibraryItem {
   };
 }
 
+// ── 个人 PDF 知识库（迁移 027 user_documents）──────────────────
+/** 知识库条目来源：studio 编译产物 / 资源大厅收藏引用 / 直接上传 */
+export type KnowledgeDocSource = 'studio' | 'library' | 'upload';
+
+/** 个人知识库一条 PDF（每用户私有）。library 来源为公共资料的引用快照。 */
+export interface KnowledgeDoc {
+  id: string;
+  title: string;
+  source: KnowledgeDocSource;
+  /** Supabase Storage 公开 URL（studio 自有对象，或 library 资料快照 url） */
+  pdf_url: string;
+  cover_url: string | null;
+  /** library 来源时关联的公共资料 id（用于去重 / 点亮大厅书签态）；其余来源为 null */
+  library_item_id: string | null;
+  created_at: string;
+}
+
 /**
  * tus 续传成功后，浏览器交给 finalize Server Action 的元数据。
  * 文件字节已直传 Storage，这里不再携带 File——只传对象路径与展示信息。

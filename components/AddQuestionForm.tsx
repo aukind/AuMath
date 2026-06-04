@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useCallback, useRef, type RefObject, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Eye, EyeOff, Loader2, Send, Save, X } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Loader2, Send, Save, X, ChevronDown, Star, XCircle, BookMarked } from 'lucide-react';
 import MathRenderer from '@/components/MathRenderer';
 import LatexNormalizeHint from '@/components/editor/LatexNormalizeHint';
 import AiFigureButton from '@/components/admin/AiFigureButton';
@@ -10,6 +10,7 @@ import { ScreenshotToLatexButton } from '@/components/admin/ScreenshotToLatexBut
 import TikzFigureButton from '@/components/latex/TikzFigureButton';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import { createQuestion, updateQuestion } from '@/app/actions/questions';
+import { createPersonalQuestion } from '@/app/actions/user-workspace';
 import { uploadRiveAsset } from '@/app/actions/upload-rive';
 import type { QuestionForEdit } from '@/app/actions/questions';
 import type { TopicRow, QuestionType, InteractiveSandboxConfig, SandboxControl } from '@/types/database';
@@ -63,6 +64,8 @@ interface Props {
   topics: Pick<TopicRow, 'id' | 'name' | 'parent_id'>[];
   /** 传入时为编辑模式，表单自动回显该题目的数据 */
   initialData?: QuestionForEdit;
+  /** 管理员：可发布到公共题库；普通用户：只能「导入题库」到自己的收藏/错题。 */
+  isAdmin?: boolean;
 }
 
 // ── 单字段：左编辑 / 右预览 ──────────────────────────────────
@@ -214,9 +217,12 @@ function CollapsibleField({
 
 // ── 主表单 ───────────────────────────────────────────────────
 
-export default function AddQuestionForm({ topics, initialData }: Props) {
+export default function AddQuestionForm({ topics, initialData, isAdmin = false }: Props) {
   const router   = useRouter();
   const isEdit   = !!initialData?.id;
+  // 普通用户新建态：不能进公共题库，只能「导入题库」到自己的收藏/错题。
+  const personalMode = !isEdit && !isAdmin;
+  const [importMenuOpen, setImportMenuOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   // 以 initialData 作为初始值，实现回显
@@ -279,6 +285,32 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
     });
   };
 
+  // 普通用户「导入题库」：建一道私有题并归入收藏 / 错题，跳到我的题库对应分组。
+  const handleImport = (target: 'favorites' | 'errors') => {
+    if (!content.trim()) { setErrorMsg('题目正文不能为空'); return; }
+    setErrorMsg(null);
+    setImportMenuOpen(false);
+    startTransition(async () => {
+      const result = await createPersonalQuestion(target, {
+        content,
+        answer,
+        analysis,
+        question_type: questionType,
+        year:   year ? parseInt(year, 10) : null,
+        source: source.trim() || null,
+        topic_ids: topicIds,
+        options,
+        choice_type: choiceType,
+      });
+      if (result.success) {
+        router.push(`/?view=mybank&workspace=${target}`);
+        router.refresh();
+      } else {
+        setErrorMsg(result.error ?? '导入失败，请重试');
+      }
+    });
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 flex flex-col">
 
@@ -305,23 +337,65 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
             {errorMsg && (
               <span className="text-xs text-red-500 max-w-[240px] truncate">{errorMsg}</span>
             )}
-            <button
-              onClick={() => handleSubmit('draft')}
-              disabled={isPending}
-              className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
-            >
-              <Save size={13} /> 保存草稿
-            </button>
-            <button
-              onClick={() => handleSubmit('published')}
-              disabled={isPending}
-              className="flex items-center gap-1.5 text-sm px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white disabled:opacity-40 transition-colors font-medium shadow-sm"
-            >
-              {isPending
-                ? <><Loader2 size={13} className="animate-spin" /> {isEdit ? '更新中…' : '提交中…'}</>
-                : <><Send size={13} /> {isEdit ? '更新题目' : '发布题目'}</>
-              }
-            </button>
+            {personalMode ? (
+              /* 普通用户：导入题库 ▾ —— 二选一进收藏 / 错题本 */
+              <div className="relative">
+                <button
+                  onClick={() => setImportMenuOpen(o => !o)}
+                  disabled={isPending}
+                  aria-haspopup="menu"
+                  aria-expanded={importMenuOpen}
+                  className="flex items-center gap-1.5 text-sm px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white disabled:opacity-40 transition-colors font-medium shadow-sm"
+                >
+                  {isPending
+                    ? <><Loader2 size={13} className="animate-spin" /> 导入中…</>
+                    : <><BookMarked size={13} /> 导入题库 <ChevronDown size={13} className={importMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} /></>
+                  }
+                </button>
+                {importMenuOpen && !isPending && (
+                  <>
+                    {/* 点遮罩关闭菜单 */}
+                    <div className="fixed inset-0 z-10" onClick={() => setImportMenuOpen(false)} />
+                    <div role="menu" className="absolute right-0 z-20 mt-1.5 w-44 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                      <button
+                        role="menuitem"
+                        onClick={() => handleImport('favorites')}
+                        className="flex w-full items-center gap-2 px-3.5 py-2.5 text-sm text-zinc-700 hover:bg-amber-50 dark:text-zinc-200 dark:hover:bg-amber-950/30"
+                      >
+                        <Star size={14} className="text-amber-500" /> 加入收藏
+                      </button>
+                      <button
+                        role="menuitem"
+                        onClick={() => handleImport('errors')}
+                        className="flex w-full items-center gap-2 border-t border-zinc-100 px-3.5 py-2.5 text-sm text-zinc-700 hover:bg-rose-50 dark:border-zinc-800 dark:text-zinc-200 dark:hover:bg-rose-950/30"
+                      >
+                        <XCircle size={14} className="text-rose-500" /> 加入错题本
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => handleSubmit('draft')}
+                  disabled={isPending}
+                  className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+                >
+                  <Save size={13} /> 保存草稿
+                </button>
+                <button
+                  onClick={() => handleSubmit('published')}
+                  disabled={isPending}
+                  className="flex items-center gap-1.5 text-sm px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white disabled:opacity-40 transition-colors font-medium shadow-sm"
+                >
+                  {isPending
+                    ? <><Loader2 size={13} className="animate-spin" /> {isEdit ? '更新中…' : '提交中…'}</>
+                    : <><Send size={13} /> {isEdit ? '更新题目' : '发布题目'}</>
+                  }
+                </button>
+              </>
+            )}
           </div>
         </div>
       </header>

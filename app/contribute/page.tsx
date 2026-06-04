@@ -1,5 +1,7 @@
 import { getQuestionTopics } from '@/app/actions/questions';
 import AddQuestionForm from '@/components/AddQuestionForm';
+import { createClient } from '@/lib/supabase/server';
+import { isAdminUser } from '@/lib/utils/auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,8 +20,10 @@ function flattenTopics(
 }
 
 export default async function ContributePage() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
   const topicTree = await getQuestionTopics();
   const topics = flattenTopics(topicTree);
 
-  return <AddQuestionForm topics={topics} />;
+  return <AddQuestionForm topics={topics} isAdmin={isAdminUser(user)} />;
 }

@@ -10,13 +10,15 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import {
-  ArrowLeft, Check, Download, FileWarning, FolderOpen, Loader2,
+  ArrowLeft, BookMarked, Check, Download, FileWarning, FolderOpen, Loader2,
   Paperclip, PanelLeftClose, PanelLeftOpen, Play, Plus, Trash2, X,
 } from 'lucide-react';
 import { compileLatexDocument, type LatexAttachment, type LatexEngine } from '@/app/actions/latex-doc';
 import {
   createLatexDocument, deleteLatexDocument, getLatexDocument, updateLatexDocument,
 } from '@/app/actions/latex-documents';
+import { addStudioDocument } from '@/app/actions/knowledge';
+import { createClient } from '@/lib/supabase/client';
 import LatexOutline from '@/components/latex/LatexOutline';
 
 // 与 latex-documents.ts（'use server'，不能导出类型）共享的文档类型，故定义在此供其 import type。
@@ -86,9 +88,10 @@ type EditorLike = {
 
 const TABS_KEY = 'latex-studio-tabs';
 
-export default function LatexDocStudio({ initialDocs = [] }: { initialDocs?: LatexDocMeta[] }) {
+export default function LatexDocStudio({ initialDocs = [], userId = null }: { initialDocs?: LatexDocMeta[]; userId?: string | null }) {
   const router = useRouter();
   const { resolvedTheme } = useTheme();
+  const [kbState, setKbState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const [docs, setDocs] = useState<LatexDocMeta[]>(initialDocs);
   // 默认值只依赖服务端传入的 initialDocs（SSR 确定、首屏与服务端一致，无水合不匹配）；
@@ -341,6 +344,34 @@ export default function LatexDocStudio({ initialDocs = [] }: { initialDocs?: Lat
     });
   }, [activeId, flushSave]);
 
+  // ── 导入知识库 ────────────────────────────────────────────────────────────
+  // 把当前已编译 PDF 直传 library-pdfs 桶（${uid}/kb/*.pdf，满足 storage RLS），
+  // 再调 addStudioDocument 落 user_documents 行。不写 library_items，故不进公共大厅。
+  const importToKnowledge = useCallback(async () => {
+    const id = activeId;
+    if (!id || !userId) return;
+    const preview = previewsRef.current[id];
+    const b = buffersRef.current[id];
+    if (!preview?.pdfUrl || !b) return;
+    setKbState('saving');
+    try {
+      const blob = await fetch(preview.pdfUrl).then((r) => r.blob());
+      const objectName = `${userId}/kb/${crypto.randomUUID()}.pdf`;
+      const supabase = createClient();
+      const { error: upErr } = await supabase.storage
+        .from('library-pdfs')
+        .upload(objectName, blob, { contentType: 'application/pdf', upsert: false });
+      if (upErr) { setKbState('error'); return; }
+      const res = await addStudioDocument({ objectName, title: b.title });
+      setKbState(res.success ? 'saved' : 'error');
+    } catch {
+      setKbState('error');
+    }
+  }, [activeId, userId]);
+
+  // 切换文档或重新编译后，复位导入态
+  useEffect(() => { setKbState('idle'); }, [activeId, activePreview?.pdfUrl]);
+
   // Ctrl/Cmd+S 触发编译
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -415,6 +446,25 @@ export default function LatexDocStudio({ initialDocs = [] }: { initialDocs?: Lat
           >
             <Download size={13} /> 下载 PDF
           </a>
+          {userId && (
+            <button
+              onClick={importToKnowledge}
+              disabled={!activePreview?.pdfUrl || kbState === 'saving' || kbState === 'saved'}
+              title="把这份编译好的 PDF 存入「我的题库 › 知识库」"
+              className={[
+                'inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors',
+                kbState === 'saved'
+                  ? 'border-emerald-200 text-emerald-600 dark:border-emerald-900 dark:text-emerald-400'
+                  : activePreview?.pdfUrl
+                    ? 'border-zinc-200 text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800'
+                    : 'pointer-events-none border-zinc-100 text-zinc-300 dark:border-zinc-800 dark:text-zinc-700',
+                kbState === 'error' ? 'border-red-200 text-red-500 dark:border-red-900' : '',
+              ].join(' ')}
+            >
+              {kbState === 'saving' ? <Loader2 size={13} className="animate-spin" /> : kbState === 'saved' ? <Check size={13} /> : <BookMarked size={13} />}
+              {kbState === 'saving' ? '导入中…' : kbState === 'saved' ? '已入知识库' : kbState === 'error' ? '导入失败' : '导入知识库'}
+            </button>
+          )}
           <button
             onClick={compile}
             disabled={isCompiling || !active}

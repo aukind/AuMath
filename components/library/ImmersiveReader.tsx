@@ -29,6 +29,7 @@ import {
   PanelLeft,
   List,
   Images,
+  Bookmark,
 } from 'lucide-react';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -52,9 +53,12 @@ interface OutlineNode {
 interface Props {
   item: LibraryItem;
   onClose: () => void;
+  /** 资源大厅传入：收藏到个人知识库。知识库自身复用本阅读器时不传，故不显示书签按钮。 */
+  saved?: boolean;
+  onToggleSave?: () => void;
 }
 
-export default function ImmersiveReader({ item, onClose }: Props) {
+export default function ImmersiveReader({ item, onClose, saved, onToggleSave }: Props) {
   const reduce = useReducedMotion();
   const [open, setOpen] = useState(true); // AnimatePresence 控制：false → 播放退场后 onExitComplete 卸载
   const [ready, setReady] = useState(false); // 展开动画结束才挂载 <Document>
@@ -236,6 +240,8 @@ export default function ImmersiveReader({ item, onClose }: Props) {
                   jumpToDest={jumpToDest}
                   handleJump={handleJump}
                   onClose={requestClose}
+                  saved={saved}
+                  onToggleSave={onToggleSave}
                   onLoadSuccess={(pdf: {
                     numPages: number;
                     getOutline: () => Promise<OutlineNode[] | null>;
@@ -306,6 +312,8 @@ function ReaderBody(props: any) {
     onClose,
     onLoadSuccess,
     onLoadError,
+    saved,
+    onToggleSave,
   } = props;
 
   return (
@@ -362,6 +370,19 @@ function ReaderBody(props: any) {
           </div>
         )}
 
+        {onToggleSave && (
+          <button
+            type="button"
+            onClick={onToggleSave}
+            aria-pressed={saved}
+            title={saved ? '已在我的知识库 · 点击移除' : '收藏到我的知识库'}
+            className={`rounded-md p-1.5 hover:bg-zinc-200/70 dark:hover:bg-zinc-800 ${
+              saved ? 'text-indigo-500' : 'text-zinc-600 dark:text-zinc-400'
+            }`}
+          >
+            <Bookmark size={16} className={saved ? 'fill-current' : ''} />
+          </button>
+        )}
         <a
           href={item.pdf_url}
           target="_blank"

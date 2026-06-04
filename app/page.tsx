@@ -1,6 +1,7 @@
 import { getQuestions, getQuestionTopics, getPapers, getQuestionsByPaperId } from '@/app/actions/questions';
 import type { PaperQuestionsResult, SortOrder } from '@/app/actions/questions';
 import { getFavoritedQuestionIds, getErroredQuestionIds, getWorkspaceQuestions } from '@/app/actions/user-workspace';
+import { getMyKnowledgeDocs } from '@/app/actions/knowledge';
 import { getTodayDueCount } from '@/app/actions/fsrs';
 import { getMyDifficultyRatings } from '@/app/actions/difficulty';
 import { getSiteViews } from '@/app/actions/site-stats';
@@ -33,6 +34,7 @@ export default async function HomePage({
     ? sort
     : 'updated_at_desc';
 
+  const isDocsTab = workspace === 'documents';
   const mybankTab: WorkspaceType =
     workspace === 'errors' || workspace === 'history' ? workspace : 'favorites';
 
@@ -50,6 +52,7 @@ export default async function HomePage({
     paperResult,
     topicQuestions,
     workspaceQuestions,
+    knowledgeDocs,
     forumPosts,
     favoritedIds,
     erroredIds,
@@ -68,9 +71,12 @@ export default async function HomePage({
     mainView === 'browse' && topicId && !paperId
       ? getQuestions(topicId, validSort, 20, 'public')
       : Promise.resolve<QuestionWithTopics[]>([]),
-    mainView !== 'browse'
+    mainView !== 'browse' && !isDocsTab
       ? getWorkspaceQuestions(mybankTab)
       : Promise.resolve<QuestionWithTopics[]>([]),
+    mainView !== 'browse' && isDocsTab
+      ? getMyKnowledgeDocs()
+      : Promise.resolve<Awaited<ReturnType<typeof getMyKnowledgeDocs>>>([]),
     mainView !== 'browse'
       ? getForumPosts()
       : Promise.resolve<ForumPost[]>([]),
@@ -189,6 +195,8 @@ export default async function HomePage({
         mainView={mainView}
         forumPosts={forumPosts}
         mybankTab={mybankTab}
+        isDocsTab={isDocsTab}
+        knowledgeDocs={knowledgeDocs}
         favoritedIds={favoritedIds}
         erroredIds={erroredIds}
         myRatings={myRatings}
