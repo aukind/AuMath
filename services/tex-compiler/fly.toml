@@ -1,6 +1,6 @@
 # Fly.io：自托管 TeX Live 编译服务。app 名以 `fly launch` 实际创建为准（同步改这里）。
 app = "aumath-tex"
-primary_region = "hkg"
+primary_region = "sin"
 
 [build]
   dockerfile = "Dockerfile"

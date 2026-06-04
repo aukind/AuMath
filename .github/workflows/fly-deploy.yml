@@ -50,4 +50,4 @@ jobs:
           fi
 
       - name: 远程构建并部署（镜像在 Fly 云端构建，不经本机/CI 上传 GB 级镜像）
-        run: flyctl deploy --remote-only
+        run: flyctl deploy --remote-only --ha=false
