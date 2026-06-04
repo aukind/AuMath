@@ -197,6 +197,7 @@ function PageLayoutInner({
             selectedTopicId={paperId ? undefined : topicId}
             selectedPaperId={paperId}
             isAdmin={isAdmin}
+            isLoggedIn={isLoggedIn}
             mainView={mainView}
             activeWorkspace={workspace}
             onWorkspaceChange={switchWorkspace}

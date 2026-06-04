@@ -7,8 +7,18 @@ import {
   publishPaperBundles, detectDuplicatePapers,
   type ExtractedPaperBundle, type ExtractedQuestion, type DuplicatePaperInfo, type DuplicateStrategy,
 } from '@/app/actions/process-paper';
-import { autoFiguresFromDoc, getAutoFiguresProgress } from '@/app/actions/cv-tikz';
-import { uploadFigureImage, uploadFigureSvg } from '@/app/actions/figure-image';
+import { uploadFigureImage } from '@/app/actions/figure-image';
+import { detectPageFigures } from '@/app/actions/detect-figures';
+import {
+  rasterizePdfPages,
+  rasterizeImageUrl,
+  canvasToDetectBase64,
+  cropBox,
+  toXYXY,
+  type PageRaster,
+} from '@/lib/paper/figure-extract';
+import { screenshotToTikz } from '@/app/actions/screenshot-tikz';
+import { compileTikzAction, uploadTikzFigureAction } from '@/app/actions/tikz';
 
 type FigureMode = 'image' | 'cloud-vector';
 
@@ -1055,8 +1065,12 @@ function columnRanks(centers: number[]): number[] {
 
 type RawFigure = { url: string; box: number[]; page: number; fileIdx: number };
 
-/** 慢活：本地 CV 检测几何图 + 裁剪上传 Storage。**与 Gemini 文字提取并行跑**（不依赖其结果）。
- *  onProgress：percent=整卷扫描百分比（轮询后端按页进度）；detected=已上传图数。 */
+/** 慢活：客户端 pdf.js 光栅化每页 → Gemini 视觉检测几何图 bbox → canvas 裁剪 → 上传 Storage。
+ *  纯 Vercel、不依赖本地 cv-service。**与 Gemini 文字提取并行跑**（不依赖其结果，图↔题对位在
+ *  matchFiguresToQuestions 里用 figure_count 配额完成）。
+ *  mode='image'：裁剪原图位图入库（与原卷一致，默认）；
+ *  mode='cloud-vector'：每张裁图再走 直连 HF DeTikZify → 编译 → 上传 SVG，任一步失败回退位图。
+ *  onProgress：percent=按页扫描进度；detected=已上传图数。 */
 async function detectAndUploadFigures(
   files: UploadedFile[],
   mode: FigureMode,
@@ -1064,44 +1078,64 @@ async function detectAndUploadFigures(
 ): Promise<{ raws: RawFigure[]; error?: string }> {
   const raws: RawFigure[] = [];
   let firstError: string | undefined;
-  const N = files.length;
-  for (let fileIdx = 0; fileIdx < N; fileIdx++) {
+
+  // 1) 每个文件光栅化成页 canvas（PDF 逐页；图片型单页）。统计总页数用于进度。
+  const filePages: { fileIdx: number; pages: PageRaster[] }[] = [];
+  for (let fileIdx = 0; fileIdx < files.length; fileIdx++) {
     const f = files[fileIdx];
-    const jobId = `fig-${Date.now()}-${fileIdx}-${Math.random().toString(36).slice(2, 8)}`;
-
-    // 轮询后端按页进度 → 折算成整体百分比（已完成文件 + 当前文件分数）/ 总文件数
-    let lastFrac = 0;
-    const poll = setInterval(async () => {
-      const { done, total } = await getAutoFiguresProgress(jobId);
-      if (total > 0) lastFrac = done / total;
-      onProgress?.({ percent: Math.min(99, Math.round(((fileIdx + lastFrac) / N) * 100)) });
-    }, 1200);
-
-    let res;
     try {
-      res = await autoFiguresFromDoc(f.signedUrl, f.fileType, { mode, vectorize: false, jobId });
-    } finally {
-      clearInterval(poll);
+      const pages = f.fileType === 'pdf'
+        ? await rasterizePdfPages(f.signedUrl)
+        : [await rasterizeImageUrl(f.signedUrl)];
+      filePages.push({ fileIdx, pages });
+    } catch (e) {
+      firstError ??= `页面光栅化失败：${e instanceof Error ? e.message : String(e)}`;
     }
-    // 该文件检测完成 → 百分比推进到该文件末尾
-    onProgress?.({ percent: Math.min(99, Math.round(((fileIdx + 1) / N) * 100)) });
-    if (!res.success) { firstError ??= res.error; continue; }
-    // 同一文件的图**并发上传**（实测每张 ~900ms，串行会拖很久）；完成一张即累加计数。
-    await Promise.all(res.figures.map(async (fig) => {
-      // cloud-vector：优先用云端 8B 编译的 SVG；失败/位图模式则用裁剪原图兜底（绝不丢图）
-      let url: string | null = null;
-      if (mode === 'cloud-vector' && fig.svg) {
-        const up = await uploadFigureSvg(fig.svg);
-        if (up.success) url = up.url;
+  }
+  const totalPages = filePages.reduce((s, fp) => s + fp.pages.length, 0) || 1;
+  let donePages = 0;
+
+  // 2) 逐页检测 + 裁剪上传
+  for (const fp of filePages) {
+    for (const pg of fp.pages) {
+      const { base64, mime } = canvasToDetectBase64(pg.canvas);
+      if (!base64) {
+        firstError ??= '页面取图失败（图片跨域未配 CORS？）';
+        donePages++;
+        onProgress?.({ percent: Math.min(99, Math.round((donePages / totalPages) * 100)) });
+        continue;
       }
-      if (!url && fig.crop_base64) {
-        const up = await uploadFigureImage(fig.crop_base64);
-        if (up.success) url = up.url;
-      }
-      if (!url) return;
-      raws.push({ url, box: fig.box ?? [0, 0, 0, 0], page: fig.page ?? 0, fileIdx });
-      onProgress?.({ detected: raws.length });  // 每传完一张就上报，第二步清单实时跳数
-    }));
+      const det = await detectPageFigures(base64, mime);
+      donePages++;
+      onProgress?.({ percent: Math.min(99, Math.round((donePages / totalPages) * 100)) });
+      if (!det.success) { firstError ??= det.error; continue; }
+
+      // 同一页的图并发处理（裁剪同步 + 上传异步）。
+      await Promise.all(det.figures.map(async (fb) => {
+        const cropBase64 = cropBox(pg.canvas, fb.box);
+        if (!cropBase64) return;
+        let url: string | null = null;
+        if (mode === 'cloud-vector') {
+          try {
+            const tk = await screenshotToTikz(cropBase64, 'image/png');
+            if (tk.success) {
+              const cp = await compileTikzAction(tk.tikz, { tikzLibraries: tk.libraries });
+              if (cp.success) {
+                const up = await uploadTikzFigureAction(cp.svg);
+                if (up.success) url = up.url;
+              }
+            }
+          } catch { /* 回退位图 */ }
+        }
+        if (!url) {
+          const up = await uploadFigureImage(cropBase64);
+          if (up.success) url = up.url;
+        }
+        if (!url) return;
+        raws.push({ url, box: toXYXY(fb.box), page: pg.pageNumber, fileIdx: fp.fileIdx });
+        onProgress?.({ detected: raws.length });
+      }));
+    }
   }
   onProgress?.({ percent: 100 });
   return { raws, error: firstError };

@@ -14,6 +14,7 @@ interface MobileMenuDrawerProps {
   selectedTopicId?: string;
   selectedPaperId?: string;
   isAdmin: boolean;
+  isLoggedIn?: boolean;
   hasFilter: boolean;
   siteViews: number; // 接收访问量数据
   mainView: MainView;
@@ -25,6 +26,7 @@ export default function MobileMenuDrawer({
   selectedTopicId,
   selectedPaperId,
   isAdmin,
+  isLoggedIn = false,
   hasFilter,
   siteViews,
   mainView,
@@ -71,6 +73,7 @@ export default function MobileMenuDrawer({
                 selectedTopicId={selectedTopicId}
                 selectedPaperId={selectedPaperId}
                 isAdmin={isAdmin}
+                isLoggedIn={isLoggedIn}
                 mainView={mainView}
               />
 

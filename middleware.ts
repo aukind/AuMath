@@ -31,11 +31,15 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // 保护所有 /admin/* 路由
-  if (!user && request.nextUrl.pathname.startsWith('/admin')) {
+  // 保护需登录的路由：/admin/*（管理台）、/contribute（自助录题）、/studio（LaTeX 文档工作室）。
+  const path = request.nextUrl.pathname;
+  if (
+    !user &&
+    (path.startsWith('/admin') || path.startsWith('/contribute') || path.startsWith('/studio'))
+  ) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = '/login';
-    loginUrl.searchParams.set('redirectTo', request.nextUrl.pathname);
+    loginUrl.searchParams.set('redirectTo', path);
     return NextResponse.redirect(loginUrl);
   }
 

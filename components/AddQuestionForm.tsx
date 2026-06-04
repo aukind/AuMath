@@ -7,6 +7,7 @@ import MathRenderer from '@/components/MathRenderer';
 import LatexNormalizeHint from '@/components/editor/LatexNormalizeHint';
 import AiFigureButton from '@/components/admin/AiFigureButton';
 import { ScreenshotToLatexButton } from '@/components/admin/ScreenshotToLatexButton';
+import TikzFigureButton from '@/components/latex/TikzFigureButton';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import { createQuestion, updateQuestion } from '@/app/actions/questions';
 import { uploadRiveAsset } from '@/app/actions/upload-rive';
@@ -336,6 +337,7 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
             </span>
             <div className="flex items-center gap-2">
               <ScreenshotToLatexButton onInsert={insertContent} />
+              <TikzFigureButton onInsert={insertContent} />
               <AiFigureButton content={content} onContentChange={setContent} />
             </div>
           </div>

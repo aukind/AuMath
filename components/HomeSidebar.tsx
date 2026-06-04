@@ -23,6 +23,8 @@ import {
   Newspaper,
   GraduationCap,
   Trophy,
+  SquarePen,
+  FileCode,
 } from 'lucide-react';
 import Magnetic from '@/components/motion/Magnetic';
 import SidebarTabs from '@/components/SidebarTabs';
@@ -39,6 +41,8 @@ interface Props {
   selectedTopicId?: string;
   selectedPaperId?: string;
   isAdmin?: boolean;
+  /** 登录用户才显示「创作」组（录题 / LaTeX 工作室）。 */
+  isLoggedIn?: boolean;
   mainView: MainView;
   /** 受控工作区（仅桌面端 PageLayout 注入，用于 0ms 秒切高亮）。 */
   activeWorkspace?: Workspace;
@@ -113,6 +117,7 @@ export default function HomeSidebar({
   selectedTopicId,
   selectedPaperId,
   isAdmin = false,
+  isLoggedIn = false,
   mainView,
   activeWorkspace,
   onWorkspaceChange,
@@ -155,6 +160,8 @@ export default function HomeSidebar({
   const libraryActive = pathname.startsWith('/library');
   const graphActive = pathname.startsWith('/explore');
   const dailyActive = pathname.startsWith('/daily');
+  const contributeActive = pathname.startsWith('/contribute');
+  const studioActive = pathname.startsWith('/studio');
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -242,6 +249,29 @@ export default function HomeSidebar({
         >
           <RowInner Icon={BookMarked} label="我的题库" active={mybankActive} loading={pendingHref === '/?view=mybank'} />
         </Link>
+
+        {/* 创作（仅登录可见）：自助录题 / LaTeX 文档工作室 */}
+        {isLoggedIn && (
+          <>
+            <div className="mx-2 my-1.5 border-t border-zinc-100 dark:border-zinc-800/70" />
+            <Link
+              href="/contribute"
+              onClick={goLink('/contribute')}
+              aria-current={contributeActive ? 'page' : undefined}
+              className={rowClass(contributeActive)}
+            >
+              <RowInner Icon={SquarePen} label="录题" active={contributeActive} loading={pendingHref === '/contribute'} />
+            </Link>
+            <Link
+              href="/studio"
+              onClick={goLink('/studio')}
+              aria-current={studioActive ? 'page' : undefined}
+              className={rowClass(studioActive)}
+            >
+              <RowInner Icon={FileCode} label="LaTeX 工作室" active={studioActive} loading={pendingHref === '/studio'} />
+            </Link>
+          </>
+        )}
       </nav>
 
       {/* 高考题库语境面板：知识点 / 真题 / 模拟题 树（手风琴展开后置于滚动区，避免顶出后续 nav 项） */}

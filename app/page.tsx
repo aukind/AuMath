@@ -128,6 +128,7 @@ export default async function HomePage({
             selectedTopicId={paperId ? undefined : topicId}
             selectedPaperId={paperId}
             isAdmin={isAdmin}
+            isLoggedIn={isLoggedIn}
             hasFilter={mainView === 'browse'}
             siteViews={siteViews} /* 将访问次数传递给移动端菜单 */
             mainView={mainView}
