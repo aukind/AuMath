@@ -21,11 +21,6 @@ export interface MathRendererProps {
   academicTypography?: boolean;
   /** 首字下沉（仅 academicTypography 为真时生效，作用于第一段首字）。 */
   dropCap?: boolean;
-  /**
-   * 题面去粗：高考印刷卷题干/选项几乎零加粗。为真时把 strong/b 压回常规字重（见 globals.css 的
-   * .academic-nobold）。仅用于题干与选项渲染；解析（解法一/二分层加粗）不传此项，故仍保留加粗。
-   */
-  plainWeight?: boolean;
 }
 
 // 导出以便讲义 PDF 的服务端 unified 渲染管线（lib/lecture/md-to-html）复用同一套 KaTeX 宏，
@@ -104,7 +99,6 @@ export default function MathRenderer({
   katexOptions,
   academicTypography = false,
   dropCap = false,
-  plainWeight = false,
 }: MathRendererProps) {
   const katexOpts  = { ...defaultKatexOptions, ...katexOptions };
   const normalized = preprocessMathContent(content);
@@ -129,12 +123,13 @@ export default function MathRenderer({
         '[&_td]:border [&_td]:border-zinc-300 dark:[&_td]:border-zinc-600',
         '[&_th]:px-3! [&_th]:py-1.5! [&_td]:px-3! [&_td]:py-1.5!',
         '[&_th]:text-center [&_td]:text-center',
-        // 位图几何图（markdown ![](url)）：有界缩略图 + 白底卡片；inline-block 让一题多图
+        // 位图几何图（markdown ![](url)）：有界缩略图，白底便于暗色模式阅读；inline-block 让一题多图
         // 在同一段里平铺换行成一行（取代旧的竖向全宽堆叠），单图则是一张适中缩略图。
         // 全站 markdown 图片只有几何图，故此样式范围安全。
+        // 不加边框线：立体图本身是线条图，再套一圈边框框住会显得局促（用户要求去掉）。
         '[&_img]:inline-block [&_img]:align-top [&_img]:my-2 [&_img]:mr-2',
         '[&_img]:max-w-[260px] [&_img]:max-h-[240px] [&_img]:w-auto [&_img]:h-auto [&_img]:object-contain',
-        '[&_img]:rounded-md [&_img]:bg-white [&_img]:p-1.5 [&_img]:border [&_img]:border-zinc-200',
+        '[&_img]:rounded-md [&_img]:bg-white [&_img]:p-1.5',
         // SVG 几何图：居中、限宽、亮色卡片背景便于阅读
         '[&_svg]:block [&_svg]:mx-auto [&_svg]:my-3 [&_svg]:max-w-full',
         '[&_svg]:bg-white dark:[&_svg]:bg-zinc-50 [&_svg]:rounded-md [&_svg]:p-2',
@@ -152,7 +147,6 @@ export default function MathRenderer({
         // 精准避开 .katex，公式仍用数学字体）。
         academicTypography ? 'academic-prose' : '',
         academicTypography && dropCap ? 'drop-cap' : '',
-        plainWeight ? 'academic-nobold' : '',
         className ?? '',
       ].join(' ')}
     >

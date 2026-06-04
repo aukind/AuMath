@@ -229,25 +229,6 @@ function normalizeVectors(body: string): string {
   return body.replace(/\\vec\s*\{\s*([A-Za-z]{2,})\s*\}/g, '\\overrightarrow{$1}');
 }
 
-/**
- * 把「黑斜体向量」改写成高考国标的「箭头向量」——高考/中文教材排版里向量一律用箭头
- * （单字母 $\vec{a}$、两点 $\overrightarrow{AB}$），绝不用加粗黑斜体（\boldsymbol/\bm/\mathbf）。
- *
- * - \boldsymbol / \bm / \pmb：教辅几乎一定是向量黑斜体 → 两个大写字母作 \overrightarrow，其余（单字母/希腊字母）作 \vec。
- * - \mathbf：保守处理（它也用于矩阵/集合）——仅当参数是「单个小写拉丁字母」「两个大写字母」「单个希腊命令」时才当向量改写，
- *   其余（如单个大写 \mathbf{A} 矩阵）保持不动，避免误伤。
- * 改写后再交给 normalizeVectors 统一把残留的 \vec{AB} 升级为 \overrightarrow。
- */
-function normalizeVectorBold(body: string): string {
-  let out = body
-    .replace(/\\(?:boldsymbol|bm|pmb)\s*\{\s*([A-Z]{2})\s*\}/g, '\\overrightarrow{$1}')
-    .replace(/\\(?:boldsymbol|bm|pmb)\s*\{\s*(\\[a-zA-Z]+|[A-Za-z])\s*\}/g, '\\vec{$1}');
-  out = out
-    .replace(/\\mathbf\s*\{\s*([A-Z]{2})\s*\}/g, '\\overrightarrow{$1}')
-    .replace(/\\mathbf\s*\{\s*(\\[a-zA-Z]+|[a-z])\s*\}/g, '\\vec{$1}');
-  return out;
-}
-
 function transformMathBody(body: string): string {
   let out = repairDegenerateScripts(body);
 
@@ -260,8 +241,7 @@ function transformMathBody(body: string): string {
     out = out.replace(re, `\\${op}\\limits`);
   }
 
-  // 1.5 向量规范化：先把黑斜体向量(\boldsymbol/\bm/\mathbf)改成箭头，再把两点 \vec{AB} 升级为 \overrightarrow{AB}
-  out = normalizeVectorBold(out);
+  // 1.5 两点向量 \vec{AB} → \overrightarrow{AB}（单字母向量 \boldsymbol/\mathbf 保持黑斜体，不改箭头）
   out = normalizeVectors(out);
 
   // 2. 行内分数注入 \displaystyle（仅一两个 \frac 时，避免压扁）

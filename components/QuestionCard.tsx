@@ -192,7 +192,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
 
         {/* Question body */}
         <div className="px-5 pt-5 pb-1 text-[15px]">
-          <MathRenderer content={displayContent} academicTypography plainWeight />
+          <MathRenderer content={displayContent} academicTypography />
         </div>
 
         {/* Interactive Rive sandbox — 仅当题目配置了交互动画时渲染 */}
@@ -206,7 +206,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
           <div className={`px-5 pb-4 pt-2 grid gap-x-8 gap-y-2 ${visibleOptions.length <= 2 ? 'grid-cols-1' : 'grid-cols-2'}`}>
             {visibleOptions.map((opt, i) => (
               <div key={i} className="text-[15px] [&_.prose_p]:my-0 [&_.prose_p]:leading-[1.85]">
-                <MathRenderer content={opt} academicTypography plainWeight />
+                <MathRenderer content={opt} academicTypography />
               </div>
             ))}
           </div>
