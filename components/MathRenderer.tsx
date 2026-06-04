@@ -21,6 +21,11 @@ export interface MathRendererProps {
   academicTypography?: boolean;
   /** 首字下沉（仅 academicTypography 为真时生效，作用于第一段首字）。 */
   dropCap?: boolean;
+  /**
+   * 题面去粗：高考印刷卷题干/选项几乎零加粗。为真时把 strong/b 压回常规字重（见 globals.css 的
+   * .academic-nobold）。仅用于题干与选项渲染；解析（解法一/二分层加粗）不传此项，故仍保留加粗。
+   */
+  plainWeight?: boolean;
 }
 
 // 导出以便讲义 PDF 的服务端 unified 渲染管线（lib/lecture/md-to-html）复用同一套 KaTeX 宏，
@@ -99,6 +104,7 @@ export default function MathRenderer({
   katexOptions,
   academicTypography = false,
   dropCap = false,
+  plainWeight = false,
 }: MathRendererProps) {
   const katexOpts  = { ...defaultKatexOptions, ...katexOptions };
   const normalized = preprocessMathContent(content);
@@ -146,6 +152,7 @@ export default function MathRenderer({
         // 精准避开 .katex，公式仍用数学字体）。
         academicTypography ? 'academic-prose' : '',
         academicTypography && dropCap ? 'drop-cap' : '',
+        plainWeight ? 'academic-nobold' : '',
         className ?? '',
       ].join(' ')}
     >

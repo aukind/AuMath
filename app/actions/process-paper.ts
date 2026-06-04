@@ -4,7 +4,7 @@ import { GoogleGenAI } from '@google/genai';
 import { revalidatePath, revalidateTag } from 'next/cache';
 // 录入流程统一走 Smart 入口：默认 TS AST 版，USE_WASM_NORMALIZER=1 时切 Rust→WASM 版。
 import { normalizeLaTeXSmart as normalizeLaTeX } from '@/lib/normalizeLatexSmart';
-import { stripInlineOptionTail } from '@/lib/questions/content';
+import { stripInlineOptionTail, isMultiAnswer } from '@/lib/questions/content';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
@@ -17,6 +17,8 @@ export interface ExtractedQuestion {
   question_number?: number;
   content: string;
   options: string[];
+  /** true=多项选择题（新高考多选），false/缺省=单项选择或非选择题。供入库写 metadata.choice_type。 */
+  is_multi?: boolean;
   answer: string;
   /** 详细解析/解答（大题含完整解法，可多解法）；选填可空 */
   analysis: string;
@@ -189,14 +191,20 @@ ${MULTI_PAPER_RULE}
 
 ${TOP_LEVEL_STRUCTURE}
 
-Each question element (ALL 4 fields required；不要输出 solution / answer 字段):
+Each question element (ALL 5 fields required；不要输出 solution / answer 字段):
 {
   "question_number": 5,
   "content": "**5.** 完整题干（按规则 14-16 排版）",
   "options": {"A":"...","B":"...","C":"...","D":"..."} or null,
+  "is_multi": false,
   "category": "数列",
   "figure_count": 0
 }
+
+19.【单选 vs 多选】is_multi 标记该选择题是否为「多项选择题」。判据看卷面分区说明与题干用语：
+    若该题所属大题/分区写明「多项选择题」「有多项符合题目要求」「全部选对得…分，部分选对得…分，有选错得0分」之类 → is_multi=true；
+    普通「在每小题给出的四个选项中，只有一项是符合题目要求的」单选题，以及填空/解答/证明等非选择题 → is_multi=false。
+    新高考典型结构：第 9–11 题为多选题。拿不准时按单选（false）处理，绝不臆造。
 
 ${SHARED_TRANSCRIPTION_RULES}
 18. 【不录任何答案】绝不输出 solution / answer 字段，也绝不把答案写进 content。无论答案是你自己算出来的，还是卷面上已经印好的（答案/参考答案/答案栏），一律**不录入**。本管线只录题面，答案在录题后由人工在编辑页补充。`;
@@ -417,7 +425,9 @@ async function normalizeQuestions(
       const figure_count    = typeof q.figure_count === 'number' && q.figure_count >= 0 ? Math.round(q.figure_count) : undefined;
       // 治本：即便模型把选项复述进 content，也在入库前确定性剥掉，杜绝与选项卡片重复。
       const cleanContent = stripInlineOptionTail(content, options.length >= 2);
-      return { id: crypto.randomUUID(), question_number, content: cleanContent, options, answer, analysis, category, figure_count };
+      // 多选判定：模型显式标记 is_multi，或（配对模式有答案时）答案是 2+ 选项字母（"AD"）兜底。
+      const is_multi = options.length >= 2 && (q.is_multi === true || isMultiAnswer(answer));
+      return { id: crypto.randomUUID(), question_number, content: cleanContent, options, is_multi, answer, analysis, category, figure_count };
     }),
   );
   // 过滤掉完全空的题（content/options/answer 全空 = 模型输出被截断的残骸）
@@ -839,6 +849,8 @@ export async function publishQuestions(
     if (q.category)                metadata.tags        = q.category;
     if (q.question_number != null) metadata.exam_number = `第${q.question_number}题`;
     if (q.options.length > 0)      metadata.options     = q.options;
+    // 单选/多选子类型存 JSONB（避免 ENUM 迁移）；展示侧据此给多选题打「多选」标签。
+    if (q.options.length > 0)      metadata.choice_type = q.is_multi ? 'multi' : 'single';
     return {
       content:    q.content,
       answer:     q.answer,

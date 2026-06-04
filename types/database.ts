@@ -67,6 +67,11 @@ export interface QuestionMetadata {
   tags?: string[];
   /** 选择题选项，如 ["A. ...", "B. ...", "C. ...", "D. ..."] */
   options?: string[] | Record<string, string>;
+  /**
+   * 选择题子类型：'single'=单项选择，'multi'=多项选择（新高考多选题）。
+   * 不进 question_type 枚举（避免 Postgres ENUM 迁移），改存 JSONB；缺省时按答案字母数兜底推断。
+   */
+  choice_type?: 'single' | 'multi';
   /** 相关定理，如 ["韦达定理", "判别式"] */
   related_theorems?: string[];
   /** 常见错误，用于教学提示 */

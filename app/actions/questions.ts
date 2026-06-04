@@ -5,6 +5,7 @@ import { createClient as createSupabaseJsClient } from '@supabase/supabase-js';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isAdminUser } from '@/lib/utils/auth';
+import { isMultiAnswer } from '@/lib/questions/content';
 
 /** 无 cookie 的匿名只读客户端，专供 unstable_cache 缓存公共数据（试卷/分类，RLS 公开可读）。
  *  unstable_cache 内不能访问 cookies/headers，故不能用 server.ts 的 createClient。
@@ -34,6 +35,8 @@ export interface CreateQuestionInput {
   interactive_sandbox?: InteractiveSandboxConfig | null;
   /** 选择题选项（每项形如 "A. ..."，标签写在字符串里，与录题入库格式一致）。非选择题留空。 */
   options?: string[] | null;
+  /** 选择题子类型：单选/多选。仅选择题有意义，存入 metadata.choice_type。 */
+  choice_type?: 'single' | 'multi' | null;
 }
 
 /** 把存储里的 metadata.options（数组或 {A,B,..} 对象）规整为可编辑的字符串数组。 */
@@ -67,6 +70,11 @@ export async function createQuestion(
   const asAdmin = isAdminUser(user);
 
   const opts = cleanOptions(input.options);
+  const metadata: Record<string, unknown> = {};
+  if (opts.length) {
+    metadata.options = opts;
+    metadata.choice_type = input.choice_type === 'multi' ? 'multi' : 'single';
+  }
   const { data, error } = await admin
     .from('questions')
     .insert({
@@ -81,7 +89,7 @@ export async function createQuestion(
       is_public:           asAdmin,
       created_by:          user.id,
       interactive_sandbox: input.interactive_sandbox ?? null,
-      metadata:            opts.length ? { options: opts } : {},
+      metadata,
     })
     .select('id')
     .single();
@@ -115,6 +123,8 @@ export interface QuestionForEdit {
   interactive_sandbox: InteractiveSandboxConfig | null;
   /** 选择题选项（每项形如 "A. ..."），从 metadata.options 规整而来 */
   options: string[];
+  /** 选择题子类型：单选/多选，从 metadata.choice_type 回显；缺省按答案字母数兜底 */
+  choice_type: 'single' | 'multi';
 }
 
 export async function getQuestionById(id: string): Promise<QuestionForEdit | null> {
@@ -142,6 +152,8 @@ export async function getQuestionById(id: string): Promise<QuestionForEdit | nul
     topic_ids:           ((data as any).question_topic_relations ?? []).map((r: any) => r.topic_id),
     interactive_sandbox: ((data as any).interactive_sandbox ?? null) as InteractiveSandboxConfig | null,
     options:             optionsToStringArray((data as any).metadata?.options),
+    choice_type:         (data as any).metadata?.choice_type === 'multi' || isMultiAnswer((data as any).answer ?? '')
+                           ? 'multi' : 'single',
   };
 }
 
@@ -161,8 +173,13 @@ export async function updateQuestion(
     .from('questions').select('metadata').eq('id', id).maybeSingle();
   const metadata: Record<string, unknown> = { ...((existing as any)?.metadata ?? {}) };
   const opts = cleanOptions(input.options);
-  if (opts.length) metadata.options = opts;
-  else delete metadata.options;
+  if (opts.length) {
+    metadata.options = opts;
+    metadata.choice_type = input.choice_type === 'multi' ? 'multi' : 'single';
+  } else {
+    delete metadata.options;
+    delete metadata.choice_type;
+  }
 
   // 注意：不再更新 difficulty（已退役为群众评分），保留数据库原值。
   const { error } = await supabase

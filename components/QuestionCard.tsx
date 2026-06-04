@@ -8,7 +8,7 @@ import DifficultyRating from '@/components/DifficultyRating';
 import Magnetic from '@/components/motion/Magnetic';
 import SquishyButton from '@/components/motion/SquishyButton';
 import { toggleFavorite, markError, removeError, recordView, recordAttempt } from '@/app/actions/user-workspace';
-import { stripInlineOptionTail, withAnswerBlank, isBlankOption, normalizeOptions } from '@/lib/questions/content';
+import { stripInlineOptionTail, withAnswerBlank, isBlankOption, normalizeOptions, isMultiAnswer } from '@/lib/questions/content';
 import type { QuestionWithTopics } from '@/types/database';
 
 interface QuestionCardProps {
@@ -81,6 +81,9 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
   // 但它仍是选择题：题干补括号、剥内联尾巴照常按 options.length 判定。
   const isChoice = options.length >= 2;
   const visibleOptions = options.filter(o => !isBlankOption(o));
+  // 多选题提示：入库时写好的 metadata.choice_type 为主；答案本身是 2+ 选项字母（"AD"）即铁证多选，
+  // 故答案优先级最高——覆盖历史数据漏标、或模型把多选误判成单选的情况。
+  const isMulti = isChoice && (question.metadata?.choice_type === 'multi' || isMultiAnswer(question.answer));
 
   // 兜底：老数据 / 模型漏网时，展示侧再用同一逻辑剥掉题干里重复的选项尾巴（治本在 process-paper 入库时）。
   // 选项进数组、走下方网格渲染的选择题，给题干补上高考式作答括号「（　　）」。
@@ -137,12 +140,18 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
           )}
           {/* 题目来源（完整卷名，含年份）—— 收藏键右侧 */}
           {question.source && (
-            <span className="exam-serif text-sm font-medium text-zinc-700 dark:text-zinc-200 truncate">
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200 truncate">
               {question.source}
             </span>
           )}
           {primaryTopic && (
             <span className="text-xs text-zinc-400 dark:text-zinc-500 truncate">· {primaryTopic.name}</span>
+          )}
+          {/* 多选题醒目提示——新高考多选题与单选题卷面易混，给个标签免得漏看「不止一个正确答案」 */}
+          {isMulti && (
+            <span className="shrink-0 rounded px-1.5 py-0.5 text-[11px] leading-none text-rose-600 bg-rose-50 border border-rose-200 dark:text-rose-300 dark:bg-rose-950/40 dark:border-rose-900">
+              多选
+            </span>
           )}
 
           {/* 众包难度评分 —— 靠右 */}
@@ -183,7 +192,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
 
         {/* Question body */}
         <div className="px-5 pt-5 pb-1 text-[15px]">
-          <MathRenderer content={displayContent} academicTypography />
+          <MathRenderer content={displayContent} academicTypography plainWeight />
         </div>
 
         {/* Interactive Rive sandbox — 仅当题目配置了交互动画时渲染 */}
@@ -197,7 +206,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
           <div className={`px-5 pb-4 pt-2 grid gap-x-8 gap-y-2 ${visibleOptions.length <= 2 ? 'grid-cols-1' : 'grid-cols-2'}`}>
             {visibleOptions.map((opt, i) => (
               <div key={i} className="text-[15px] [&_.prose_p]:my-0 [&_.prose_p]:leading-[1.85]">
-                <MathRenderer content={opt} academicTypography />
+                <MathRenderer content={opt} academicTypography plainWeight />
               </div>
             ))}
           </div>

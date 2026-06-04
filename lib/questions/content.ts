@@ -26,7 +26,7 @@ export function stripInlineOptionTail(content: string, hasOptions: boolean): str
 /**
  * 把 metadata.options 归一化成字符串数组。两种入库形态都兼容：
  *  ① 数组 ["A. …","B. …"]：原样返回（已带标号）。
- *  ② 对象 {"A":"…","B":"…"}：拼成 "**A.** …" 的 markdown（加粗标号）。
+ *  ② 对象 {"A":"…","B":"…"}：拼成 "A. …" 的 markdown（标号常规字重，贴合高考印刷卷题面零加粗）。
  * 题卡（QuestionCard）与讲义 PDF（LectureDocument）共用，确保选项渲染逻辑完全一致。纯函数，前后端通用。
  */
 export function normalizeOptions(raw: unknown): string[] {
@@ -34,10 +34,20 @@ export function normalizeOptions(raw: unknown): string[] {
   if (Array.isArray(raw)) return raw.map(String);
   if (typeof raw === 'object') {
     return Object.entries(raw as Record<string, unknown>).map(
-      ([k, v]) => `**${k}.** ${v}`,
+      ([k, v]) => `${k}. ${v}`,
     );
   }
   return [];
+}
+
+/**
+ * 从答案推断是否「多选题」：答案去掉分隔符后若是 2–4 个 A–H 选项字母（如 "AD"、"BCD"、"B、D"），
+ * 即判定为多选。单字母（"A"）或带公式/数字的填空答案（"$-1$"）一律判为非多选。
+ * 配对录入（带答案卷）与展示侧兜底共用——既不必依赖模型显式标记，也能给历史数据补提示。纯函数，前后端通用。
+ */
+export function isMultiAnswer(answer: string): boolean {
+  const letters = (answer ?? '').toUpperCase().replace(/[\s,，、;；]/g, '');
+  return /^[A-H]{2,4}$/.test(letters);
 }
 
 /** 高考选择题题干末尾的作答括号：全角括号 + 两个全角空格（U+3000），贴合试卷排版。 */

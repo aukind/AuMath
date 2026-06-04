@@ -1,22 +1,5 @@
 import type { Metadata } from "next";
-import { Noto_Serif_SC } from "next/font/google";
 import "./globals.css";
-
-// 出版级中文衬线 = 思源宋体（Google 名「Noto Serif SC」即 Source Han Serif SC）。
-// next/font 在构建时把 Google 的 202 个 unicode-range 分片 woff2 自托管到本域，浏览器按
-// unicode-range 仅拉取当前页面实际用到的字形分片 —— 这就是「子集化」：跨设备完全一致的出版级宋体，
-// 又不会一次性下载整套字库。
-// preload:false —— CJK 字库分片极多，预加载全部反而拖慢首屏；display:swap 先用系统宋体兜底再无闪切换。
-// ⚠️ 仅供题目正文/标题等中文文本使用，严禁触碰 .katex（数学公式恒用 KaTeX 的 Computer Modern 字体）。
-const examSerif = Noto_Serif_SC({
-  weight: ["400", "700"],
-  subsets: ["latin"],
-  display: "swap",
-  preload: false,
-  variable: "--font-serif-cjk",
-  fallback: ["Songti SC", "SimSun", "Noto Serif CJK SC", "STSong", "serif"],
-  adjustFontFallback: false,
-});
 // KaTeX 字体与符号样式必须全局引入，MathRenderer 渲染的数学公式才能正确显示
 import "katex/dist/katex.min.css";
 // Lenis 必需样式：html.lenis{height:auto} 覆盖 <html> 的 h-full(height:100%)，
@@ -50,7 +33,7 @@ export default function RootLayout({
     <html
       lang="zh-CN"
       suppressHydrationWarning
-      className={`h-full antialiased ${examSerif.variable}`}
+      className="h-full antialiased"
     >
       <body className="min-h-full flex flex-col">
         {/* Lenis 全局平滑滚动须在最外层，先于主题水合接管文档滚动器 */}

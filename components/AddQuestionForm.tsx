@@ -224,6 +224,7 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
   const [analysis,     setAnalysis]     = useState(initialData?.analysis     ?? '');
   const [questionType, setQuestionType] = useState<QuestionType>(initialData?.question_type ?? 'calculation');
   const [options,      setOptions]      = useState<string[]>(initialData?.options ?? []);
+  const [choiceType,   setChoiceType]   = useState<'single' | 'multi'>(initialData?.choice_type ?? 'single');
   const [year,         setYear]         = useState(initialData?.year ? String(initialData.year) : String(new Date().getFullYear()));
   const [source,       setSource]       = useState(initialData?.source ?? '');
   const [topicIds,     setTopicIds]     = useState<string[]>(initialData?.topic_ids ?? []);
@@ -260,6 +261,7 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
       status,
       interactive_sandbox: sandbox,
       options,
+      choice_type: choiceType,
     };
 
     startTransition(async () => {
@@ -368,6 +370,31 @@ export default function AddQuestionForm({ topics, initialData }: Props) {
 
         {/* ── 选项（选择题）—— 每行一个选项，支持 LaTeX，实时预览 ── */}
         <OptionsEditor options={options} onChange={setOptions} />
+
+        {/* ── 单选 / 多选 —— 仅当有 ≥2 个选项时显示；存入 metadata.choice_type，展示侧据此打「多选」标签 ── */}
+        {options.length >= 2 && (
+          <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm px-6 py-4 flex items-center gap-3">
+            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-200">选择题类型</span>
+            <div className="inline-flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+              {(['single', 'multi'] as const).map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setChoiceType(t)}
+                  className={[
+                    'px-4 py-1.5 text-sm transition-colors',
+                    choiceType === t
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                      : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200',
+                  ].join(' ')}
+                >
+                  {t === 'single' ? '单选题' : '多选题'}
+                </button>
+              ))}
+            </div>
+            <span className="text-xs text-zinc-400">多选题会在题卡上标注「多选」提示</span>
+          </div>
+        )}
 
         {/* ── 元数据行 ── */}
         <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm px-6 py-5 space-y-5">
