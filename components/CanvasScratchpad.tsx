@@ -135,6 +135,12 @@ export default function CanvasScratchpad() {
       if (!r.current) return;
       r.current.width  = window.innerWidth  * dpr;
       r.current.height = window.innerHeight * dpr;
+      // CSS display size must equal the viewport (in CSS px), not the
+      // intrinsic attribute size — a <canvas> is a replaced element and
+      // absolute+inset-0 alone would display it at innerWidth*dpr, scaling
+      // every stroke by dpr (severe offset on Retina). Pin it explicitly.
+      r.current.style.width  = `${window.innerWidth}px`;
+      r.current.style.height = `${window.innerHeight}px`;
       r.current.getContext('2d')?.scale(dpr, dpr);
     });
   }, []);
@@ -154,6 +160,8 @@ export default function CanvasScratchpad() {
         if (!r.current) return;
         r.current.width  = window.innerWidth  * dpr;
         r.current.height = window.innerHeight * dpr;
+        r.current.style.width  = `${window.innerWidth}px`;
+        r.current.style.height = `${window.innerHeight}px`;
         r.current.getContext('2d')?.scale(dpr, dpr);
       });
 
