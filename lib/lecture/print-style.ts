@@ -122,8 +122,10 @@ html, body {
 .lecture svg { display: block; margin: 3mm auto; max-width: 100%; }
 .lecture svg text { fill: #000; }
 
-/* 关键：撤销上面几何图样式对 KaTeX 内部 SVG（根号/求和/积分尾）的污染，否则公式会被毁 */
-.lecture .katex svg { margin: 0 !important; max-width: none !important; fill: currentColor !important; display: inline; }
+/* 关键：撤销上面几何图样式对 KaTeX 内部 SVG（根号/求和/积分尾）的污染，否则公式会被毁。
+   注意 display 必须保持 block：KaTeX 的根号 svg 靠自身 CSS 的 display:block + position:absolute
+   叠在被开方数上方，若改成 inline 会脱离绝对定位块、与被开方数重叠（根号乱码）。 */
+.lecture .katex svg { margin: 0 !important; max-width: none !important; fill: currentColor !important; display: block; }
 .lecture .katex svg text { fill: currentColor !important; }
 
 /* KaTeX 矢量保真 */

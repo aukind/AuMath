@@ -17,19 +17,10 @@ import {
 } from '@/lib/questions/content';
 import { mdToHtml } from '@/lib/lecture/md-to-html';
 import { LECTURE_PRINT_STYLE } from '@/lib/lecture/print-style';
-import type { Difficulty } from '@/types/database';
 import type { LectureQuestion } from '@/lib/lecture/types';
 
 // 与 package.json 的 katex 版本保持一致；jsDelivr 镜像 npm，按确切版本取 CSS+字体，避免字形漂移。
 const KATEX_VERSION = '0.17.0';
-
-const DIFFICULTY_LABELS: Record<Difficulty, string> = {
-  1: '基础',
-  2: '进阶',
-  3: '中等',
-  4: '拔高',
-  5: '竞赛',
-};
 
 /** 仅用于纯文本字段（标题、来源、知识点名）的 HTML 转义；题目正文走 mdToHtml 自带的 sanitize。 */
 function esc(s: string): string {
@@ -72,7 +63,6 @@ function buildBody(
         (q.topicName ? `<span>${esc(q.topicName)}</span>` : '') +
         (q.source ? `<span>${esc(q.source)}</span>` : '') +
         (q.year ? `<span>${q.year} 年</span>` : '') +
-        `<span>${DIFFICULTY_LABELS[q.difficulty]}</span>` +
         `</div>`;
 
       const stemHtml = `<div class="lec-stem">${prose(stem)}</div>`;
