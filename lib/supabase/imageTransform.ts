@@ -13,7 +13,11 @@ export interface ImgTransformOptions {
   height?: number;
   /** 1–100，默认 72：肉眼无损但体积显著更小 */
   quality?: number;
-  /** cover（裁切填满，默认）| contain（完整不裁）| fill（拉伸） */
+  /**
+   * 裁切模式，仅在「同时指定 width 和 height」时生效：
+   * cover（裁切填满）| contain（完整不裁）| fill（拉伸）。
+   * 只给单边尺寸时本参数被忽略——图按原始比例缩放、不裁切，裁切交给 CSS object-cover。
+   */
   resize?: 'cover' | 'contain' | 'fill';
 }
 
@@ -25,6 +29,8 @@ export function imgTransform(url?: string | null, o: ImgTransformOptions = {}): 
   if (o.width) q.set('width', String(o.width));
   if (o.height) q.set('height', String(o.height));
   q.set('quality', String(o.quality ?? 72));
-  q.set('resize', o.resize ?? 'cover');
+  // 关键：只在 width+height 都给时才带 resize。否则 Supabase 遇到 resize=cover
+  // 会按正方形裁切（竖版头像被裁成中下部），故单边尺寸时必须省略 resize，保持原比例。
+  if (o.width && o.height) q.set('resize', o.resize ?? 'cover');
   return url.replace('/object/public/', '/render/image/public/') + '?' + q.toString();
 }
