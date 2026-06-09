@@ -14,6 +14,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import { formatRelativeTime } from '@/lib/utils/datetime';
 import { getNotifications, markAllNotificationsRead, type NotificationItem } from '@/app/actions/notifications';
 import { createClient } from '@/lib/supabase/server';
+import { imgTransform } from '@/lib/supabase/imageTransform';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '通知 · AuMath' };
@@ -30,7 +31,7 @@ const TYPE_META: Record<NotificationItem['type'], { icon: IconType; color: strin
 function Avatar({ name, url }: { name: string; url?: string }) {
   if (url) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={url} alt={name} className="h-9 w-9 rounded-full object-cover" />;
+    return <img src={imgTransform(url, { width: 128 })} alt={name} className="h-9 w-9 rounded-full object-cover" />;
   }
   return (
     <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-sm font-bold text-white">

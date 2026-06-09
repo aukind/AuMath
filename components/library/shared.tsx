@@ -5,6 +5,8 @@
  * 同一 item.id 在任一渲染中只会出现一次（官方进书架、非官方进瀑布；其他 tab 书架隐藏），
  * 故 layoutId 天然唯一，不会产生「幽灵节点」。
  */
+import { imgTransform } from '@/lib/supabase/imageTransform';
+
 export const coverLayoutId = (id: string) => `lib-cover-${id}`;
 
 export function Avatar({ name, url, size = 24 }: { name: string; url?: string; size?: number }) {
@@ -13,7 +15,7 @@ export function Avatar({ name, url, size = 24 }: { name: string; url?: string; s
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={url}
+        src={imgTransform(url, { width: 128 })}
         alt={name}
         style={{ width: px, height: px }}
         className="rounded-full object-cover"

@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { UserSquare, Users, Bell, Settings, LayoutDashboard, LogOut, ChevronDown } from 'lucide-react';
 import { logout } from '@/app/actions/auth';
+import { imgTransform } from '@/lib/supabase/imageTransform';
 
 interface AccountMenuProps {
   username: string;
@@ -18,7 +19,7 @@ interface AccountMenuProps {
 function Avatar({ name, url, size = 24 }: { name: string; url?: string; size?: number }) {
   if (url) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={url} alt={name} width={size} height={size} className="rounded-full object-cover" style={{ width: size, height: size }} />;
+    return <img src={imgTransform(url, { width: 128 })} alt={name} width={size} height={size} className="rounded-full object-cover" style={{ width: size, height: size }} />;
   }
   return (
     <span

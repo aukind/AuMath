@@ -10,6 +10,7 @@ import FollowButton from '@/components/profile/FollowButton';
 import { getPublicProfile } from '@/app/actions/user-profile';
 import { getFollowCounts, isFollowing } from '@/app/actions/follows';
 import { createClient } from '@/lib/supabase/server';
+import { imgTransform } from '@/lib/supabase/imageTransform';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,7 @@ function Avatar({ name, url, role }: { name: string; url?: string; role?: string
       <div className="relative z-10 flex h-16 w-16 shrink-0 overflow-hidden rounded-full ring-2 ring-white dark:ring-zinc-800">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={url} alt={name} className="h-full w-full object-cover" />
+          <img src={imgTransform(url, { width: 128 })} alt={name} className="h-full w-full object-cover" />
         ) : (
           <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-indigo-500 to-violet-500 text-2xl font-bold text-white">
             {name.slice(0, 1).toUpperCase()}

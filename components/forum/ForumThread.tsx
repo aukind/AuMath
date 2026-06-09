@@ -17,6 +17,7 @@ import MathContent from './MathContent';
 import CommentSection from './CommentSection';
 import PostActions from './PostActions';
 import { ReplyProvider } from './ReplyContext';
+import { imgTransform } from '@/lib/supabase/imageTransform';
 
 // ── 带有极客专属头像框的 Avatar 组件 ──
 function Avatar({ name, url, role }: { name: string; url?: string; role?: string }) {
@@ -26,7 +27,7 @@ function Avatar({ name, url, role }: { name: string; url?: string; role?: string
       <div className="relative z-10 flex h-11 w-11 shrink-0 overflow-hidden rounded-full ring-1 ring-zinc-200 dark:ring-zinc-800 bg-zinc-100 dark:bg-zinc-800">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={url} alt={name} className="h-full w-full object-cover" />
+          <img src={imgTransform(url, { width: 128 })} alt={name} className="h-full w-full object-cover" />
         ) : (
           <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-indigo-500 to-violet-500 text-lg font-bold text-white">
             {name.slice(0, 1).toUpperCase()}

@@ -10,6 +10,7 @@
 
 import { createClient } from '@/lib/supabase/server';
 import type { QuestionWithTopics } from '@/types/database';
+import { semanticSearchQuestionIds } from '@/app/actions/embeddings';
 
 export interface PostHit {
   id: string;
@@ -39,6 +40,20 @@ const POST_SELECT = 'id, title, created_at, author:profiles!forum_posts_author_i
 function reorder<T extends { id: string }>(rows: T[], ids: string[]): T[] {
   const map = new Map(rows.map((r) => [r.id, r]));
   return ids.map((id) => map.get(id)).filter((x): x is T => !!x);
+}
+
+/**
+ * Reciprocal Rank Fusion：把词面（trgm）与语义（pgvector）两路有序 id 融合成一路。
+ * 同时命中两路的题排前；任一路为空时退化为另一路的原序。k=60 为通用经验值。
+ */
+function fuseRanks(lists: string[][], k = 60): string[] {
+  const score = new Map<string, number>();
+  for (const list of lists) {
+    list.forEach((id, rank) => {
+      score.set(id, (score.get(id) ?? 0) + 1 / (k + rank));
+    });
+  }
+  return [...score.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
 }
 
 function toPostHit(p: any): PostHit {
@@ -102,10 +117,16 @@ async function searchUsers(sb: any, q: string): Promise<UserHit[]> {
 
 async function searchQuestions(sb: any, q: string): Promise<QuestionWithTopics[]> {
   try {
-    // 优先：trgm 排序 RPC（仅返回有序 id）
-    const { data: idRows, error } = await sb.rpc('search_question_ids', { q, lim: LIMIT });
-    if (error) throw error;
-    const ids = (idRows ?? []).map((r: any) => r.id as string);
+    // 混合检索：词面（trgm）与语义（pgvector）并行，RRF 融合排序。
+    // 语义路任一环节失败（无 key/迁移 028 未跑）返回空数组，自动退化为纯 trgm。
+    const [idRows, semIds] = await Promise.all([
+      sb.rpc('search_question_ids', { q, lim: LIMIT }).then((r: any) => {
+        if (r.error) throw r.error;
+        return (r.data ?? []).map((x: any) => x.id as string);
+      }),
+      semanticSearchQuestionIds(q, LIMIT),
+    ]);
+    const ids = fuseRanks([idRows, semIds]).slice(0, LIMIT);
     if (!ids.length) return [];
     const { data } = await sb.from('questions').select(QUESTION_SELECT).in('id', ids);
     return reorder<QuestionWithTopics>((data ?? []) as QuestionWithTopics[], ids);

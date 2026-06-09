@@ -17,6 +17,7 @@ import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import 'katex/dist/katex.min.css';
 import { lexicalToSafeMarkdown } from '@/lib/forum/lexicalSerialize';
 import { FORUM_KATEX_OPTIONS } from '@/lib/forum/sanitize';
+import { imgTransform } from '@/lib/supabase/imageTransform';
 
 // 在默认 schema 基础上放行 <img>，且 src 仅允许 https（图片来自本项目 Supabase 存储，
 // 序列化器已二次校验来源）。其余 HTML 仍按默认 schema 清洗。
@@ -62,6 +63,11 @@ export default function MathContent({ content, className }: MathContentProps) {
         // 注意顺序：先 rehype-sanitize 清洗 HAST，再 rehype-katex 注入 KaTeX 标记。
         // 序列化器已不产出原始 HTML，这里是第三道防线。
         rehypePlugins={[[rehypeSanitize, SANITIZE_SCHEMA], [rehypeKatex, FORUM_KATEX_OPTIONS]]}
+        components={{
+          // 论坛配图按显示宽度变换（Pro render/image），省 egress；非本桶/SVG 原样返回。
+          // eslint-disable-next-line @next/next/no-img-element, jsx-a11y/alt-text, @typescript-eslint/no-unused-vars
+          img: ({ src, node, ...props }) => <img src={imgTransform(typeof src === 'string' ? src : '', { width: 800, resize: 'contain' })} {...props} />,
+        }}
       >
         {markdown}
       </ReactMarkdown>

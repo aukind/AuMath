@@ -1,4 +1,5 @@
 import type { LibraryItem } from '@/types/library';
+import { imgTransform } from '@/lib/supabase/imageTransform';
 
 // 无真实封面时的精致占位：标题 hash 取一组高级渐变 + 书脊 + 光泽 + 大号书名 + 类型角标。
 // 取代此前「浅紫底 + FileText 线框」的劣质占位。
@@ -33,7 +34,7 @@ export default function CoverArt({
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
-        src={item.cover_url}
+        src={imgTransform(item.cover_url, { width: 320 })}
         alt={item.title}
         loading="lazy"
         className={`w-full bg-zinc-100 object-cover dark:bg-zinc-800 ${className}`}
