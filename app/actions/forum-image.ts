@@ -33,8 +33,7 @@ export async function uploadForumImage(formData: FormData): Promise<{ url: strin
 
   const { error } = await admin.storage
     .from(BUCKET)
-    // key 带时间戳，天然不可变 → 长缓存（1 年），让 Storage CDN 兜住 egress。
-    .upload(key, bytes, { contentType: file.type, upsert: true, cacheControl: '31536000' });
+    .upload(key, bytes, { contentType: file.type, upsert: true, cacheControl: '3600' });
   if (error) throw new Error('上传失败：' + error.message);
 
   const { data: pub } = admin.storage.from(BUCKET).getPublicUrl(key);

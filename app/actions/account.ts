@@ -96,8 +96,7 @@ export async function uploadAvatar(formData: FormData): Promise<{ url: string }>
 
   const { error: upErr } = await admin.storage
     .from(AVATAR_BUCKET)
-    // key 带时间戳，天然不可变 → 长缓存（1 年），让 Storage CDN 兜住 egress。
-    .upload(key, bytes, { contentType: file.type, upsert: true, cacheControl: '31536000' });
+    .upload(key, bytes, { contentType: file.type, upsert: true, cacheControl: '3600' });
   if (upErr) throw new Error('上传失败：' + upErr.message);
 
   const { data: pub } = admin.storage.from(AVATAR_BUCKET).getPublicUrl(key);

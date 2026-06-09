@@ -13,7 +13,6 @@ import { ChevronDown, MessageSquare, ThumbsUp } from 'lucide-react';
 import type { ForumComment, SessionUser, SubComment } from '@/types/forum';
 import MathContent from './MathContent';
 import { useReply } from './ReplyContext';
-import { imgTransform } from '@/lib/supabase/imageTransform';
 
 /** 二级回复默认展示条数，超出折叠。 */
 const SUBCOMMENT_PREVIEW = 2;
@@ -39,7 +38,7 @@ function Avatar({ name, url, role }: { name: string; url?: string; role?: string
       <div className="relative z-10 flex h-8 w-8 items-center justify-center rounded-full bg-blue-100 text-sm font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-200 overflow-hidden ring-1 ring-zinc-200 dark:ring-zinc-800">
         {url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={imgTransform(url, { width: 128 })} alt={name} className="h-full w-full object-cover" />
+          <img src={url} alt={name} className="h-full w-full object-cover" />
         ) : (
           initials(name)
         )}

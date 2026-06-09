@@ -6,7 +6,6 @@ import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isAdminUser } from '@/lib/utils/auth';
 import { isMultiAnswer } from '@/lib/questions/content';
-import { embedQuestion } from '@/app/actions/embeddings';
 
 /** 无 cookie 的匿名只读客户端，专供 unstable_cache 缓存公共数据（试卷/分类，RLS 公开可读）。
  *  unstable_cache 内不能访问 cookies/headers，故不能用 server.ts 的 createClient。
@@ -104,9 +103,6 @@ export async function createQuestion(
     if (relError) return { success: false, error: relError.message };
   }
 
-  // 公开题写入语义向量（私题/草稿不索引，省 Gemini 调用）。失败已内部吞掉，不影响录题。
-  if (asAdmin) await embedQuestion(data.id, input.content, input.source);
-
   revalidatePath('/');
   return { success: true, id: data.id };
 }
@@ -174,7 +170,7 @@ export async function updateQuestion(
 
   // 合并 metadata：保留既有的 tags/exam_number 等键，只覆写 options。
   const { data: existing } = await supabase
-    .from('questions').select('metadata, is_public').eq('id', id).maybeSingle();
+    .from('questions').select('metadata').eq('id', id).maybeSingle();
   const metadata: Record<string, unknown> = { ...((existing as any)?.metadata ?? {}) };
   const opts = cleanOptions(input.options);
   if (opts.length) {
@@ -212,9 +208,6 @@ export async function updateQuestion(
       .insert(input.topic_ids.map(tid => ({ question_id: id, topic_id: tid })));
     if (relError) return { success: false, error: relError.message };
   }
-
-  // 正文可能已改，公开题重算语义向量；私题不索引。失败已内部吞掉。
-  if ((existing as any)?.is_public) await embedQuestion(id, input.content, input.source);
 
   revalidatePath('/');
   revalidatePath(`/admin/edit/${id}`);

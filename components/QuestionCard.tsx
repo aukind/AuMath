@@ -1,10 +1,8 @@
 'use client';
 
 import { useState, useTransition } from 'react';
-import Link from 'next/link';
-import { ChevronDown, GripVertical, Layers, Pencil, Sparkles, Star, Trash2, X } from 'lucide-react';
+import { ChevronDown, GripVertical, Layers, Pencil, Star, Trash2, X } from 'lucide-react';
 import MathRenderer from '@/components/MathRenderer';
-import { getSimilarQuestions, type SimilarQuestion } from '@/app/actions/embeddings';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import DifficultyRating from '@/components/DifficultyRating';
 import Magnetic from '@/components/motion/Magnetic';
@@ -37,23 +35,6 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
   const [errored, setErrored] = useState(initialErrored);
   const [gradedCorrect, setGradedCorrect] = useState(false);
   const [isPending, startTransition] = useTransition();
-
-  // 相似题（pgvector 语义近邻）—— 首次展开才拉取，避免列表页 N 次请求。
-  const [similarOpen, setSimilarOpen] = useState(false);
-  const [similar, setSimilar] = useState<SimilarQuestion[] | null>(null);
-  const [similarLoading, setSimilarLoading] = useState(false);
-
-  function handleToggleSimilar() {
-    const opening = !similarOpen;
-    setSimilarOpen(opening);
-    if (opening && similar === null && !similarLoading) {
-      setSimilarLoading(true);
-      getSimilarQuestions(question.id)
-        .then((rows) => setSimilar(rows))
-        .catch(() => setSimilar([]))
-        .finally(() => setSimilarLoading(false));
-    }
-  }
 
   function handleToggleSolution() {
     const opening = !solutionOpen;
@@ -275,55 +256,8 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
               {gradedCorrect ? '✓ 已掌握' : '我做对了'}
             </SquishyButton>
           )}
-          <SquishyButton
-            onClick={handleToggleSimilar}
-            title="用 AI 语义检索找相似题"
-            className={[
-              'flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors',
-              similarOpen
-                ? 'border-violet-300 dark:border-violet-700 text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/30'
-                : 'border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-violet-300 dark:hover:border-violet-700 hover:text-violet-600 dark:hover:text-violet-400',
-            ].join(' ')}
-          >
-            <Sparkles size={13} />
-            相似题
-          </SquishyButton>
           <VariantButton count={question.variations?.length ?? 0} />
         </div>
-
-        {/* 相似题面板（语义近邻）—— 懒加载 */}
-        {similarOpen && (
-          <div className="border-t border-violet-100 dark:border-violet-900/60 bg-violet-50/40 dark:bg-violet-950/20 px-5 py-4">
-            <p className="text-[0.6875rem] font-semibold uppercase tracking-widest text-violet-600 dark:text-violet-400 mb-3">
-              相似题
-            </p>
-            {similarLoading && (
-              <p className="text-sm text-zinc-400">检索中…</p>
-            )}
-            {!similarLoading && similar !== null && similar.length === 0 && (
-              <p className="text-sm text-zinc-400">暂无相似题（题库语义索引可能尚未建立）。</p>
-            )}
-            {!similarLoading && similar && similar.length > 0 && (
-              <ul className="space-y-2">
-                {similar.map((s) => (
-                  <li key={s.id}>
-                    <Link
-                      href={`/question/${s.id}`}
-                      className="block rounded-lg border border-violet-100 dark:border-violet-900/50 bg-white/70 dark:bg-zinc-900/50 px-3 py-2 hover:border-violet-300 dark:hover:border-violet-700 transition-colors"
-                    >
-                      {s.source && (
-                        <span className="block text-[11px] text-zinc-400 mb-0.5 truncate">{s.source}</span>
-                      )}
-                      <span className="block text-sm text-zinc-700 dark:text-zinc-200 line-clamp-2">
-                        {s.content.replace(/\$+/g, '').slice(0, 120)}
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
 
         {/* Solution panel */}
         {solutionOpen && (

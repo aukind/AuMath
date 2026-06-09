@@ -6,8 +6,6 @@ import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Camera, Loader2 } from 'lucide-react';
 import { changePassword, updateUsername, uploadAvatar, type MyAccount } from '@/app/actions/account';
-import { imgTransform } from '@/lib/supabase/imageTransform';
-import AvatarCropper from './AvatarCropper';
 
 function initials(name: string) {
   return name.slice(0, 1).toUpperCase();
@@ -19,7 +17,6 @@ export default function AccountSettings({ account }: { account: MyAccount }) {
 
   const [avatarUrl, setAvatarUrl] = useState(account.avatarUrl);
   const [avatarPending, startAvatar] = useTransition();
-  const [cropFile, setCropFile] = useState<File | null>(null); // 待裁剪的原图，非空即弹裁剪框
 
   const [username, setUsername] = useState(account.username);
   const [namePending, startName] = useTransition();
@@ -28,26 +25,21 @@ export default function AccountSettings({ account }: { account: MyAccount }) {
   const [pw2, setPw2] = useState('');
   const [pwPending, startPw] = useTransition();
 
-  // 选图后不直接上传，先弹裁剪框让用户框定方形区域。
   function onPickAvatar(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (file) setCropFile(file);
-    if (fileRef.current) fileRef.current.value = '';
-  }
-
-  // 裁剪确定：上传裁好的方形 JPEG。
-  function onCropped(blob: Blob) {
+    if (!file) return;
     const fd = new FormData();
-    fd.append('file', new File([blob], 'avatar.jpg', { type: 'image/jpeg' }));
+    fd.append('file', file);
     startAvatar(async () => {
       try {
         const { url } = await uploadAvatar(fd);
         setAvatarUrl(url);
-        setCropFile(null);
         toast.success('头像已更新');
         router.refresh();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : '上传失败');
+      } finally {
+        if (fileRef.current) fileRef.current.value = '';
       }
     });
   }
@@ -94,7 +86,7 @@ export default function AccountSettings({ account }: { account: MyAccount }) {
           >
             {avatarUrl ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={imgTransform(avatarUrl, { width: 160 })} alt="头像" className="h-full w-full object-cover" />
+              <img src={avatarUrl} alt="头像" className="h-full w-full object-cover" />
             ) : (
               <span className="flex h-full w-full items-center justify-center bg-indigo-100 text-2xl font-semibold text-indigo-700 dark:bg-indigo-900 dark:text-indigo-200">
                 {initials(username)}
@@ -110,15 +102,6 @@ export default function AccountSettings({ account }: { account: MyAccount }) {
           <input ref={fileRef} type="file" accept="image/*" onChange={onPickAvatar} className="hidden" />
         </div>
       </Section>
-
-      {cropFile && (
-        <AvatarCropper
-          file={cropFile}
-          busy={avatarPending}
-          onCancel={() => setCropFile(null)}
-          onConfirm={onCropped}
-        />
-      )}
 
       {/* 用户名 */}
       <Section title="用户名">

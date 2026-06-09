@@ -20,7 +20,6 @@ import { createForumPost } from '@/app/actions/forum';
 import { uploadForumImage } from '@/app/actions/forum-image';
 import { buildReplyEditorConfig, FORUM_TRANSFORMERS } from './lexicalConfig';
 import type { SessionUser } from '@/types/forum';
-import { imgTransform } from '@/lib/supabase/imageTransform';
 
 const TOOLBAR_BTN =
   'inline-flex h-7 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium ' +
@@ -33,7 +32,7 @@ function Avatar({ name, url, role }: { name: string; url?: string; role?: string
   return (
     <div className="relative inline-flex items-center justify-center shrink-0 mt-1">
       <div className="relative z-10 flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-lg font-bold text-white overflow-hidden shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
-        {url ? <img src={imgTransform(url, { width: 128 })} alt={name} className="h-full w-full object-cover" /> : name.slice(0, 1).toUpperCase()}
+        {url ? <img src={url} alt={name} className="h-full w-full object-cover" /> : name.slice(0, 1).toUpperCase()}
       </div>
       {isSpecial && (
         <div className="pointer-events-none absolute -inset-[10px] z-20">

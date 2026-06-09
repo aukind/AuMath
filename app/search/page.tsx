@@ -8,7 +8,6 @@ import { searchAll } from '@/app/actions/search';
 import { getFavoritedQuestionIds, getErroredQuestionIds } from '@/app/actions/user-workspace';
 import { getMyDifficultyRatings } from '@/app/actions/difficulty';
 import { createClient } from '@/lib/supabase/server';
-import { imgTransform } from '@/lib/supabase/imageTransform';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '搜索 · AuMath' };
@@ -17,7 +16,7 @@ export const metadata = { title: '搜索 · AuMath' };
 function UserAvatar({ name, url }: { name: string; url?: string }) {
   if (url) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={imgTransform(url, { width: 128 })} alt={name} className="h-9 w-9 shrink-0 rounded-full object-cover" />;
+    return <img src={url} alt={name} className="h-9 w-9 shrink-0 rounded-full object-cover" />;
   }
   return (
     <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-sm font-bold text-white">

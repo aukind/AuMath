@@ -1,12 +1,11 @@
 import Link from 'next/link';
 import FollowButton from '@/components/profile/FollowButton';
 import type { FollowedUser } from '@/app/actions/follows';
-import { imgTransform } from '@/lib/supabase/imageTransform';
 
 function Avatar({ name, url }: { name: string; url?: string }) {
   if (url) {
     // eslint-disable-next-line @next/next/no-img-element
-    return <img src={imgTransform(url, { width: 128 })} alt={name} className="h-10 w-10 rounded-full object-cover" />;
+    return <img src={url} alt={name} className="h-10 w-10 rounded-full object-cover" />;
   }
   return (
     <span className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-base font-bold text-white">

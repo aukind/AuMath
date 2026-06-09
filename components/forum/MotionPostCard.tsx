@@ -15,7 +15,6 @@ import {
   metaLayoutId,
   SHARED_SPRING,
 } from '@/components/motion/SharedCardProps';
-import { imgTransform } from '@/lib/supabase/imageTransform';
 
 function initials(name: string): string {
   return name.slice(0, 1).toUpperCase();
@@ -26,7 +25,7 @@ export function PostAvatar({ name, url, role }: { name: string; url?: string; ro
   return (
     <div className="relative inline-flex items-center justify-center shrink-0">
       <div className="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-500 text-sm font-bold text-white overflow-hidden shadow-sm ring-1 ring-zinc-200 dark:ring-zinc-800">
-        {url ? <img src={imgTransform(url, { width: 128 })} alt={name} className="h-full w-full object-cover" /> : initials(name)}
+        {url ? <img src={url} alt={name} className="h-full w-full object-cover" /> : initials(name)}
       </div>
       {isSpecial && (
         <div className="pointer-events-none absolute -inset-[9px] z-20">
