@@ -17,7 +17,10 @@ import { isAdminUser } from '@/lib/utils/auth';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const EMBED_MODEL = 'text-embedding-004'; // 768 维，稳定且免费额度充足
+// gemini-embedding-001：当前 GA 的嵌入模型（text-embedding-004 在该 API 版本已 404）。
+// 默认 3072 维，这里用 outputDimensionality=768 对齐 questions.embedding vector(768)。
+const EMBED_MODEL = 'gemini-embedding-001';
+const EMBED_DIMS = 768;
 const EMBED_TIMEOUT_MS = 20_000;
 
 /** 入库文本：正文 + 出处，截断到模型可接受长度。保留公式语义即可，不做激进清洗。 */
@@ -42,7 +45,7 @@ export async function embedText(
     const res = await ai.models.embedContent({
       model: EMBED_MODEL,
       contents: text,
-      config: { taskType },
+      config: { taskType, outputDimensionality: EMBED_DIMS },
     });
     const values = res.embeddings?.[0]?.values;
     return Array.isArray(values) && values.length ? values : null;
