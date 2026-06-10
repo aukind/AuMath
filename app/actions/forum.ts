@@ -429,6 +429,16 @@ async function toggleForumUpvoteImpl(commentId: string): Promise<{ upvotes: numb
   const sb = supabase as any;
   const uid = await requireUserId();
 
+  // 迁移 029 后：单次往返 RPC（切换+通知+计数一把完成，替代下方 4 次串行查询）。
+  // RPC 未建（迁移没跑）或异常 → 回退老路径，行为不变。
+  const { data: rpcData, error: rpcErr } = await sb.rpc('toggle_comment_vote', { p_comment_id: commentId });
+  if (!rpcErr && rpcData) {
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    if (row && typeof row.upvotes === 'number') {
+      return { upvotes: row.upvotes, upvoted: !!row.upvoted };
+    }
+  }
+
   const { data: existing } = await sb
     .from('forum_comment_votes')
     .select('comment_id')
@@ -476,6 +486,16 @@ async function toggleForumPostUpvoteImpl(postId: string): Promise<{ upvotes: num
   const supabase = await createClient();
   const sb = supabase as any;
   const uid = await requireUserId();
+
+  // 迁移 029 后：单次往返 RPC；未建/异常回退老路径（同 toggle_comment_vote）。
+  const { data: rpcData, error: rpcErr } = await sb.rpc('toggle_post_vote', { p_post_id: postId });
+  if (!rpcErr && rpcData) {
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    if (row && typeof row.upvotes === 'number') {
+      revalidatePath(`/forum/${postId}`);
+      return { upvotes: row.upvotes, upvoted: !!row.upvoted };
+    }
+  }
 
   const { data: existing } = await sb
     .from('forum_post_votes')

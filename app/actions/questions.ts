@@ -402,22 +402,35 @@ const getAllPapersCached = unstable_cache(
     return all;
   }
 
-  const [papersResult, pqRows] = await Promise.all([
+  // 题数统计：迁移 029 后用库内 GROUP BY 一把返回（paper_question_counts RPC）；
+  // RPC 未建/异常 → 回退分页扫全表的老路径。
+  async function fetchCountMap(): Promise<Map<string, number>> {
+    const m = new Map<string, number>();
+    const { data, error } = await sb.rpc('paper_question_counts') as {
+      data: { paper_id: string; question_count: number }[] | null;
+      error: { message: string } | null;
+    };
+    if (!error && data) {
+      for (const row of data) m.set(row.paper_id, Number(row.question_count));
+      return m;
+    }
+    for (const pq of await fetchAllPaperQuestionIds()) {
+      m.set(pq.paper_id, (m.get(pq.paper_id) ?? 0) + 1);
+    }
+    return m;
+  }
+
+  const [papersResult, countMap] = await Promise.all([
     sb.from('papers')
       .select('*')
       .order('year', { ascending: false, nullsFirst: false })
       .order('created_at', { ascending: false }) as Promise<{ data: PaperRaw[] | null; error: { message: string } | null }>,
-    fetchAllPaperQuestionIds(),
+    fetchCountMap(),
   ]);
 
   if (papersResult.error) {
     console.error('[getPapers]', papersResult.error.message);
     return [];
-  }
-
-  const countMap = new Map<string, number>();
-  for (const pq of pqRows) {
-    countMap.set(pq.paper_id, (countMap.get(pq.paper_id) ?? 0) + 1);
   }
 
   return (papersResult.data ?? []).map(p => ({
