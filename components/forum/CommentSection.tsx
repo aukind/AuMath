@@ -96,7 +96,9 @@ export default function CommentSection({
       try {
         await mutate(
           async (cur: ForumComment[] = []) => {
-            const res = await submitForumReply(target, serializedJson);
+            const result = await submitForumReply(target, serializedJson);
+            if (!result.ok) throw new Error(result.error); // 触发 SWR 回滚，文案进 catch 的 toast
+            const res = result.data;
             if (res.kind === 'comment') return [...cur, res.data];
             return cur.map((c) =>
               c.id === res.data.parentId
@@ -131,7 +133,9 @@ export default function CommentSection({
     (commentId: string) => {
       mutate(
         async (cur: ForumComment[] = []) => {
-          const { upvotes, upvoted } = await toggleForumUpvote(commentId);
+          const result = await toggleForumUpvote(commentId);
+          if (!result.ok) throw new Error(result.error);
+          const { upvotes, upvoted } = result.data;
           return cur.map((c) => (c.id === commentId ? { ...c, upvotes, upvotedByMe: upvoted } : c));
         },
         {
@@ -145,7 +149,7 @@ export default function CommentSection({
           populateCache: true,
           revalidate: false,
         },
-      ).catch(() => toast.error('点赞失败，已回滚'));
+      ).catch((e) => toast.error(e instanceof Error && e.message ? e.message : '点赞失败，已回滚'));
     },
     [mutate],
   );
@@ -156,7 +160,8 @@ export default function CommentSection({
       if (action !== 'delete') return;
       mutate(
         async (cur: ForumComment[] = []) => {
-          await deleteForumComment(commentId);
+          const result = await deleteForumComment(commentId);
+          if (!result.ok) throw new Error(result.error);
           return cur.filter((c) => c.id !== commentId);
         },
         {
@@ -167,7 +172,7 @@ export default function CommentSection({
         },
       )
         .then(() => toast.success('已删除'))
-        .catch(() => toast.error('删除失败，可能无权限'));
+        .catch((e) => toast.error(e instanceof Error && e.message ? e.message : '删除失败，可能无权限'));
     },
     [mutate],
   );

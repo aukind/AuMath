@@ -132,16 +132,23 @@ export interface QuestionForEdit {
 }
 
 export async function getQuestionById(id: string): Promise<QuestionForEdit | null> {
+  // 鉴权：本函数走 service-role 绕过 RLS，必须先验明身份——
+  // 管理员可读任意题（编辑台）；普通用户只能读自己录入的题（私题编辑回显）。
+  const userClient = await createClient();
+  const { data: { user } } = await userClient.auth.getUser();
+  if (!user) return null;
+
   let supabase;
   try { supabase = createAdminClient(); } catch { return null; }
 
   const { data, error } = await supabase
     .from('questions')
-    .select('id, content, answer, analysis, question_type, difficulty, year, source, status, metadata, interactive_sandbox, question_topic_relations(topic_id)')
+    .select('id, content, answer, analysis, question_type, difficulty, year, source, status, metadata, interactive_sandbox, created_by, question_topic_relations(topic_id)')
     .eq('id', id)
     .maybeSingle();
 
   if (error || !data) return null;
+  if (!isAdminUser(user) && (data as any).created_by !== user.id) return null;
 
   return {
     id:                  data.id,
@@ -167,6 +174,12 @@ export async function updateQuestion(
   id: string,
   input: CreateQuestionInput,
 ): Promise<{ success: boolean; error?: string }> {
+  // 鉴权（与 deleteQuestion 同规则）：管理员可改任意题；普通用户只能改自己的私有题。
+  // 本函数走 service-role 绕过 RLS，这道校验是唯一的防线，绝不能省。
+  const userClient = await createClient();
+  const { data: { user } } = await userClient.auth.getUser();
+  if (!user) return { success: false, error: '请先登录' };
+
   let supabase;
   try { supabase = createAdminClient(); } catch {
     return { success: false, error: '服务端配置错误：缺少 SUPABASE_SERVICE_ROLE_KEY' };
@@ -174,7 +187,13 @@ export async function updateQuestion(
 
   // 合并 metadata：保留既有的 tags/exam_number 等键，只覆写 options。
   const { data: existing } = await supabase
-    .from('questions').select('metadata, is_public').eq('id', id).maybeSingle();
+    .from('questions').select('metadata, is_public, created_by').eq('id', id).maybeSingle();
+  if (!existing) return { success: false, error: '题目不存在' };
+  if (!isAdminUser(user)) {
+    if ((existing as any).is_public || (existing as any).created_by !== user.id) {
+      return { success: false, error: '无权限修改该题目' };
+    }
+  }
   const metadata: Record<string, unknown> = { ...((existing as any)?.metadata ?? {}) };
   const opts = cleanOptions(input.options);
   if (opts.length) {

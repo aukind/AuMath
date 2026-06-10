@@ -5,6 +5,8 @@
 // 裁剪与页面光栅化在客户端用 pdf.js/canvas 完成（见 lib/paper/figure-extract.ts）。
 
 import { GoogleGenAI } from '@google/genai';
+import { createClient } from '@/lib/supabase/server';
+import { isAdminUser } from '@/lib/utils/auth';
 
 /** Gemini 标准 bbox 顺序：[ymin, xmin, ymax, xmax]，归一化 0–1000。 */
 export interface PageFigureBox {
@@ -60,6 +62,11 @@ export async function detectFiguresOnPage(
   imageBase64: string,
   mimeType: string,
 ): Promise<DetectFiguresResult> {
+  // 鉴权：调 Gemini 视觉（按量计费），且只在管理员试卷录入工作流中使用 → 仅限管理员。
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!isAdminUser(user)) return { success: false, error: '需要管理员权限' };
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return { success: false, error: '服务端配置缺失：GEMINI_API_KEY 未设置' };
   if (!SUPPORTED_MIME.has(mimeType)) return { success: false, error: `不支持的图片类型：${mimeType}` };
