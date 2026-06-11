@@ -79,9 +79,13 @@ function ComposerInner({ currentUser, initialTag }: { currentUser?: SessionUser;
     const tags = tagsRaw.split(/[,，\s]+/).map((t) => t.trim()).filter(Boolean);
     startTransition(async () => {
       try {
-        const { id } = await createForumPost({ title, content, tags });
+        const res = await createForumPost({ title, content, tags });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
         toast.success('发布成功');
-        router.push(`/forum/${id}`);
+        router.push(`/forum/${res.data.id}`);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : '发帖失败，请重试');
       }

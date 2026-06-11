@@ -1,6 +1,7 @@
 'use server';
 
 import { GoogleGenAI } from '@google/genai';
+import { createClient } from '@/lib/supabase/server';
 
 export type ExtractLatexResult =
   | { success: true; markdown: string; rawModelOutput?: string }
@@ -64,6 +65,14 @@ export async function extractLatexFromImage(
   imageBase64: string,
   mimeType: string,
 ): Promise<ExtractLatexResult> {
+  // 鉴权：本 action 调 Gemini（按量计费），Server Action 即公开 POST 端点，
+  // 必须限制为登录用户（录题页 / 论坛编辑器都要求登录后才可见此按钮）。
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return { success: false, error: '请先登录后再使用截图转 LaTeX' };
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return { success: false, error: '服务端配置缺失：GEMINI_API_KEY 未设置' };

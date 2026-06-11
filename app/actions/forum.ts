@@ -161,6 +161,14 @@ export async function getForumPosts(): Promise<ForumPost[]> {
 // ── 发布新主贴，返回新帖 id（供客户端跳转）──────────────────
 export async function createForumPost(input: {
   title: string;
+  content: string;
+  tags: string[];
+}): Promise<ForumResult<{ id: string }>> {
+  return asResult(() => createForumPostImpl(input));
+}
+
+async function createForumPostImpl(input: {
+  title: string;
   content: string; // 序列化的 Lexical JSON
   tags: string[];
 }): Promise<{ id: string }> {
@@ -171,6 +179,9 @@ export async function createForumPost(input: {
   const title = input.title.trim();
   if (title.length < 1 || title.length > 200) {
     throw new Error('标题需在 1–200 字之间');
+  }
+  if (!input.content?.trim() || input.content.length > MAX_CONTENT_BYTES) {
+    throw new Error('正文为空或超出长度上限');
   }
 
   const tags = input.tags
@@ -285,6 +296,27 @@ export async function incrementForumView(postId: string): Promise<void> {
   await (supabase as any).rpc('increment_post_view', { p_post_id: postId });
 }
 
+// 帖子/回复正文（序列化 Lexical JSON）长度上限：正常长帖含若干公式 ~几十 KB，
+// 200K 字符留足余量，挡住脚本灌入 MB 级垃圾数据。
+const MAX_CONTENT_BYTES = 200_000;
+
+// ── 写操作统一返回判别联合 ───────────────────────────────────
+// 生产环境 Next.js 会把 Server Action 抛出的 Error 文案脱敏成通用报错，
+// 「请先登录」这类业务提示根本到不了用户眼前。所有 mutation 一律经 asResult
+// 把内部 throw 转成可序列化的 { ok, error }，客户端拿到真实文案后自行决定
+// toast / 本地重抛（重抛用于触发 SWR 乐观回滚）。
+export type ForumResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string };
+
+async function asResult<T>(fn: () => Promise<T>): Promise<ForumResult<T>> {
+  try {
+    return { ok: true, data: await fn() };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '操作失败，请稍后再试' };
+  }
+}
+
 async function requireUserId(): Promise<string> {
   const supabase = await createClient();
   const {
@@ -295,13 +327,28 @@ async function requireUserId(): Promise<string> {
 }
 
 // ── 发表回复（一级 / 楼中楼）统一入口 ───────────────────────
+export type ForumReplyData =
+  | { kind: 'comment'; data: ForumComment }
+  | { kind: 'sub'; data: SubComment };
+
 export async function submitForumReply(
   target: ReplyTarget,
   content: string,
-): Promise<{ kind: 'comment'; data: ForumComment } | { kind: 'sub'; data: SubComment }> {
+): Promise<ForumResult<ForumReplyData>> {
+  return asResult(() => submitForumReplyImpl(target, content));
+}
+
+async function submitForumReplyImpl(
+  target: ReplyTarget,
+  content: string,
+): Promise<ForumReplyData> {
   const supabase = await createClient();
   const sb = supabase as any;
   const uid = await requireUserId();
+
+  if (!content?.trim() || content.length > MAX_CONTENT_BYTES) {
+    throw new Error('回复内容为空或超出长度上限');
+  }
 
   if (target.kind === 'post') {
     const { data, error } = await sb
@@ -373,10 +420,24 @@ export async function submitForumReply(
 }
 
 // ── 评论点赞 / 取消点赞，返回最新计数 + 切换后状态 ───────────
-export async function toggleForumUpvote(commentId: string): Promise<{ upvotes: number; upvoted: boolean }> {
+export async function toggleForumUpvote(commentId: string): Promise<ForumResult<{ upvotes: number; upvoted: boolean }>> {
+  return asResult(() => toggleForumUpvoteImpl(commentId));
+}
+
+async function toggleForumUpvoteImpl(commentId: string): Promise<{ upvotes: number; upvoted: boolean }> {
   const supabase = await createClient();
   const sb = supabase as any;
   const uid = await requireUserId();
+
+  // 迁移 029 后：单次往返 RPC（切换+通知+计数一把完成，替代下方 4 次串行查询）。
+  // RPC 未建（迁移没跑）或异常 → 回退老路径，行为不变。
+  const { data: rpcData, error: rpcErr } = await sb.rpc('toggle_comment_vote', { p_comment_id: commentId });
+  if (!rpcErr && rpcData) {
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    if (row && typeof row.upvotes === 'number') {
+      return { upvotes: row.upvotes, upvoted: !!row.upvoted };
+    }
+  }
 
   const { data: existing } = await sb
     .from('forum_comment_votes')
@@ -417,10 +478,24 @@ export async function toggleForumUpvote(commentId: string): Promise<{ upvotes: n
 }
 
 // ── 帖子点赞 / 取消点赞（公开计数，仿评论点赞）──────────────
-export async function toggleForumPostUpvote(postId: string): Promise<{ upvotes: number; upvoted: boolean }> {
+export async function toggleForumPostUpvote(postId: string): Promise<ForumResult<{ upvotes: number; upvoted: boolean }>> {
+  return asResult(() => toggleForumPostUpvoteImpl(postId));
+}
+
+async function toggleForumPostUpvoteImpl(postId: string): Promise<{ upvotes: number; upvoted: boolean }> {
   const supabase = await createClient();
   const sb = supabase as any;
   const uid = await requireUserId();
+
+  // 迁移 029 后：单次往返 RPC；未建/异常回退老路径（同 toggle_comment_vote）。
+  const { data: rpcData, error: rpcErr } = await sb.rpc('toggle_post_vote', { p_post_id: postId });
+  if (!rpcErr && rpcData) {
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    if (row && typeof row.upvotes === 'number') {
+      revalidatePath(`/forum/${postId}`);
+      return { upvotes: row.upvotes, upvoted: !!row.upvoted };
+    }
+  }
 
   const { data: existing } = await sb
     .from('forum_post_votes')
@@ -452,7 +527,11 @@ export async function toggleForumPostUpvote(postId: string): Promise<{ upvotes: 
 }
 
 // ── 帖子收藏 / 取消收藏（私有书签，仿题目收藏）──────────────
-export async function toggleForumPostFavorite(postId: string): Promise<{ favorited: boolean }> {
+export async function toggleForumPostFavorite(postId: string): Promise<ForumResult<{ favorited: boolean }>> {
+  return asResult(() => toggleForumPostFavoriteImpl(postId));
+}
+
+async function toggleForumPostFavoriteImpl(postId: string): Promise<{ favorited: boolean }> {
   const supabase = await createClient();
   const sb = supabase as any;
   const uid = await requireUserId();
@@ -475,35 +554,44 @@ export async function toggleForumPostFavorite(postId: string): Promise<{ favorit
 }
 
 // ── 删除评论（作者或管理员；RLS 最终把关）──────────────────
-export async function deleteForumComment(commentId: string): Promise<void> {
-  const supabase = await createClient();
-  const sb = supabase as any;
-  await requireUserId();
-  const { error } = await sb.from('forum_comments').delete().eq('id', commentId);
-  if (error) throw new Error('删除失败，可能无权限');
+export async function deleteForumComment(commentId: string): Promise<ForumResult<null>> {
+  return asResult(async () => {
+    const supabase = await createClient();
+    const sb = supabase as any;
+    await requireUserId();
+    const { error } = await sb.from('forum_comments').delete().eq('id', commentId);
+    if (error) throw new Error('删除失败，可能无权限');
+    return null;
+  });
 }
 
 // ── 管理员：置顶 / 加精 ─────────────────────────────────────
 export async function setForumPostFlags(
   postId: string,
   flags: { isPinned?: boolean; isFeatured?: boolean },
-): Promise<void> {
-  const supabase = await createClient();
-  const sb = supabase as any;
-  await requireUserId();
-  const patch: Record<string, boolean> = {};
-  if (flags.isPinned !== undefined) patch.is_pinned = flags.isPinned;
-  if (flags.isFeatured !== undefined) patch.is_featured = flags.isFeatured;
-  const { error } = await sb.from('forum_posts').update(patch).eq('id', postId);
-  if (error) throw new Error('操作失败，需要管理员权限');
-  revalidatePath(`/forum/${postId}`);
+): Promise<ForumResult<null>> {
+  return asResult(async () => {
+    const supabase = await createClient();
+    const sb = supabase as any;
+    await requireUserId();
+    const patch: Record<string, boolean> = {};
+    if (flags.isPinned !== undefined) patch.is_pinned = flags.isPinned;
+    if (flags.isFeatured !== undefined) patch.is_featured = flags.isFeatured;
+    const { error } = await sb.from('forum_posts').update(patch).eq('id', postId);
+    if (error) throw new Error('操作失败，需要管理员权限');
+    revalidatePath(`/forum/${postId}`);
+    return null;
+  });
 }
 
 // ── 删帖（作者或管理员）─────────────────────────────────────
-export async function deleteForumPost(postId: string): Promise<void> {
-  const supabase = await createClient();
-  const sb = supabase as any;
-  await requireUserId();
-  const { error } = await sb.from('forum_posts').delete().eq('id', postId);
-  if (error) throw new Error('删除失败，需要作者或管理员权限');
+export async function deleteForumPost(postId: string): Promise<ForumResult<null>> {
+  return asResult(async () => {
+    const supabase = await createClient();
+    const sb = supabase as any;
+    await requireUserId();
+    const { error } = await sb.from('forum_posts').delete().eq('id', postId);
+    if (error) throw new Error('删除失败，需要作者或管理员权限');
+    return null;
+  });
 }

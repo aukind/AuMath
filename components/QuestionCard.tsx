@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { memo, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { toast } from 'sonner';
 import { ChevronDown, GripVertical, Layers, Pencil, Sparkles, Star, Trash2, X } from 'lucide-react';
 import MathRenderer from '@/components/MathRenderer';
 import { getSimilarQuestions, type SimilarQuestion } from '@/app/actions/embeddings';
@@ -28,7 +29,7 @@ interface QuestionCardProps {
   initialMyRating?: number | null;
 }
 
-export default function QuestionCard({ question, isAdmin = false, canModify, onDelete, isDragging = false, dragHandleProps, isLoggedIn = false, initialFavorited = false, initialErrored = false, initialMyRating = null }: QuestionCardProps) {
+function QuestionCard({ question, isAdmin = false, canModify, onDelete, isDragging = false, dragHandleProps, isLoggedIn = false, initialFavorited = false, initialErrored = false, initialMyRating = null }: QuestionCardProps) {
   const effectiveCanModify = canModify ?? isAdmin;
   const [solutionOpen, setSolutionOpen] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -36,7 +37,18 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
   const [favorited, setFavorited] = useState(initialFavorited);
   const [errored, setErrored] = useState(initialErrored);
   const [gradedCorrect, setGradedCorrect] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  // 三个学习动作各自独立的在途标记：点收藏不应禁用「我做错了」「我做对了」
+  const [pendingAction, setPendingAction] = useState<null | 'fav' | 'err' | 'correct'>(null);
+
+  // 删除确认弹窗：Escape 关闭（与点击遮罩等价）
+  useEffect(() => {
+    if (!showConfirm) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowConfirm(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showConfirm]);
 
   // 相似题（pgvector 语义近邻）—— 首次展开才拉取，避免列表页 N 次请求。
   const [similarOpen, setSimilarOpen] = useState(false);
@@ -63,32 +75,56 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
     }
   }
 
+  // 三个学习动作统一「乐观更新 + 失败回滚 + toast」：UI 零延迟响应，
+  // 服务端失败时恢复原状并明确告知，绝不静默吞掉。
   function handleToggleFavorite(e: React.MouseEvent) {
     e.preventDefault();
-    startTransition(async () => {
-      const result = await toggleFavorite(question.id);
-      if (result.success) setFavorited(result.favorited);
-    });
+    if (pendingAction === 'fav') return;
+    const prev = favorited;
+    setFavorited(!prev); // 乐观
+    setPendingAction('fav');
+    toggleFavorite(question.id)
+      .then((result) => {
+        if (!result.success) throw new Error(result.error);
+        setFavorited(result.favorited); // 以服务端为准（防双端漂移）
+      })
+      .catch(() => {
+        setFavorited(prev);
+        toast.error(prev ? '取消收藏失败，请重试' : '收藏失败，请重试');
+      })
+      .finally(() => setPendingAction(null));
   }
 
   function handleToggleError() {
-    startTransition(async () => {
-      if (errored) {
-        const result = await removeError(question.id);
-        if (result.success) setErrored(false);
-      } else {
-        const result = await markError(question.id);
-        if (result.success) setErrored(true);
-      }
-    });
+    if (pendingAction === 'err') return;
+    const prev = errored;
+    setErrored(!prev); // 乐观
+    setPendingAction('err');
+    (prev ? removeError(question.id) : markError(question.id))
+      .then((result) => {
+        if (!result.success) throw new Error(result.error);
+      })
+      .catch(() => {
+        setErrored(prev);
+        toast.error(prev ? '移出错题本失败，请重试' : '记入错题本失败，请重试');
+      })
+      .finally(() => setPendingAction(null));
   }
 
   // 自评「我做对了」—— 知识星图绿色(已掌握)节点的数据来源。
   function handleMarkCorrect() {
-    startTransition(async () => {
-      const result = await recordAttempt(question.id, true);
-      if (result.success) setGradedCorrect(true);
-    });
+    if (pendingAction === 'correct' || gradedCorrect) return;
+    setGradedCorrect(true); // 乐观
+    setPendingAction('correct');
+    recordAttempt(question.id, true)
+      .then((result) => {
+        if (!result.success) throw new Error(result.error);
+      })
+      .catch(() => {
+        setGradedCorrect(false);
+        toast.error('记录失败，请重试');
+      })
+      .finally(() => setPendingAction(null));
   }
 
   const primaryTopic = (question.question_topic_relations.find(r => r.is_primary) ?? question.question_topic_relations[0])?.topics;
@@ -143,14 +179,13 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
             <Magnetic intensity={0.3} range={6}>
               <SquishyButton
                 onClick={handleToggleFavorite}
-                disabled={isPending}
+                aria-pressed={favorited}
                 title={favorited ? '取消收藏' : '收藏此题'}
                 className={[
                   'flex items-center justify-center w-6 h-6 rounded-md transition-colors shrink-0',
                   favorited
                     ? 'text-amber-400 hover:text-amber-500'
                     : 'text-zinc-300 dark:text-zinc-600 hover:text-amber-400 dark:hover:text-amber-500',
-                  isPending && 'opacity-50 cursor-not-allowed',
                 ].join(' ')}
               >
                 <Star size={14} fill={favorited ? 'currentColor' : 'none'} />
@@ -246,14 +281,13 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
           {isLoggedIn && (
             <SquishyButton
               onClick={handleToggleError}
-              disabled={isPending}
+              aria-pressed={errored}
               title={errored ? '点击从错题本移除' : '标记为错题'}
               className={[
                 'flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors',
                 errored
                   ? 'border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/30 hover:border-red-300 dark:hover:border-red-700 hover:text-red-500 dark:hover:text-red-400 hover:bg-transparent'
                   : 'border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-red-300 dark:hover:border-red-700 hover:text-red-500 dark:hover:text-red-400',
-                isPending && 'opacity-50 cursor-not-allowed',
               ].join(' ')}
             >
               {errored ? '✓ 已记录' : '我做错了'}
@@ -262,14 +296,13 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
           {isLoggedIn && (
             <SquishyButton
               onClick={handleMarkCorrect}
-              disabled={isPending}
+              aria-pressed={gradedCorrect}
               title="标记为已掌握（计入知识星图）"
               className={[
                 'flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors',
                 gradedCorrect
                   ? 'border-emerald-200 dark:border-emerald-800 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/30'
                   : 'border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-emerald-300 dark:hover:border-emerald-700 hover:text-emerald-600 dark:hover:text-emerald-400',
-                isPending && 'opacity-50 cursor-not-allowed',
               ].join(' ')}
             >
               {gradedCorrect ? '✓ 已掌握' : '我做对了'}
@@ -338,7 +371,12 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
 
       {/* Delete confirm modal */}
       {showConfirm && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={`delete-confirm-${question.id}`}
+        >
           <div
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() => setShowConfirm(false)}
@@ -346,6 +384,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
           <div className="relative bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl w-full max-w-xs p-6 border border-zinc-200 dark:border-zinc-800">
             <button
               onClick={() => setShowConfirm(false)}
+              aria-label="关闭"
               className="absolute top-4 right-4 p-1 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
             >
               <X size={16} />
@@ -353,7 +392,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
             <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-red-50 dark:bg-red-950/40 mb-4 mx-auto">
               <Trash2 size={22} className="text-red-600 dark:text-red-400" />
             </div>
-            <h2 className="text-center font-semibold text-zinc-900 dark:text-zinc-100 mb-1">
+            <h2 id={`delete-confirm-${question.id}`} className="text-center font-semibold text-zinc-900 dark:text-zinc-100 mb-1">
               确认删除
             </h2>
             <p className="text-center text-sm text-zinc-500 dark:text-zinc-400 mb-6">
@@ -362,6 +401,7 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
             <div className="flex gap-2.5">
               <button
                 onClick={() => setShowConfirm(false)}
+                autoFocus
                 className="flex-1 py-2.5 rounded-xl text-sm font-medium border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
               >
                 取消
@@ -380,6 +420,11 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
     </>
   );
 }
+
+// memo：列表页搜索框每个 keystroke 触发父组件重渲染，没有 memo 时所有题卡的
+// react-markdown + KaTeX 全管线会整体重跑（几十题的卷子打字明显卡顿）。
+// props 里 question/初值都来自服务端快照、引用稳定，浅比较即可拦截。
+export default memo(QuestionCard);
 
 function VariantButton({ count }: { count: number }) {
   return (
