@@ -162,7 +162,7 @@ export async function getQuestionById(id: string): Promise<QuestionForEdit | nul
     .maybeSingle();
 
   if (error || !data) return null;
-  if (!isAdminUser(user) && (data as any).created_by !== user.id) return null;
+  if (!isAdminUser(user) && data.created_by !== user.id) return null;
 
   const metadata = (data.metadata ?? {}) as QuestionMetadata;
   return {
