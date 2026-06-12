@@ -17,6 +17,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from 'react';
@@ -39,25 +40,21 @@ function MathComponent({ equation, inline, nodeKey }: MathComponentProps) {
   const [editor] = useLexicalComposerContext();
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState(equation);
-  const [parseError, setParseError] = useState<string | null>(null);
   const renderRef = useRef<HTMLSpanElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Keep local draft in sync if the node's equation is mutated from elsewhere
-  // (e.g. collaborative edits, undo/redo).
-  useEffect(() => {
-    if (!isEditing) setDraft(equation);
-  }, [equation, isEditing]);
+  // (e.g. collaborative edits, undo/redo). Render-time adjustment instead of
+  // an effect so the corrected draft is visible within the same commit.
+  if (!isEditing && draft !== equation) {
+    setDraft(equation);
+  }
 
-  // Render KaTeX synchronously after layout so the resulting node measures
-  // correctly inside Lexical's selection rects.
-  useLayoutEffect(() => {
-    if (isEditing) return;
-    const host = renderRef.current;
-    if (!host) return;
-
+  // Parse during render so parseError is derived state, not an effect echo.
+  // renderToString is exactly what katex.render does before innerHTML.
+  const rendered = useMemo(() => {
     try {
-      katex.render(equation, host, {
+      const html = katex.renderToString(equation, {
         displayMode: !inline,
         throwOnError: true,
         // SECURITY: hard-disable \href and similar trust-gated macros so the
@@ -68,14 +65,27 @@ function MathComponent({ equation, inline, nodeKey }: MathComponentProps) {
         output: 'html',
         macros: {},
       });
-      setParseError(null);
+      return { html, error: null as string | null };
     } catch (err) {
-      // Wipe partial DOM left behind by KaTeX before signaling the error so
-      // the React-managed fallback below is the only visible artifact.
-      host.innerHTML = '';
-      setParseError(getKatexErrorMessage(err));
+      return { html: '', error: getKatexErrorMessage(err) };
     }
-  }, [equation, inline, isEditing]);
+  }, [equation, inline]);
+  const parseError = rendered.error;
+
+  // Write KaTeX markup synchronously after layout so the resulting node
+  // measures correctly inside Lexical's selection rects. On parse error wipe
+  // any stale markup and fall back to the raw LaTeX source text. The host's
+  // content is fully owned by this effect; React renders it childless.
+  useLayoutEffect(() => {
+    if (isEditing) return;
+    const host = renderRef.current;
+    if (!host) return;
+    if (rendered.error === null) {
+      host.innerHTML = rendered.html;
+    } else {
+      host.textContent = equation;
+    }
+  }, [rendered, equation, isEditing]);
 
   // Auto-focus + select the textarea as soon as we flip into edit mode.
   useLayoutEffect(() => {
@@ -207,13 +217,10 @@ function MathComponent({ equation, inline, nodeKey }: MathComponentProps) {
             ? 'math-node__broken text-red-500'
             : 'math-node__rendered cursor-pointer'
         }
-        // KaTeX writes the markup itself; React must not stomp it.
+        // KaTeX (or the error fallback) writes the content via the layout
+        // effect above; React must not stomp it.
         suppressHydrationWarning
-      >
-        {/* Fallback text shown only if KaTeX has not yet written into the host
-            (e.g. SSR snapshot, before useLayoutEffect runs). */}
-        {parseError ? equation : null}
-      </span>
+      />
       {parseError ? (
         <span
           role="alert"

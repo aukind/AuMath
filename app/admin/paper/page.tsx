@@ -131,18 +131,22 @@ export default function PaperPage() {
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(PAPER_VIEW_KEY);
-      if (raw) {
-        const { questions: qs, meta: m } = JSON.parse(raw) as {
-          questions: ExtractedQuestion[];
-          meta: PublishBatchMeta;
-        };
-        if (Array.isArray(qs)) setQuestions(qs);
-        if (m) setMeta(m);
-      }
-    } catch {}
-    setLoaded(true);
+    // sessionStorage 只在挂载后可读；放进微任务回调，避免 effect 体内同步 setState
+    // 触发级联渲染（react-hooks/set-state-in-effect）。
+    queueMicrotask(() => {
+      try {
+        const raw = sessionStorage.getItem(PAPER_VIEW_KEY);
+        if (raw) {
+          const { questions: qs, meta: m } = JSON.parse(raw) as {
+            questions: ExtractedQuestion[];
+            meta: PublishBatchMeta;
+          };
+          if (Array.isArray(qs)) setQuestions(qs);
+          if (m) setMeta(m);
+        }
+      } catch {}
+      setLoaded(true);
+    });
   }, []);
 
   // 按选择题 / 解答题分组，组内按原序
@@ -168,7 +172,7 @@ export default function PaperPage() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 text-center px-6">
         <p className="text-xl text-zinc-400">没有试卷数据</p>
-        <p className="text-sm text-zinc-400">请先在录题工作台发布题目后，再点击"查看试卷"</p>
+        <p className="text-sm text-zinc-400">请先在录题工作台发布题目后，再点击&quot;查看试卷&quot;</p>
         <a
           href="/admin/paper-upload"
           className="mt-2 text-sm text-blue-600 hover:underline"

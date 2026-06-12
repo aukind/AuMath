@@ -2,13 +2,15 @@
 
 import { useTheme } from 'next-themes';
 import { Sun, Moon } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
+
+// 水合检测：服务端快照恒 false，客户端快照恒 true，挂载后 React 自动补一次渲染。
+// 等价于旧的 useEffect(() => setMounted(true), []) 模式，但不在 effect 里同步 setState。
+const emptySubscribe = () => () => {};
 
 export default function ThemeToggle() {
-  const { theme, setTheme, resolvedTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
+  const { setTheme, resolvedTheme } = useTheme();
+  const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
 
   if (!mounted) {
     return <div className="w-8 h-8 rounded-lg" />;

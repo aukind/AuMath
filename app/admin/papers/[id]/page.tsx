@@ -45,7 +45,7 @@ export default async function PaperDetailPage({
                 {paper.year && `${paper.year} 年 · `}
                 {paper.type === 'real' ? '真题' : '模拟'} ·{' '}
                 共 {questions.length} 题 ·{' '}
-                点击右侧"编辑"或"删除"按钮校对每道题
+                点击右侧&quot;编辑&quot;或&quot;删除&quot;按钮校对每道题
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">

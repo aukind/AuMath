@@ -29,28 +29,28 @@ const DEFAULT_CONTROLS_TEMPLATE = `[
 
 // Splice `snippet` into the textarea at its current selection range and place
 // the caret right after the insertion so the next keystroke continues editing.
-function makeInserter(
+// Only ever called from event handlers, so reading ref.current here is safe.
+function insertSnippet(
   ref: RefObject<HTMLTextAreaElement | null>,
   value: string,
   setValue: (v: string) => void,
+  snippet: string,
 ) {
-  return (snippet: string) => {
-    const el = ref.current;
-    if (!el) {
-      setValue(value + snippet);
-      return;
-    }
-    const start = el.selectionStart ?? value.length;
-    const end = el.selectionEnd ?? value.length;
-    const next = value.slice(0, start) + snippet + value.slice(end);
-    setValue(next);
-    // Restore focus + caret after React commits the new value.
-    requestAnimationFrame(() => {
-      el.focus();
-      const caret = start + snippet.length;
-      el.setSelectionRange(caret, caret);
-    });
-  };
+  const el = ref.current;
+  if (!el) {
+    setValue(value + snippet);
+    return;
+  }
+  const start = el.selectionStart ?? value.length;
+  const end = el.selectionEnd ?? value.length;
+  const next = value.slice(0, start) + snippet + value.slice(end);
+  setValue(next);
+  // Restore focus + caret after React commits the new value.
+  requestAnimationFrame(() => {
+    el.focus();
+    const caret = start + snippet.length;
+    el.setSelectionRange(caret, caret);
+  });
 }
 
 const QUESTION_TYPES: { value: QuestionType; label: string }[] = [
@@ -244,9 +244,9 @@ export default function AddQuestionForm({ topics, initialData, isAdmin = false }
   const contentRef  = useRef<HTMLTextAreaElement | null>(null);
   const answerRef   = useRef<HTMLTextAreaElement | null>(null);
   const analysisRef = useRef<HTMLTextAreaElement | null>(null);
-  const insertContent  = makeInserter(contentRef,  content,  setContent);
-  const insertAnswer   = makeInserter(answerRef,   answer,   setAnswer);
-  const insertAnalysis = makeInserter(analysisRef, analysis, setAnalysis);
+  const insertContent  = (s: string) => insertSnippet(contentRef,  content,  setContent,  s);
+  const insertAnswer   = (s: string) => insertSnippet(answerRef,   answer,   setAnswer,   s);
+  const insertAnalysis = (s: string) => insertSnippet(analysisRef, analysis, setAnalysis, s);
 
   const toggleTopic = useCallback((id: string) => {
     setTopicIds(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]);

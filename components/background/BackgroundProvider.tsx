@@ -15,7 +15,7 @@
  */
 
 import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { useTheme } from 'next-themes';
 
 // three 较大，按需懒加载；SSR 关闭（WebGL 仅在浏览器可用）
@@ -39,21 +39,27 @@ const STATIC_GRADIENT: Record<'light' | 'dark', string> = {
   ].join(','),
 };
 
+// ── 外部系统订阅（useSyncExternalStore，替代 effect 里同步 setState）──────────
+// 水合检测：服务端快照恒 false，客户端快照恒 true，挂载后 React 自动补一次渲染。
+const emptySubscribe = () => () => {};
+
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+function subscribeReducedMotion(onChange: () => void) {
+  const mq = window.matchMedia(REDUCED_MOTION_QUERY);
+  mq.addEventListener('change', onChange);
+  return () => mq.removeEventListener('change', onChange);
+}
+
 export default function BackgroundProvider() {
   const { resolvedTheme } = useTheme();
   const theme: 'light' | 'dark' = resolvedTheme === 'dark' ? 'dark' : 'light';
 
-  const [mounted, setMounted] = useState(false);
-  const [reduced, setReduced] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    setReduced(mq.matches);
-    const onChange = (e: MediaQueryListEvent) => setReduced(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
+  const mounted = useSyncExternalStore(emptySubscribe, () => true, () => false);
+  const reduced = useSyncExternalStore(
+    subscribeReducedMotion,
+    () => window.matchMedia(REDUCED_MOTION_QUERY).matches,
+    () => false,
+  );
 
   // 水合前不渲染：body 的 var(--background) 已铺满正确主题底色，无空白/CLS，
   // 也避免 resolvedTheme 未定时的亮/暗错配闪烁。

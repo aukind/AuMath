@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // wasm-bindgen 生成的胶水代码（latex-normalizer），不手改、不参与 lint。
+    "lib/wasm/**",
+    "public/wasm/**",
   ]),
 ]);
 
