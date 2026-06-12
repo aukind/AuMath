@@ -105,6 +105,8 @@ export interface TopicRow {
   parent_id: string | null;
   level: number;
   order_index: number;
+  /** 管理端自定义排序（迁移后新增列），空则回退 order_index */
+  sort_order?: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -169,33 +171,9 @@ export type QuestionTopicRelationInsert = Omit<QuestionTopicRelationRow, 'create
 export type TopicUpdate = Partial<TopicInsert>;
 export type QuestionUpdate = Partial<QuestionInsert>;
 
-// ── Supabase 数据库类型（供 createClient<Database> 泛型使用） ─
+// ── Supabase 数据库类型（自动生成，供 createClient<Database> 泛型使用） ─
 
-export interface Database {
-  public: {
-    Tables: {
-      topics: {
-        Row:    TopicRow;
-        Insert: TopicInsert;
-        Update: TopicUpdate;
-      };
-      questions: {
-        Row:    QuestionRow;
-        Insert: QuestionInsert;
-        Update: QuestionUpdate;
-      };
-      question_topic_relations: {
-        Row:    QuestionTopicRelationRow;
-        Insert: QuestionTopicRelationInsert;
-        Update: Partial<QuestionTopicRelationInsert>;
-      };
-    };
-    Enums: {
-      question_type:   QuestionType;
-      question_status: QuestionStatus;
-    };
-  };
-}
+export type { Database } from '@/types/supabase';
 
 // ── 联合查询类型（Server Action 返回值常用） ─────────────────
 

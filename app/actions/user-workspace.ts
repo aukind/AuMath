@@ -14,8 +14,7 @@ export async function toggleFavorite(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, favorited: false, error: '未登录' };
 
-  const sb = supabase as any;
-  const { data: existing } = await sb
+  const { data: existing } = await supabase
     .from('user_favorites')
     .select('user_id')
     .eq('user_id', user.id)
@@ -23,7 +22,7 @@ export async function toggleFavorite(
     .maybeSingle();
 
   if (existing) {
-    const { error } = await sb
+    const { error } = await supabase
       .from('user_favorites')
       .delete()
       .eq('user_id', user.id)
@@ -31,7 +30,7 @@ export async function toggleFavorite(
     if (error) return { success: false, favorited: true, error: error.message };
     return { success: true, favorited: false };
   } else {
-    const { error } = await sb
+    const { error } = await supabase
       .from('user_favorites')
       .insert({ user_id: user.id, question_id: questionId });
     if (error) return { success: false, favorited: false, error: error.message };
@@ -48,8 +47,7 @@ export async function markError(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: '未登录' };
 
-  const sb = supabase as any;
-  const { data: existing } = await sb
+  const { data: existing } = await supabase
     .from('user_errors')
     .select('wrong_count')
     .eq('user_id', user.id)
@@ -57,14 +55,14 @@ export async function markError(
     .maybeSingle();
 
   if (existing) {
-    const { error } = await sb
+    const { error } = await supabase
       .from('user_errors')
       .update({ wrong_count: existing.wrong_count + 1, updated_at: new Date().toISOString() })
       .eq('user_id', user.id)
       .eq('question_id', questionId);
     if (error) return { success: false, error: error.message };
   } else {
-    const { error } = await sb
+    const { error } = await supabase
       .from('user_errors')
       .insert({ user_id: user.id, question_id: questionId, wrong_count: 1 });
     if (error) return { success: false, error: error.message };
@@ -82,7 +80,7 @@ export async function removeError(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: '未登录' };
 
-  const { error } = await (supabase as any)
+  const { error } = await supabase
     .from('user_errors')
     .delete()
     .eq('user_id', user.id)
@@ -101,11 +99,11 @@ export async function getErroredQuestionIds(): Promise<string[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data } = await (supabase as any)
+  const { data } = await supabase
     .from('user_errors')
     .select('question_id')
     .eq('user_id', user.id);
-  return (data ?? []).map((r: { question_id: string }) => r.question_id);
+  return (data ?? []).map((r) => r.question_id);
 }
 
 // ── Record view (fire-and-forget) ─────────────────────────────────────────────
@@ -115,7 +113,7 @@ export async function recordView(questionId: string): Promise<void> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return;
 
-  await (supabase as any)
+  await supabase
     .from('user_history')
     .upsert(
       { user_id: user.id, question_id: questionId, viewed_at: new Date().toISOString() },
@@ -134,8 +132,7 @@ export async function recordAttempt(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: '未登录' };
 
-  const sb = supabase as any;
-  const { data: existing } = await sb
+  const { data: existing } = await supabase
     .from('user_question_attempts')
     .select('attempt_count, correct_count')
     .eq('user_id', user.id)
@@ -151,7 +148,7 @@ export async function recordAttempt(
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await sb
+  const { error } = await supabase
     .from('user_question_attempts')
     .upsert(row, { onConflict: 'user_id,question_id' });
   if (error) return { success: false, error: error.message };
@@ -167,12 +164,12 @@ export async function getMasteredQuestionIds(): Promise<string[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data } = await (supabase as any)
+  const { data } = await supabase
     .from('user_question_attempts')
     .select('question_id')
     .eq('user_id', user.id)
     .gt('correct_count', 0);
-  return (data ?? []).map((r: { question_id: string }) => r.question_id);
+  return (data ?? []).map((r) => r.question_id);
 }
 
 // ── Get workspace counts ──────────────────────────────────────────────────────
@@ -182,11 +179,10 @@ export async function getWorkspaceCounts(): Promise<WorkspaceCounts> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { favorites: 0, errors: 0, history: 0 };
 
-  const sb = supabase as any;
   const [favRes, errRes, histRes] = await Promise.all([
-    sb.from('user_favorites').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
-    sb.from('user_errors').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
-    sb.from('user_history').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
+    supabase.from('user_favorites').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
+    supabase.from('user_errors').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
+    supabase.from('user_history').select('*', { count: 'exact', head: true }).eq('user_id', user.id),
   ]);
 
   return {
@@ -203,20 +199,16 @@ export async function getWorkspaceQuestions(type: WorkspaceType): Promise<Questi
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const sb = supabase as any;
-  const table    = type === 'favorites' ? 'user_favorites' : type === 'errors' ? 'user_errors' : 'user_history';
-  const orderCol = type === 'history' ? 'viewed_at' : 'created_at';
-
-  const { data: rows } = await sb
-    .from(table)
-    .select('question_id')
-    .eq('user_id', user.id)
-    .order(orderCol, { ascending: false })
-    .limit(100);
+  const { data: rows } =
+    type === 'history'
+      ? await supabase.from('user_history').select('question_id')
+          .eq('user_id', user.id).order('viewed_at', { ascending: false }).limit(100)
+      : await supabase.from(type === 'favorites' ? 'user_favorites' : 'user_errors').select('question_id')
+          .eq('user_id', user.id).order('created_at', { ascending: false }).limit(100);
 
   if (!rows?.length) return [];
 
-  const ids: string[] = rows.map((r: { question_id: string }) => r.question_id);
+  const ids = rows.map((r) => r.question_id);
 
   const { data: questions } = await supabase
     .from('questions')
@@ -226,7 +218,7 @@ export async function getWorkspaceQuestions(type: WorkspaceType): Promise<Questi
 
   // Preserve workspace ordering (DB IN clause doesn't guarantee order)
   const qMap = new Map(
-    ((questions ?? []) as QuestionWithTopics[]).map(q => [q.id, q]),
+    ((questions ?? []) as unknown as QuestionWithTopics[]).map(q => [q.id, q]),
   );
   return ids.map(id => qMap.get(id)).filter(Boolean) as QuestionWithTopics[];
 }
@@ -274,14 +266,10 @@ export async function createPersonalQuestion(
   });
   if (!res.success || !res.id) return { success: false, error: res.error ?? '创建失败' };
 
-  const sb = supabase as any;
-  const row =
+  const { error } =
     target === 'favorites'
-      ? { user_id: user.id, question_id: res.id }
-      : { user_id: user.id, question_id: res.id, wrong_count: 1 };
-  const { error } = await sb
-    .from(target === 'favorites' ? 'user_favorites' : 'user_errors')
-    .insert(row);
+      ? await supabase.from('user_favorites').insert({ user_id: user.id, question_id: res.id })
+      : await supabase.from('user_errors').insert({ user_id: user.id, question_id: res.id, wrong_count: 1 });
   if (error) return { success: false, error: error.message };
 
   revalidatePath('/');
@@ -295,9 +283,9 @@ export async function getFavoritedQuestionIds(): Promise<string[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data } = await (supabase as any)
+  const { data } = await supabase
     .from('user_favorites')
     .select('question_id')
     .eq('user_id', user.id);
-  return (data ?? []).map((r: { question_id: string }) => r.question_id);
+  return (data ?? []).map((r) => r.question_id);
 }

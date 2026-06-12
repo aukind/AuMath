@@ -7,10 +7,8 @@
 // 注意：一律用 `supabase.from(...)` 方法调用（this 已绑定）。切勿 `const from = supabase.from`
 // 再调用——会丢失 this 抛 "reading 'rest'"。详见 user-profile.ts 的教训。
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, type SupabaseServerClient } from '@/lib/supabase/server';
 import { notify } from '@/lib/notifications';
 
 export interface FollowCounts {
@@ -50,8 +48,7 @@ export async function toggleFollow(targetId: string): Promise<ToggleFollowResult
   if (user.id === targetId) return { ok: false, error: '不能关注自己' };
 
   try {
-    const sb = supabase as any;
-    const { data: existing } = await sb
+    const { data: existing } = await supabase
       .from('user_follows')
       .select('follower_id')
       .eq('follower_id', user.id)
@@ -59,28 +56,29 @@ export async function toggleFollow(targetId: string): Promise<ToggleFollowResult
       .maybeSingle();
 
     if (existing) {
-      const { error } = await sb
+      const { error } = await supabase
         .from('user_follows')
         .delete()
         .eq('follower_id', user.id)
         .eq('following_id', targetId);
       if (error) throw error;
     } else {
-      const { error } = await sb
+      const { error } = await supabase
         .from('user_follows')
         .insert({ follower_id: user.id, following_id: targetId });
       if (error) throw error;
       // 新关注 → 通知被关注者
-      await notify(sb, { recipientId: targetId, actorId: user.id, type: 'follow' });
+      await notify(supabase, { recipientId: targetId, actorId: user.id, type: 'follow' });
     }
 
     revalidatePath(`/u/${targetId}`);
     revalidatePath('/following');
     return { ok: true, following: !existing };
-  } catch (e: any) {
+  } catch (e) {
     // 表未建（迁移 011 未应用）会得到 PGRST205；给出明确可读提示而非通用报错。
+    const err = e as { code?: string; message?: string };
     const missingTable =
-      e?.code === 'PGRST205' || (typeof e?.message === 'string' && e.message.includes('user_follows'));
+      err?.code === 'PGRST205' || (typeof err?.message === 'string' && err.message.includes('user_follows'));
     return {
       ok: false,
       error: missingTable ? '关注功能尚未启用，请稍后再试' : '操作失败，请稍后再试',
@@ -96,8 +94,7 @@ export async function isFollowing(targetId: string): Promise<boolean> {
   } = await supabase.auth.getUser();
   if (!user || user.id === targetId) return false;
   try {
-    const sb = supabase as any;
-    const { data } = await sb
+    const { data } = await supabase
       .from('user_follows')
       .select('follower_id')
       .eq('follower_id', user.id)
@@ -112,11 +109,10 @@ export async function isFollowing(targetId: string): Promise<boolean> {
 /** 某用户的关注数（following）与粉丝数（followers）。表缺失 → 0。 */
 export async function getFollowCounts(userId: string): Promise<FollowCounts> {
   const supabase = await createClient();
-  const sb = supabase as any;
 
   const countBy = async (column: 'follower_id' | 'following_id'): Promise<number> => {
     try {
-      const { count } = await sb
+      const { count } = await supabase
         .from('user_follows')
         .select(column, { count: 'exact', head: true })
         .eq(column, userId);
@@ -135,13 +131,13 @@ export async function getFollowCounts(userId: string): Promise<FollowCounts> {
 
 /** 把 user_follows 边 + profiles 拼成用户列表（两步查询规避双 FK 嵌入歧义）。 */
 async function resolveProfiles(
-  sb: any,
+  sb: SupabaseServerClient,
   rows: { id: string; created_at: string }[],
 ): Promise<FollowedUser[]> {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
   const { data: profiles } = await sb.from('profiles').select('id, username, avatar_url, role').in('id', ids);
-  const pMap = new Map<string, any>((profiles ?? []).map((p: any) => [p.id, p]));
+  const pMap = new Map((profiles ?? []).map((p) => [p.id, p]));
   return rows
     .map((r): FollowedUser | null => {
       const p = pMap.get(r.id);
@@ -162,13 +158,12 @@ export async function getFollowingOf(userId: string): Promise<FollowedUser[]> {
   if (!userId) return [];
   const supabase = await createClient();
   try {
-    const sb = supabase as any;
-    const { data: edges } = await sb
+    const { data: edges } = await supabase
       .from('user_follows')
       .select('following_id, created_at')
       .eq('follower_id', userId)
       .order('created_at', { ascending: false });
-    return resolveProfiles(sb, (edges ?? []).map((e: any) => ({ id: e.following_id, created_at: e.created_at })));
+    return resolveProfiles(supabase, (edges ?? []).map((e) => ({ id: e.following_id, created_at: e.created_at })));
   } catch {
     return [];
   }
@@ -179,13 +174,12 @@ export async function getFollowers(userId: string): Promise<FollowedUser[]> {
   if (!userId) return [];
   const supabase = await createClient();
   try {
-    const sb = supabase as any;
-    const { data: edges } = await sb
+    const { data: edges } = await supabase
       .from('user_follows')
       .select('follower_id, created_at')
       .eq('following_id', userId)
       .order('created_at', { ascending: false });
-    return resolveProfiles(sb, (edges ?? []).map((e: any) => ({ id: e.follower_id, created_at: e.created_at })));
+    return resolveProfiles(supabase, (edges ?? []).map((e) => ({ id: e.follower_id, created_at: e.created_at })));
   } catch {
     return [];
   }
@@ -209,9 +203,8 @@ export async function getMyFollowingIds(): Promise<string[]> {
   } = await supabase.auth.getUser();
   if (!user) return [];
   try {
-    const sb = supabase as any;
-    const { data } = await sb.from('user_follows').select('following_id').eq('follower_id', user.id);
-    return (data ?? []).map((r: any) => r.following_id);
+    const { data } = await supabase.from('user_follows').select('following_id').eq('follower_id', user.id);
+    return (data ?? []).map((r) => r.following_id);
   } catch {
     return [];
   }
@@ -233,24 +226,23 @@ export async function getFollowingFeed(limit = 15): Promise<FollowingFeedPost[]>
   } = await supabase.auth.getUser();
   if (!user) return [];
   try {
-    const sb = supabase as any;
-    const { data: edges } = await sb.from('user_follows').select('following_id').eq('follower_id', user.id);
-    const ids = (edges ?? []).map((e: any) => e.following_id);
+    const { data: edges } = await supabase.from('user_follows').select('following_id').eq('follower_id', user.id);
+    const ids = (edges ?? []).map((e) => e.following_id);
     if (!ids.length) return [];
 
-    const { data: posts } = await sb
+    const { data: posts } = await supabase
       .from('forum_posts')
       .select('id, title, created_at, tags, author_id')
       .in('author_id', ids)
       .order('created_at', { ascending: false })
       .limit(limit);
 
-    const rows: any[] = posts ?? [];
+    const rows = posts ?? [];
     if (!rows.length) return [];
 
     const authorIds = [...new Set(rows.map((p) => p.author_id))];
-    const { data: profiles } = await sb.from('profiles').select('id, username, avatar_url').in('id', authorIds);
-    const pMap = new Map<string, any>((profiles ?? []).map((p: any) => [p.id, p]));
+    const { data: profiles } = await supabase.from('profiles').select('id, username, avatar_url').in('id', authorIds);
+    const pMap = new Map((profiles ?? []).map((p) => [p.id, p]));
 
     return rows.map((p): FollowingFeedPost => {
       const a = pMap.get(p.author_id);

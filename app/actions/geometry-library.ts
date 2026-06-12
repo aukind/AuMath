@@ -5,6 +5,7 @@
 
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { GeoLabel, ProcessResult } from '@/types/tikz';
+import type { Json } from '@/types/supabase';
 
 export interface SaveGeometryInput {
   pipeline: 'A' | 'B';
@@ -26,7 +27,7 @@ export async function saveGeometryFigure(input: SaveGeometryInput): Promise<Save
       .insert({
         pipeline: input.pipeline,
         svg: input.svg ?? null,
-        labels: input.labels,
+        labels: input.labels as unknown as Json,
         overpic_latex: input.overpic_latex ?? null,
         tikz: input.tikz ?? null,
         inline_svg: input.inline_svg ?? null,
@@ -35,7 +36,7 @@ export async function saveGeometryFigure(input: SaveGeometryInput): Promise<Save
       .select('id')
       .single();
     if (error) return { success: false, error: error.message };
-    return { success: true, id: (data as { id: string }).id };
+    return { success: true, id: data.id };
   } catch (err) {
     return { success: false, error: err instanceof Error ? err.message : String(err) };
   }

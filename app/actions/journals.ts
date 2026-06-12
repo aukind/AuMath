@@ -8,9 +8,7 @@ import type { JournalArticle } from '@/components/library/JournalList';
 export async function getJournalArticles(limit = 100): Promise<JournalArticle[]> {
   try {
     const supabase = await createClient();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sb = supabase as any;
-    const { data, error } = await sb
+    const { data, error } = await supabase
       .from('journal_articles')
       .select('id, title, authors, journal_name, issue, abstract, source_url, published_on, tags')
       .order('published_on', { ascending: false, nullsFirst: false })

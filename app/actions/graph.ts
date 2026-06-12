@@ -95,13 +95,12 @@ export async function getPersonalizedGraphData(): Promise<GraphDataPayload> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
-      const sb = supabase as any;
       const [errRes, masRes] = await Promise.all([
-        sb.from('user_errors').select('question_id').eq('user_id', user.id),
-        sb.from('user_question_attempts').select('question_id').eq('user_id', user.id).gt('correct_count', 0),
+        supabase.from('user_errors').select('question_id').eq('user_id', user.id),
+        supabase.from('user_question_attempts').select('question_id').eq('user_id', user.id).gt('correct_count', 0),
       ]);
-      for (const r of (errRes.data ?? []) as { question_id: string }[]) errorSet.add(r.question_id);
-      for (const r of (masRes.data ?? []) as { question_id: string }[]) masteredSet.add(r.question_id);
+      for (const r of errRes.data ?? []) errorSet.add(r.question_id);
+      for (const r of masRes.data ?? []) masteredSet.add(r.question_id);
     }
   } catch {
     // 未登录或鉴权失败：全部按未做处理，仍可看全站星图。
@@ -172,15 +171,14 @@ export async function getQuestionForGraph(id: string): Promise<{
   let myRating: number | null = null;
 
   if (user) {
-    const sb = supabase as any;
     const [favRes, errRes, ratRes] = await Promise.all([
-      sb.from('user_favorites').select('question_id').eq('user_id', user.id).eq('question_id', id).maybeSingle(),
-      sb.from('user_errors').select('question_id').eq('user_id', user.id).eq('question_id', id).maybeSingle(),
-      sb.from('question_difficulty_ratings').select('rating').eq('user_id', user.id).eq('question_id', id).maybeSingle(),
+      supabase.from('user_favorites').select('question_id').eq('user_id', user.id).eq('question_id', id).maybeSingle(),
+      supabase.from('user_errors').select('question_id').eq('user_id', user.id).eq('question_id', id).maybeSingle(),
+      supabase.from('question_difficulty_ratings').select('rating').eq('user_id', user.id).eq('question_id', id).maybeSingle(),
     ]);
     favorited = !!favRes.data;
     errored = !!errRes.data;
-    myRating = (ratRes.data?.rating as number | undefined) ?? null;
+    myRating = ratRes.data?.rating ?? null;
   }
 
   return {

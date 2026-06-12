@@ -4,12 +4,12 @@
 // RLS 要求 actor_id = auth.uid()，因此必须用「当前用户的 supabase 客户端」插入；
 // 调用方把自己已有的 sb（来自 createClient + session）传进来即可。
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import type { SupabaseServerClient } from '@/lib/supabase/server';
 
 export type NotificationType = 'reply_post' | 'reply_comment' | 'like' | 'follow';
 
 export async function notify(
-  sb: any,
+  sb: SupabaseServerClient,
   params: { recipientId?: string | null; actorId: string; type: NotificationType; postId?: string | null },
 ): Promise<void> {
   const { recipientId, actorId, type, postId } = params;

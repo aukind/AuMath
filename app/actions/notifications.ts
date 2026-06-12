@@ -3,8 +3,6 @@
 // 通知读取 / 已读标记。所有读路径 try/catch 降级（表未建返回空/0），不抛错。
 // 统一用 supabase.from(...) 方法调用（this 已绑定），切勿解构 const from = supabase.from。
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import type { NotificationType } from '@/lib/notifications';
@@ -34,8 +32,7 @@ export async function getUnreadNotificationCount(): Promise<number> {
   } = await supabase.auth.getUser();
   if (!user) return 0;
   try {
-    const sb = supabase as any;
-    const { count } = await sb
+    const { count } = await supabase
       .from('notifications')
       .select('id', { count: 'exact', head: true })
       .eq('recipient_id', user.id)
@@ -55,35 +52,34 @@ export async function getNotifications(): Promise<NotificationItem[]> {
   if (!user) return [];
 
   try {
-    const sb = supabase as any;
-    const { data: rows } = await sb
+    const { data: rows } = await supabase
       .from('notifications')
       .select('id, type, read, created_at, post_id, actor_id')
       .eq('recipient_id', user.id)
       .order('created_at', { ascending: false })
       .limit(LIMIT);
 
-    const list: any[] = rows ?? [];
+    const list = rows ?? [];
     if (!list.length) return [];
 
     const actorIds = [...new Set(list.map((r) => r.actor_id))];
-    const postIds = [...new Set(list.map((r) => r.post_id).filter(Boolean))];
+    const postIds = [...new Set(list.map((r) => r.post_id).filter((v): v is string => !!v))];
 
     const [{ data: actors }, { data: posts }] = await Promise.all([
-      sb.from('profiles').select('id, username, avatar_url').in('id', actorIds),
+      supabase.from('profiles').select('id, username, avatar_url').in('id', actorIds),
       postIds.length
-        ? sb.from('forum_posts').select('id, title').in('id', postIds)
-        : Promise.resolve({ data: [] }),
+        ? supabase.from('forum_posts').select('id, title').in('id', postIds)
+        : Promise.resolve({ data: [] as { id: string; title: string }[] }),
     ]);
 
-    const aMap = new Map<string, any>((actors ?? []).map((a: any) => [a.id, a]));
-    const pMap = new Map<string, string>((posts ?? []).map((p: any) => [p.id, p.title]));
+    const aMap = new Map((actors ?? []).map((a) => [a.id, a]));
+    const pMap = new Map((posts ?? []).map((p) => [p.id, p.title]));
 
     return list.map((r): NotificationItem => {
       const a = aMap.get(r.actor_id);
       return {
         id: r.id,
-        type: r.type,
+        type: r.type as NotificationItem['type'],
         read: r.read,
         createdAt: r.created_at,
         postId: r.post_id ?? undefined,
@@ -108,8 +104,7 @@ export async function markAllNotificationsRead(): Promise<void> {
   } = await supabase.auth.getUser();
   if (!user) return;
   try {
-    const sb = supabase as any;
-    await sb.from('notifications').update({ read: true }).eq('recipient_id', user.id).eq('read', false);
+    await supabase.from('notifications').update({ read: true }).eq('recipient_id', user.id).eq('read', false);
     revalidatePath('/notifications');
     revalidatePath('/');
   } catch {
