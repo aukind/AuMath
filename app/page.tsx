@@ -19,6 +19,7 @@ import AccountMenu from '@/components/AccountMenu';
 import NotificationBell from '@/components/NotificationBell';
 import CanvasScratchpad from '@/components/CanvasScratchpad';
 import FluidCursor from '@/components/background/FluidCursor';
+import HomeAurora from '@/components/background/HomeAurora';
 import MobileMenuDrawer from '@/components/MobileMenuDrawer';
 import type { User } from '@supabase/supabase-js';
 import type { TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceType } from '@/types/database';
@@ -115,7 +116,10 @@ export default async function HomePage({
     // 内部 <main>/侧栏的 overflow-y-auto。全局 Lenis(root) 接管的是 document 滚动，会吞掉
     // 滚轮事件却无处可滚 → 内层滚不动。让 Lenis 忽略整个本页子树，内层恢复原生滚动。
     // （其余页面走 document 滚动，Lenis 平滑照常生效。）
-    <div data-lenis-prevent className="h-screen overflow-hidden flex flex-col bg-zinc-50 dark:bg-zinc-950">
+    <div data-lenis-prevent className="relative isolate h-screen overflow-hidden flex flex-col bg-zinc-50 dark:bg-zinc-950">
+      {/* 极光动态背景：-z-10 垫底，半透明顶栏/侧栏自然透光（纯 CSS，零运行时开销） */}
+      <HomeAurora />
+
       {/* ── 顶部导航 ── */}
       {/* data-zen-chrome="top"：沉浸模式下由 globals.css 平滑上移淡出 */}
       <header data-zen-chrome="top" className="shrink-0 sticky top-0 z-30 border-b border-zinc-200 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm">
