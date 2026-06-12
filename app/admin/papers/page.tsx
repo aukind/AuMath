@@ -6,6 +6,7 @@ import { getPapers } from '@/app/actions/questions';
 import { ArrowLeft } from 'lucide-react';
 import AdminPaperList from '@/components/admin/AdminPaperList';
 import EmbeddingBackfillButton from '@/components/admin/EmbeddingBackfillButton';
+import KnowledgeBackfillButton from '@/components/admin/KnowledgeBackfillButton';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '试卷管理 · AuMath' };
@@ -31,8 +32,9 @@ export default async function AdminPapersPage() {
           <p className="mt-1.5 text-sm text-muted-foreground">
             管理已入库的全部试卷 · 共 {papers.length} 套 · 点击进入逐题校对
           </p>
-          <div className="mt-4">
+          <div className="mt-4 flex flex-wrap items-start gap-4">
             <EmbeddingBackfillButton />
+            <KnowledgeBackfillButton />
           </div>
         </header>
 

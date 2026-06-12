@@ -8,6 +8,8 @@ import { stripInlineOptionTail, isMultiAnswer } from '@/lib/questions/content';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
+import { KP_PROMPT_LIST, sanitizeKnowledgePoints } from '@/lib/knowledge/taxonomy';
+import { linkQuestionsToKnowledgePoints } from '@/lib/knowledge/linker';
 import type { Database, Json } from '@/types/supabase';
 
 // ── 导出类型 ───────────────────────────────────────────────────
@@ -25,6 +27,8 @@ export interface ExtractedQuestion {
   analysis: string;
   /** 6大知识点之一 */
   category?: string;
+  /** 受控词表内的细分知识点（1-4 个），入库时写 question_topic_relations 喂知识星图 */
+  knowledge_points?: string[];
   /** 本题配图张数（Gemini 数图，供图文配额分发；三视图「图①②③④⑤」按张数计）。缺省=未知 */
   figure_count?: number;
 }
@@ -139,6 +143,12 @@ const SHARED_TRANSCRIPTION_RULES = `\
 ═══ Category Rules (CRITICAL) ═══
 4. 每道题的 category 字段必须且只能是以下 6 个值之一，绝对不允许自创：
    "数列" | "三角" | "函数与导数" | "解析几何" | "立体几何" | "概率统计"
+4b.【knowledge_points — 细分知识点标注】每道题额外输出 knowledge_points 数组（1-4 个），只能从下方受控词表中选**精确名称**（一字不差，绝不自创/改写）：
+${KP_PROMPT_LIST}
+   标注要点：
+   • 第一个必须是该题最核心的考点；小题通常 1-2 个，解答大题 2-4 个，确实考到才标。
+   • 跨章节综合题必须把每个考查到的知识点都标出来：概率大题用数列递推求第 n 次概率 → 同时标「概率与数列递推」「数列递推」；解析几何大题用基本不等式求最值 → 同时标「弦长与面积」「基本不等式」。
+   • knowledge_points 与 category 独立判断：category 是题目主归属（6 选 1），knowledge_points 可跨章节。
 
 ═══ LaTeX Typesetting Rules (CRITICAL) ═══
 5. Text vs math: Chinese/English prose stays OUTSIDE math environments. All variables, equations, sets MUST use LaTeX.
@@ -192,13 +202,14 @@ ${MULTI_PAPER_RULE}
 
 ${TOP_LEVEL_STRUCTURE}
 
-Each question element (ALL 5 fields required；不要输出 solution / answer 字段):
+Each question element (ALL 7 fields required；不要输出 solution / answer 字段):
 {
   "question_number": 5,
   "content": "**5.** 完整题干（按规则 14-16 排版）",
   "options": {"A":"...","B":"...","C":"...","D":"..."} or null,
   "is_multi": false,
   "category": "数列",
+  "knowledge_points": ["数列求和", "等比数列"],
   "figure_count": 0
 }
 
@@ -422,13 +433,15 @@ async function normalizeQuestions(
       const answer   = keepAnswers ? normalizeLaTeX(String(q.answer ?? '')) : '';
       const analysis = keepAnswers ? normalizeLaTeX(String(q.analysis ?? q.solution ?? '')) : '';
       const category        = VALID_CATEGORIES.has(rawCategory) ? rawCategory : undefined;
+      // 细分知识点：丢弃词表外名字、去重、上限 4 个（与星图 topics 落库共用同一受控词表）
+      const knowledge_points = sanitizeKnowledgePoints(q.knowledge_points);
       const question_number = typeof q.question_number === 'number' ? q.question_number : undefined;
       const figure_count    = typeof q.figure_count === 'number' && q.figure_count >= 0 ? Math.round(q.figure_count) : undefined;
       // 治本：即便模型把选项复述进 content，也在入库前确定性剥掉，杜绝与选项卡片重复。
       const cleanContent = stripInlineOptionTail(content, options.length >= 2);
       // 多选判定：模型显式标记 is_multi，或（配对模式有答案时）答案是 2+ 选项字母（"AD"）兜底。
       const is_multi = options.length >= 2 && (q.is_multi === true || isMultiAnswer(answer));
-      return { id: crypto.randomUUID(), question_number, content: cleanContent, options, is_multi, answer, analysis, category, figure_count };
+      return { id: crypto.randomUUID(), question_number, content: cleanContent, options, is_multi, answer, analysis, category, knowledge_points: knowledge_points.length ? knowledge_points : undefined, figure_count };
     }),
   );
   // 过滤掉完全空的题（content/options/answer 全空 = 模型输出被截断的残骸）
@@ -892,6 +905,15 @@ export async function publishQuestions(
     dbId:    row.id,
   }));
   const savedCount = results.length;
+
+  // ── 自动知识点 → question_topic_relations（知识星图共现边/反链的数据源）──
+  // 提取阶段 Gemini 已按受控词表标好 knowledge_points，这里只做 name→topic 解析与落库。
+  // 失败只丢标注不丢题（存量可由管理端「知识点回填」补救）。
+  const kpPairs = results.flatMap((r, i) => {
+    const points = questions[i]?.knowledge_points ?? [];
+    return r.dbId && points.length ? [{ questionId: r.dbId, points }] : [];
+  });
+  if (kpPairs.length) await linkQuestionsToKnowledgePoints(supabase, kpPairs);
 
   // ── 关联题目到（已并行创建的）试卷记录 ────────────────────────────
   let paper_id: string | undefined;

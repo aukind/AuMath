@@ -7,6 +7,8 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { isAdminUser } from '@/lib/utils/auth';
 import { isMultiAnswer } from '@/lib/questions/content';
 import { embedQuestion } from '@/app/actions/embeddings';
+import { classifyKnowledgePoints } from '@/lib/knowledge/classify';
+import { linkQuestionsToKnowledgePoints } from '@/lib/knowledge/linker';
 
 /** 无 cookie 的匿名只读客户端，专供 unstable_cache 缓存公共数据（试卷/分类，RLS 公开可读）。
  *  unstable_cache 内不能访问 cookies/headers，故不能用 server.ts 的 createClient。
@@ -103,6 +105,17 @@ export async function createQuestion(
       .from('question_topic_relations')
       .insert(input.topic_ids.map(tid => ({ question_id: data.id, topic_id: tid })));
     if (relError) return { success: false, error: relError.message };
+  } else {
+    // 未手选知识点 → Gemini 受控词表自动标注兜底，喂知识星图共现边/反链。
+    // 尽力而为：分类/落库失败都静默跳过，不影响录题；存量可由管理端回填补救。
+    const classified = await classifyKnowledgePoints([
+      { id: data.id, text: `${input.content}\n\n【解析摘要】${input.analysis.slice(0, 1000)}` },
+    ]);
+    const points = classified.get(data.id);
+    if (points?.length) {
+      const { linked } = await linkQuestionsToKnowledgePoints(admin, [{ questionId: data.id, points }]);
+      if (linked > 0) revalidateTag('topics', 'max');
+    }
   }
 
   // 公开题写入语义向量（私题/草稿不索引，省 Gemini 调用）。失败已内部吞掉，不影响录题。

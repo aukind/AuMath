@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useCallback, useRef, type RefObject, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Eye, EyeOff, Loader2, Send, Save, X, ChevronDown, Star, XCircle, BookMarked } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Loader2, Send, Save, X, ChevronDown, Star, XCircle, BookMarked, Sparkles } from 'lucide-react';
 import MathRenderer from '@/components/MathRenderer';
 import LatexNormalizeHint from '@/components/editor/LatexNormalizeHint';
 import AiFigureButton from '@/components/admin/AiFigureButton';
@@ -10,6 +10,7 @@ import { ScreenshotToLatexButton } from '@/components/admin/ScreenshotToLatexBut
 import TikzFigureButton from '@/components/latex/TikzFigureButton';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import { createQuestion, updateQuestion } from '@/app/actions/questions';
+import { suggestKnowledgePoints } from '@/app/actions/knowledge-points';
 import { createPersonalQuestion } from '@/app/actions/user-workspace';
 import { uploadRiveAsset } from '@/app/actions/upload-rive';
 import type { QuestionForEdit } from '@/app/actions/questions';
@@ -251,6 +252,28 @@ export default function AddQuestionForm({ topics, initialData, isAdmin = false }
   const toggleTopic = useCallback((id: string) => {
     setTopicIds(prev => prev.includes(id) ? prev.filter(t => t !== id) : [...prev, id]);
   }, []);
+
+  // AI 识别知识点：受控词表分类 → 预选标签。新建的 topic 不在服务端传来的 topics 里，
+  // 用 extraTopics 本地补进渲染列表，保证选中态可见。
+  const [aiTagPending, setAiTagPending] = useState(false);
+  const [aiTagMsg,     setAiTagMsg]     = useState<string | null>(null);
+  const [extraTopics,  setExtraTopics]  = useState<Pick<TopicRow, 'id' | 'name' | 'parent_id'>[]>([]);
+  const allTopics = [...topics, ...extraTopics.filter(t => !topics.some(p => p.id === t.id))];
+
+  const handleAiTag = async () => {
+    if (!content.trim()) { setAiTagMsg('请先填写题目正文'); return; }
+    setAiTagPending(true);
+    setAiTagMsg(null);
+    try {
+      const r = await suggestKnowledgePoints(content, analysis);
+      if (!r.success) { setAiTagMsg(r.error); return; }
+      setExtraTopics(prev => [...prev, ...r.topics.filter(t => !prev.some(p => p.id === t.id))]);
+      setTopicIds(prev => [...prev, ...r.topics.map(t => t.id).filter(id => !prev.includes(id))]);
+      setAiTagMsg(`已识别：${r.topics.map(t => t.name).join('、')}`);
+    } finally {
+      setAiTagPending(false);
+    }
+  };
 
   const handleSubmit = (status: 'published' | 'draft') => {
     if (!content.trim()) { setErrorMsg('题目正文不能为空'); return; }
@@ -523,13 +546,27 @@ export default function AddQuestionForm({ topics, initialData, isAdmin = false }
           </div>
 
           {/* 知识点 */}
-          {topics.length > 0 && (
-            <div className="space-y-2 pt-1 border-t border-zinc-100 dark:border-zinc-800">
+          <div className="space-y-2 pt-1 border-t border-zinc-100 dark:border-zinc-800">
+            <div className="flex items-center gap-3">
               <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-zinc-400">
                 绑定知识点
               </label>
+              <button
+                type="button"
+                onClick={handleAiTag}
+                disabled={aiTagPending}
+                className="inline-flex items-center gap-1 rounded-full border border-violet-200 dark:border-violet-800 bg-violet-50 dark:bg-violet-950/30 px-2.5 py-0.5 text-[0.6875rem] font-medium text-violet-600 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/40 disabled:opacity-60 transition-colors"
+              >
+                {aiTagPending
+                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                  : <Sparkles className="h-3 w-3" />}
+                {aiTagPending ? '识别中…' : 'AI 识别知识点'}
+              </button>
+              {aiTagMsg && <span className="text-[0.6875rem] text-zinc-400">{aiTagMsg}</span>}
+            </div>
+            {allTopics.length > 0 && (
               <div className="flex flex-wrap gap-2">
-                {topics.map(topic => {
+                {allTopics.map(topic => {
                   const selected = topicIds.includes(topic.id);
                   const isChild  = !!topic.parent_id;
                   return (
@@ -551,8 +588,8 @@ export default function AddQuestionForm({ topics, initialData, isAdmin = false }
                   );
                 })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* ── 交互式 Rive 沙盒（可选） ── */}
