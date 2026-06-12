@@ -37,7 +37,7 @@ export default function HomeDynamicBackdrop() {
 
   return (
     <div aria-hidden className="absolute inset-0">
-      <AmbientFluid theme={theme} palette={HOME_PALETTE} speed={0.5} fps={30} />
+      <AmbientFluid theme={theme} palette={HOME_PALETTE} speed={1.1} fps={30} />
     </div>
   );
 }

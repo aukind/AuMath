@@ -16,12 +16,21 @@
 import { useEffect, useRef } from 'react';
 import { useTheme } from 'next-themes';
 import { FluidCursorSim } from './FluidCursorSim';
+import { useMounted } from './useClientMotionPrefs';
 
 export default function FluidCursor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const simRef = useRef<FluidCursorSim | null>(null);
   const { resolvedTheme } = useTheme();
   const light = resolvedTheme !== 'dark';
+
+  // resolvedTheme 在 SSR 恒为 undefined，但客户端注水前脚本已知真实主题——
+  // 直接据此渲染内联 style 会令服务端/客户端首帧不一致而触发 hydration 报错，
+  // 且失配的 mix-blend-mode 会被 React 焊死在 DOM 上（won't be patched up），
+  // 令暗色页面被 multiply×黑底持久压暗，只能靠手动切主题强制重渲染才恢复。
+  // 用 mounted 门控：注水前输出确定性中性态（透明、无混合），注水后再随主题切换。
+  // 复用 useSyncExternalStore 版 useMounted（勿用 set-state-in-effect，会触 Next16 新规则）。
+  const mounted = useMounted();
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -96,8 +105,8 @@ export default function FluidCursor() {
       data-fluid-cursor
       className="pointer-events-none fixed inset-0 z-[35] h-full w-full"
       style={{
-        mixBlendMode: light ? 'multiply' : 'screen',
-        opacity: light ? 0.55 : 0.8,
+        mixBlendMode: mounted ? (light ? 'multiply' : 'screen') : undefined,
+        opacity: mounted ? (light ? 0.55 : 0.8) : 0,
       }}
     />
   );
