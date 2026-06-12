@@ -8,6 +8,9 @@ import { stripInlineOptionTail, isMultiAnswer } from '@/lib/questions/content';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
+import { KP_PROMPT_LIST, sanitizeKnowledgePoints } from '@/lib/knowledge/taxonomy';
+import { linkQuestionsToKnowledgePoints } from '@/lib/knowledge/linker';
+import type { Database, Json } from '@/types/supabase';
 
 // ── 导出类型 ───────────────────────────────────────────────────
 
@@ -24,6 +27,8 @@ export interface ExtractedQuestion {
   analysis: string;
   /** 6大知识点之一 */
   category?: string;
+  /** 受控词表内的细分知识点（1-4 个），入库时写 question_topic_relations 喂知识星图 */
+  knowledge_points?: string[];
   /** 本题配图张数（Gemini 数图，供图文配额分发；三视图「图①②③④⑤」按张数计）。缺省=未知 */
   figure_count?: number;
 }
@@ -138,6 +143,12 @@ const SHARED_TRANSCRIPTION_RULES = `\
 ═══ Category Rules (CRITICAL) ═══
 4. 每道题的 category 字段必须且只能是以下 6 个值之一，绝对不允许自创：
    "数列" | "三角" | "函数与导数" | "解析几何" | "立体几何" | "概率统计"
+4b.【knowledge_points — 细分知识点标注】每道题额外输出 knowledge_points 数组（1-4 个），只能从下方受控词表中选**精确名称**（一字不差，绝不自创/改写）：
+${KP_PROMPT_LIST}
+   标注要点：
+   • 第一个必须是该题最核心的考点；小题通常 1-2 个，解答大题 2-4 个，确实考到才标。
+   • 跨章节综合题必须把每个考查到的知识点都标出来：概率大题用数列递推求第 n 次概率 → 同时标「概率与数列递推」「数列递推」；解析几何大题用基本不等式求最值 → 同时标「弦长与面积」「基本不等式」。
+   • knowledge_points 与 category 独立判断：category 是题目主归属（6 选 1），knowledge_points 可跨章节。
 
 ═══ LaTeX Typesetting Rules (CRITICAL) ═══
 5. Text vs math: Chinese/English prose stays OUTSIDE math environments. All variables, equations, sets MUST use LaTeX.
@@ -191,13 +202,14 @@ ${MULTI_PAPER_RULE}
 
 ${TOP_LEVEL_STRUCTURE}
 
-Each question element (ALL 5 fields required；不要输出 solution / answer 字段):
+Each question element (ALL 7 fields required；不要输出 solution / answer 字段):
 {
   "question_number": 5,
   "content": "**5.** 完整题干（按规则 14-16 排版）",
   "options": {"A":"...","B":"...","C":"...","D":"..."} or null,
   "is_multi": false,
   "category": "数列",
+  "knowledge_points": ["数列求和", "等比数列"],
   "figure_count": 0
 }
 
@@ -421,13 +433,15 @@ async function normalizeQuestions(
       const answer   = keepAnswers ? normalizeLaTeX(String(q.answer ?? '')) : '';
       const analysis = keepAnswers ? normalizeLaTeX(String(q.analysis ?? q.solution ?? '')) : '';
       const category        = VALID_CATEGORIES.has(rawCategory) ? rawCategory : undefined;
+      // 细分知识点：丢弃词表外名字、去重、上限 4 个（与星图 topics 落库共用同一受控词表）
+      const knowledge_points = sanitizeKnowledgePoints(q.knowledge_points);
       const question_number = typeof q.question_number === 'number' ? q.question_number : undefined;
       const figure_count    = typeof q.figure_count === 'number' && q.figure_count >= 0 ? Math.round(q.figure_count) : undefined;
       // 治本：即便模型把选项复述进 content，也在入库前确定性剥掉，杜绝与选项卡片重复。
       const cleanContent = stripInlineOptionTail(content, options.length >= 2);
       // 多选判定：模型显式标记 is_multi，或（配对模式有答案时）答案是 2+ 选项字母（"AD"）兜底。
       const is_multi = options.length >= 2 && (q.is_multi === true || isMultiAnswer(answer));
-      return { id: crypto.randomUUID(), question_number, content: cleanContent, options, is_multi, answer, analysis, category, figure_count };
+      return { id: crypto.randomUUID(), question_number, content: cleanContent, options, is_multi, answer, analysis, category, knowledge_points: knowledge_points.length ? knowledge_points : undefined, figure_count };
     }),
   );
   // 过滤掉完全空的题（content/options/answer 全空 = 模型输出被截断的残骸）
@@ -843,9 +857,9 @@ export async function publishQuestions(
 
   // 批量插入：一次 INSERT 多行（取代逐题 N 次往返；dev 下走代理时差异巨大）。
   // PostgREST 对单条多行 insert 的 returning 按插入顺序返回，故 inserted[i] 对应 questions[i]。
-  const rows = questions.map((q) => {
-    const question_type = q.options.length > 0 ? 'multiple_choice' : 'calculation';
-    const metadata: Record<string, unknown> = {};
+  const rows = questions.map((q): Database['public']['Tables']['questions']['Insert'] => {
+    const question_type = q.options.length > 0 ? ('multiple_choice' as const) : ('calculation' as const);
+    const metadata: { [key: string]: Json | undefined } = {};
     if (q.category)                metadata.tags        = q.category;
     if (q.question_number != null) metadata.exam_number = `第${q.question_number}题`;
     if (q.options.length > 0)      metadata.options     = q.options;
@@ -864,11 +878,9 @@ export async function publishQuestions(
     };
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb = supabase as any;
   // 试卷行不依赖题目 id → 与批量插题**并行**，省一次代理往返（dev 下走 ClashX 收益明显）。
   const paperPromise = meta.source
-    ? sb.from('papers').insert({
+    ? supabase.from('papers').insert({
         title: meta.source,
         year:  meta.year,
         type:  meta.paper_type ?? 'real',
@@ -884,29 +896,38 @@ export async function publishQuestions(
   const { data: inserted, error: insErr } = qRes;
   if (insErr || !inserted) {
     // 题目入库失败 → 清掉可能已并行插入的孤儿试卷行（best-effort）。
-    if (pRes?.data?.id) { try { await sb.from('papers').delete().eq('id', pRes.data.id); } catch {} }
+    if (pRes?.data?.id) { try { await supabase.from('papers').delete().eq('id', pRes.data.id); } catch {} }
     return { success: false, error: `题目入库失败：${insErr?.message ?? '未返回 id'}` };
   }
 
   const results: PublishItemResult[] = inserted.map((row, i) => ({
     localId: questions[i]?.id ?? `row-${i}`,
-    dbId:    (row as { id: string }).id,
+    dbId:    row.id,
   }));
   const savedCount = results.length;
+
+  // ── 自动知识点 → question_topic_relations（知识星图共现边/反链的数据源）──
+  // 提取阶段 Gemini 已按受控词表标好 knowledge_points，这里只做 name→topic 解析与落库。
+  // 失败只丢标注不丢题（存量可由管理端「知识点回填」补救）。
+  const kpPairs = results.flatMap((r, i) => {
+    const points = questions[i]?.knowledge_points ?? [];
+    return r.dbId && points.length ? [{ questionId: r.dbId, points }] : [];
+  });
+  if (kpPairs.length) await linkQuestionsToKnowledgePoints(supabase, kpPairs);
 
   // ── 关联题目到（已并行创建的）试卷记录 ────────────────────────────
   let paper_id: string | undefined;
   const { data: paperData, error: paperErr } = pRes ?? { data: null, error: null };
   if (meta.source && savedCount > 0 && !paperErr && paperData) {
     try {
-      paper_id = paperData.id as string;
+      paper_id = paperData.id;
 
       const paperQuestionsRows = results
         .map((r, i) => {
           if (!r.dbId) return null;
           const q = questions[i];
           return {
-            paper_id:        paperData.id as string,
+            paper_id:        paperData.id,
             question_id:     r.dbId,
             question_number: q.question_number ?? (i + 1),
           };
@@ -979,9 +1000,6 @@ export async function detectDuplicatePapers(
   try { supabase = createAdminClient(); } catch {
     return { success: false, error: '服务端配置缺失：SUPABASE_SERVICE_ROLE_KEY 未设置' };
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb = supabase as any;
-
   const duplicates: DuplicatePaperInfo[] = [];
 
   for (let i = 0; i < bundles.length; i++) {
@@ -990,13 +1008,13 @@ export async function detectDuplicatePapers(
     const title = b.paper_title.trim();
     const year  = b.paper_year ?? null;
 
-    let q = sb.from('papers').select('id, title, year').eq('title', title);
+    let q = supabase.from('papers').select('id, title, year').eq('title', title);
     q = year !== null ? q.eq('year', year) : q.is('year', null);
     const { data } = await q.limit(1);
     const existing = (data ?? [])[0];
     if (!existing) continue;
 
-    const { count } = await sb
+    const { count } = await supabase
       .from('paper_questions')
       .select('paper_id', { count: 'exact', head: true })
       .eq('paper_id', existing.id);
@@ -1005,7 +1023,7 @@ export async function detectDuplicatePapers(
       bundleIndex:   i,
       title,
       year,
-      existingId:    existing.id as string,
+      existingId:    existing.id,
       existingCount: count ?? 0,
     });
   }
@@ -1024,22 +1042,19 @@ export async function deletePaperWithQuestions(
   try { supabase = createAdminClient(); } catch {
     return { success: false, error: '服务端配置缺失：SUPABASE_SERVICE_ROLE_KEY 未设置' };
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb = supabase as any;
-
-  const { data: pqRows, error: pqErr } = await sb
+  const { data: pqRows, error: pqErr } = await supabase
     .from('paper_questions')
     .select('question_id')
     .eq('paper_id', paperId);
   if (pqErr) return { success: false, error: `查询失败：${pqErr.message}` };
 
-  const questionIds = (pqRows ?? []).map((r: { question_id: string }) => r.question_id);
+  const questionIds = (pqRows ?? []).map((r) => r.question_id);
 
   if (questionIds.length > 0) {
-    await sb.from('question_topic_relations').delete().in('question_id', questionIds);
-    await sb.from('questions').delete().in('id', questionIds);
+    await supabase.from('question_topic_relations').delete().in('question_id', questionIds);
+    await supabase.from('questions').delete().in('id', questionIds);
   }
-  const { error: paperErr } = await sb.from('papers').delete().eq('id', paperId);
+  const { error: paperErr } = await supabase.from('papers').delete().eq('id', paperId);
   if (paperErr) return { success: false, error: `删除试卷失败：${paperErr.message}` };
 
   revalidatePath('/');
@@ -1073,10 +1088,7 @@ export async function updatePaper(
   try { admin = createAdminClient(); } catch {
     return { success: false, error: '服务端配置缺失：SUPABASE_SERVICE_ROLE_KEY 未设置' };
   }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb = admin as any;
-
-  const { error: paperErr } = await sb.from('papers').update({
+  const { error: paperErr } = await admin.from('papers').update({
     title,
     year:  input.year,
     type:  input.type,
@@ -1085,11 +1097,11 @@ export async function updatePaper(
   if (paperErr) return { success: false, error: `更新失败：${paperErr.message}` };
 
   // 同步题目的 source / year（卡片来源徽章读的是 question.source）
-  const { data: pqRows } = await sb
+  const { data: pqRows } = await admin
     .from('paper_questions').select('question_id').eq('paper_id', paperId);
-  const questionIds = (pqRows ?? []).map((r: { question_id: string }) => r.question_id);
+  const questionIds = (pqRows ?? []).map((r) => r.question_id);
   if (questionIds.length > 0) {
-    await sb.from('questions').update({ source: title, year: input.year }).in('id', questionIds);
+    await admin.from('questions').update({ source: title, year: input.year }).in('id', questionIds);
   }
 
   revalidatePath('/');

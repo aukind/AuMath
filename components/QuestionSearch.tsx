@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useDeferredValue } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { Search, X, SearchX, FileText, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -9,15 +9,15 @@ import { generateLecturePdf } from '@/app/actions/lecture';
 import type { LectureQuestion } from '@/lib/lecture/types';
 import type { QuestionWithTopics } from '@/types/database';
 
+/** 渐进式渲染批量：与服务端取数节奏无关，纯客户端 DOM 挂载分批。 */
+const PAGE_SIZE = 20;
+
 interface Props {
   questions: QuestionWithTopics[];
   isAdmin: boolean;
   userId?: string;
   onDelete?: (id: string) => void;
   isLoggedIn?: boolean;
-  favoritedIds?: string[];
-  erroredIds?: string[];
-  myRatings?: Record<string, number>;
   /** 当前列表标题（如试卷名），用作讲义抬头与文件名 */
   title?: string;
 }
@@ -66,22 +66,18 @@ function DraggableCard({
   canModify,
   onDelete,
   isLoggedIn,
-  initialFavorited,
-  initialErrored,
-  initialMyRating,
 }: {
   question: QuestionWithTopics;
   isAdmin: boolean;
   canModify: boolean;
   onDelete?: (id: string) => void;
   isLoggedIn?: boolean;
-  initialFavorited?: boolean;
-  initialErrored?: boolean;
-  initialMyRating?: number | null;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: question.id,
     disabled: !canModify,
+    // 拖拽幽灵卡（PageLayout 的 DragOverlay）从事件里取题，免去父层持有全量题目数组
+    data: { question },
   });
 
   return (
@@ -94,26 +90,64 @@ function DraggableCard({
         isDragging={isDragging}
         dragHandleProps={canModify ? { ...listeners, ...attributes } : undefined}
         isLoggedIn={isLoggedIn}
-        initialFavorited={initialFavorited}
-        initialErrored={initialErrored}
-        initialMyRating={initialMyRating}
       />
     </div>
   );
 }
 
-export default function QuestionSearch({ questions, isAdmin, userId, onDelete, isLoggedIn = false, favoritedIds = [], erroredIds = [], myRatings = {}, title }: Props) {
+export default function QuestionSearch({ questions, isAdmin, userId, onDelete, isLoggedIn = false, title }: Props) {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showExport, setShowExport] = useState(false);
   const [includeAnswers, setIncludeAnswers] = useState(false);
   const [generating, setGenerating] = useState(false);
 
+  // 搜索词同步进 URL（history.replaceState 不触发 RSC 重渲染）：
+  // 刷新/分享链接不丢搜索状态；挂载后回读（放进 rAF 回调，避开 SSR 与同步 setState 限制）。
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      const initial = new URLSearchParams(window.location.search).get('q');
+      if (initial) setQuery(initial);
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (query.trim()) url.searchParams.set('q', query.trim());
+    else url.searchParams.delete('q');
+    window.history.replaceState(null, '', url.toString());
+  }, [query]);
+
+  // 导出弹窗 Escape 关闭（window 级监听，不依赖弹窗内是否有焦点）
+  useEffect(() => {
+    if (!showExport) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !generating) setShowExport(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showExport, generating]);
+
+  // deferred：重的过滤+列表渲染让位于输入框击键，长列表打字不掉帧
+  const deferredQuery = useDeferredValue(query);
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = deferredQuery.trim().toLowerCase();
     if (!q) return questions;
     return questions.filter(question => matchesQuery(question, q));
-  }, [questions, query]);
+  }, [questions, deferredQuery]);
+
+  // 渐进式渲染：一张卷/一个知识点可能有上百题，KaTeX 全量首渲染要数秒。
+  // 首屏只挂 PAGE_SIZE 张卡，其余点「加载更多」逐批进 DOM。
+  // 注意只是渲染分页 —— 搜索、全选、讲义导出仍作用于全量 filtered/questions。
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  // 搜索词变化回到第一批（React 官方推荐的「渲染期调整派生状态」写法，不进 effect）
+  const [lastQuery, setLastQuery] = useState(deferredQuery);
+  if (lastQuery !== deferredQuery) {
+    setLastQuery(deferredQuery);
+    setVisibleCount(PAGE_SIZE);
+  }
+  const visibleList = filtered.slice(0, visibleCount);
+  const remainingCount = filtered.length - visibleList.length;
 
   const isSearching = query.trim().length > 0;
   const selectedCount = selectedIds.size;
@@ -254,7 +288,7 @@ export default function QuestionSearch({ questions, isAdmin, userId, onDelete, i
         <EmptySearch query={query} />
       ) : (
         <div className="space-y-5 max-w-3xl">
-          {filtered.map(q => (
+          {visibleList.map(q => (
             <div key={q.id} className="flex items-start gap-3">
               <label className="flex items-center pt-3 cursor-pointer shrink-0">
                 <input
@@ -271,19 +305,30 @@ export default function QuestionSearch({ questions, isAdmin, userId, onDelete, i
                   canModify={isAdmin || (!!userId && q.created_by === userId)}
                   onDelete={onDelete}
                   isLoggedIn={isLoggedIn}
-                  initialFavorited={favoritedIds.includes(q.id)}
-                  initialErrored={erroredIds.includes(q.id)}
-                  initialMyRating={myRatings[q.id] ?? null}
                 />
               </div>
             </div>
           ))}
+
+          {remainingCount > 0 && (
+            <button
+              onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+              className="w-full rounded-xl border border-dashed border-zinc-300 dark:border-zinc-700 py-3 text-sm font-medium text-zinc-500 dark:text-zinc-400 hover:border-blue-300 hover:text-blue-600 dark:hover:border-blue-700 dark:hover:text-blue-400 transition-colors"
+            >
+              加载更多（还有 {remainingCount} 题）
+            </button>
+          )}
         </div>
       )}
 
       {/* 导出讲义弹窗：含答案开关 + 一键下载 */}
       {showExport && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="export-lecture-title"
+        >
           <div
             className="absolute inset-0 bg-black/40 backdrop-blur-sm"
             onClick={() => !generating && setShowExport(false)}
@@ -292,7 +337,7 @@ export default function QuestionSearch({ questions, isAdmin, userId, onDelete, i
             <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-blue-50 dark:bg-blue-950/40 mb-4 mx-auto">
               <FileText size={22} className="text-blue-600 dark:text-blue-400" />
             </div>
-            <h2 className="text-center font-semibold text-zinc-900 dark:text-zinc-100 mb-1">
+            <h2 id="export-lecture-title" className="text-center font-semibold text-zinc-900 dark:text-zinc-100 mb-1">
               生成讲义 PDF
             </h2>
             <p className="text-center text-sm text-zinc-500 dark:text-zinc-400 mb-5">

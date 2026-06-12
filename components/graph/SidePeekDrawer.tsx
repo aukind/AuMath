@@ -26,11 +26,10 @@ export default function SidePeekDrawer({ questionId, onClose }: Props) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // 渲染期调整（替代 effect 里同步 setState）：切到新题时立即复位加载态；
-  // 关闭（questionId→null）不清 detail，退场动画期间内容保持不变。
-  const [prevId, setPrevId] = useState<string | null>(null);
-  if (questionId !== prevId) {
-    setPrevId(questionId);
+  // 渲染期调整（仓库约定：set-state-in-effect 会卡 build）：questionId 变更时同步进入加载态。
+  const [prevQuestionId, setPrevQuestionId] = useState<string | null>(null);
+  if (questionId !== prevQuestionId) {
+    setPrevQuestionId(questionId);
     if (questionId) {
       setLoading(true);
       setDetail(null);

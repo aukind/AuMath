@@ -5,12 +5,11 @@
 //   · 文件上传 + 加精走 service_role admin client（绕 RLS），镜像 forum-image.ts / geometry-library.ts；
 //   · 举报/计数走 SECURITY DEFINER RPC，DB 层原子化，杜绝客户端读后 +1。
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { isAdminUser } from '@/lib/utils/auth';
+import type { Database } from '@/types/supabase';
 import {
   RESOURCE_TYPES,
   EDU_STAGES,
@@ -45,7 +44,12 @@ function publicUrl(objectName: string): string {
 }
 
 // DB 行 → LibraryItem（author 投影驼峰化）
-function mapItem(row: any): LibraryItem {
+type AuthorJoin = { username: string | null; avatar_url: string | null };
+type LibraryItemRow = Database['public']['Tables']['library_items']['Row'] & {
+  author: AuthorJoin | AuthorJoin[] | null;
+};
+
+function mapItem(row: LibraryItemRow): LibraryItem {
   const author = Array.isArray(row.author) ? row.author[0] : row.author;
   return {
     id: row.id,
@@ -55,7 +59,7 @@ function mapItem(row: any): LibraryItem {
     cover_url: row.cover_url ?? null,
     author_id: row.author_id,
     is_official: !!row.is_official,
-    status: row.status,
+    status: row.status as LibraryItem['status'],
     view_count: row.view_count ?? 0,
     download_count: row.download_count ?? 0,
     report_count: row.report_count ?? 0,
@@ -78,9 +82,8 @@ export async function getLibraryItems(
   filter: LibraryFilter = 'all',
 ): Promise<LibraryItem[]> {
   const supabase = await createClient();
-  const sb = supabase as any;
 
-  let query = sb
+  let query = supabase
     .from('library_items')
     .select(SELECT)
     .eq('status', 'published')
@@ -148,8 +151,7 @@ export async function finalizeLibraryUpload(
   ).slice(0, 8);
 
   // 落库用带用户态客户端，让 RLS library_insert_own 兜底校验本人 + UGC
-  const sb = supabase as any;
-  const { data, error } = await sb
+  const { data, error } = await supabase
     .from('library_items')
     .insert({
       title,
@@ -171,7 +173,7 @@ export async function finalizeLibraryUpload(
   }
 
   revalidatePath('/library');
-  return { success: true, id: (data as { id: string }).id };
+  return { success: true, id: data.id };
 }
 
 /** 举报：原子去重累加；达阈值自动转 pending_review（DB 触发器）。 */
@@ -184,13 +186,12 @@ export async function reportItem(
   } = await supabase.auth.getUser();
   if (!user) return { success: false };
 
-  const sb = supabase as any;
-  const { data, error } = await sb.rpc('report_library_item', { p_id: itemId });
+  const { data, error } = await supabase.rpc('report_library_item', { p_id: itemId });
   if (error) {
     console.error('[reportItem]', error.message);
     return { success: false };
   }
-  const hidden = (data as any)?.status === 'pending_review';
+  const hidden = (data as { status?: string } | null)?.status === 'pending_review';
   if (hidden) revalidatePath('/library');
   return { success: true, hidden };
 }
@@ -208,16 +209,15 @@ export async function toggleUpvote(
   } = await supabase.auth.getUser();
   if (!user) return { success: false, upvoted: false, upvotes: 0 };
 
-  const sb = supabase as any;
-  const { data, error } = await sb.rpc('toggle_library_upvote', { p_id: itemId });
+  const { data, error } = await supabase.rpc('toggle_library_upvote', { p_id: itemId });
   if (error) {
     console.error('[toggleUpvote]', error.message);
     return { success: false, upvoted: false, upvotes: 0 };
   }
   return {
     success: true,
-    upvoted: !!(data as any)?.upvoted,
-    upvotes: (data as any)?.upvote_count ?? 0,
+    upvoted: !!(data as { upvoted?: boolean } | null)?.upvoted,
+    upvotes: (data as { upvote_count?: number } | null)?.upvote_count ?? 0,
   };
 }
 
@@ -229,8 +229,7 @@ export async function getMyLibraryUpvotes(): Promise<string[]> {
   } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const sb = supabase as any;
-  const { data, error } = await sb
+  const { data, error } = await supabase
     .from('library_item_upvotes')
     .select('item_id')
     .eq('user_id', user.id);
@@ -238,7 +237,7 @@ export async function getMyLibraryUpvotes(): Promise<string[]> {
     console.error('[getMyLibraryUpvotes]', error.message);
     return [];
   }
-  return (data ?? []).map((r: { item_id: string }) => r.item_id);
+  return (data ?? []).map((r) => r.item_id);
 }
 
 /** 加精（Admin only）：转官方精选并确保公开。走 service_role 绕 RLS。 */
@@ -276,8 +275,7 @@ export async function uploadLibraryCover(
   } = await supabase.auth.getUser();
   if (!user) return { success: false };
 
-  const sb = supabase as any;
-  const { data: row } = await sb
+  const { data: row } = await supabase
     .from('library_items')
     .select('author_id')
     .eq('id', itemId)
@@ -316,11 +314,11 @@ export async function uploadLibraryCover(
 /** 阅读器打开埋点：原子 +1 浏览。允许访客。 */
 export async function recordView(itemId: string): Promise<void> {
   const supabase = await createClient();
-  await (supabase as any).rpc('increment_library_view', { p_id: itemId });
+  await supabase.rpc('increment_library_view', { p_id: itemId });
 }
 
 /** 下载埋点：原子 +1 下载。允许访客。 */
 export async function recordDownload(itemId: string): Promise<void> {
   const supabase = await createClient();
-  await (supabase as any).rpc('increment_library_download', { p_id: itemId });
+  await supabase.rpc('increment_library_download', { p_id: itemId });
 }

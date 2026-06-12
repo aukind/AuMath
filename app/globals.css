@@ -151,3 +151,83 @@ body:has([data-app-modal]) [data-app-shell] {
     transition: none;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   首页极光动态背景（HomeAurora）—— 纯 CSS，高级感三件套：
+   ① 大尺寸模糊光斑缓漂（仅动 transform，全程合成层，GPU 几乎免费）
+   ② 巨幅 conic 光晕极慢旋转（活的光，不抢内容）
+   ③ SVG 胶片颗粒压色带（feTurbulence，去 banding 的关键）
+   挂载于 app/page.tsx 根容器内 -z-10；reduced-motion 时静止为渐变底。
+   ───────────────────────────────────────────────────────────── */
+[data-home-aurora] {
+  --aurora-1: rgba(99, 102, 241, 0.16);  /* indigo */
+  --aurora-2: rgba(168, 85, 247, 0.13);  /* violet */
+  --aurora-3: rgba(34, 211, 238, 0.11);  /* cyan   */
+}
+.dark [data-home-aurora] {
+  --aurora-1: rgba(99, 102, 241, 0.2);
+  --aurora-2: rgba(147, 51, 234, 0.16);
+  --aurora-3: rgba(8, 145, 178, 0.14);
+}
+
+/* 基底色洗：GLSL shader 加载前的首帧兜底 / reduced-motion 降级底色 */
+.home-aurora-wash {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(120% 85% at 50% -10%, var(--aurora-1), transparent 60%),
+    radial-gradient(90% 70% at 85% 110%, var(--aurora-2), transparent 65%);
+}
+
+/* 巨幅旋转光晕：低透明 conic 扫光，180s 一圈，几乎潜意识级 */
+.home-aurora-beam {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 160vmax; height: 160vmax;
+  margin-left: -80vmax; margin-top: -80vmax;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    var(--aurora-1) 40deg,
+    transparent 95deg,
+    var(--aurora-3) 175deg,
+    transparent 230deg,
+    var(--aurora-2) 300deg,
+    transparent 360deg
+  );
+  opacity: 0.35;
+  filter: blur(48px);
+  will-change: transform;
+  animation: home-aurora-spin 180s linear infinite;
+}
+@keyframes home-aurora-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* 胶片颗粒：feTurbulence 噪声压渐变色带，高级感的隐形功臣 */
+.home-aurora-grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.dark .home-aurora-grain { opacity: 0.08; }
+
+/* 尊重「减少动态效果」：扫光静止（GLSL 层由 HomeDynamicBackdrop 自行不挂载） */
+@media (prefers-reduced-motion: reduce) {
+  .home-aurora-beam {
+    animation: none;
+  }
+}
+
+/* Zen 专注模式：动态背景与流体拖尾整层淡出，与纯色阅读画布无缝衔接（修黑框） */
+[data-home-aurora],
+[data-fluid-cursor] {
+  transition: opacity 0.45s ease;
+}
+.zen-active [data-home-aurora],
+.zen-active [data-fluid-cursor] {
+  opacity: 0 !important; /* 盖过 FluidCursor 的内联 opacity */
+}

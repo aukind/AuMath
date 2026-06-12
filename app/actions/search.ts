@@ -6,9 +6,7 @@
 // GIN 三元组索引加速 + similarity() 相关性排序。RPC 不存在（迁移未跑）或异常时，
 // 自动回退到 ilike 子串查询，保证迁移前后都可用。
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
-import { createClient } from '@/lib/supabase/server';
+import { createClient, type SupabaseServerClient } from '@/lib/supabase/server';
 import type { QuestionWithTopics } from '@/types/database';
 import { semanticSearchQuestionIds } from '@/app/actions/embeddings';
 
@@ -56,7 +54,9 @@ function fuseRanks(lists: string[][], k = 60): string[] {
   return [...score.entries()].sort((a, b) => b[1] - a[1]).map(([id]) => id);
 }
 
-function toPostHit(p: any): PostHit {
+type PostJoinRow = { id: string; title: string; created_at: string; author: { username: string | null } | { username: string | null }[] | null };
+
+function toPostHit(p: PostJoinRow): PostHit {
   const author = Array.isArray(p.author) ? p.author[0] : p.author;
   return {
     id: p.id,
@@ -71,21 +71,20 @@ export async function searchAll(query: string): Promise<SearchResult> {
   if (safe.length < 1) return { questions: [], posts: [], users: [] };
 
   const supabase = await createClient();
-  const sb = supabase as any;
 
   const [questions, posts, users] = await Promise.all([
-    searchQuestions(sb, safe),
-    searchPosts(sb, safe),
-    searchUsers(sb, safe),
+    searchQuestions(supabase, safe),
+    searchPosts(supabase, safe),
+    searchUsers(supabase, safe),
   ]);
   return { questions, posts, users };
 }
 
 // 按 UID（纯数字精确匹配）或用户名（子串）找人。
 // user_no 列未迁移 / 表异常时静默降级为 []，不连累题目与帖子结果。
-async function searchUsers(sb: any, q: string): Promise<UserHit[]> {
+async function searchUsers(sb: SupabaseServerClient, q: string): Promise<UserHit[]> {
   try {
-    let rows: any[] = [];
+    let rows: { id: string; username: string | null; avatar_url: string | null; user_no: number | null }[] = [];
     // 纯数字优先按 UID 精确命中
     if (/^\d+$/.test(q)) {
       const { data } = await sb
@@ -115,21 +114,21 @@ async function searchUsers(sb: any, q: string): Promise<UserHit[]> {
   }
 }
 
-async function searchQuestions(sb: any, q: string): Promise<QuestionWithTopics[]> {
+async function searchQuestions(sb: SupabaseServerClient, q: string): Promise<QuestionWithTopics[]> {
   try {
     // 混合检索：词面（trgm）与语义（pgvector）并行，RRF 融合排序。
     // 语义路任一环节失败（无 key/迁移 028 未跑）返回空数组，自动退化为纯 trgm。
     const [idRows, semIds] = await Promise.all([
-      sb.rpc('search_question_ids', { q, lim: LIMIT }).then((r: any) => {
+      sb.rpc('search_question_ids', { q, lim: LIMIT }).then((r) => {
         if (r.error) throw r.error;
-        return (r.data ?? []).map((x: any) => x.id as string);
+        return (r.data ?? []).map((x) => x.id);
       }),
       semanticSearchQuestionIds(q, LIMIT),
     ]);
     const ids = fuseRanks([idRows, semIds]).slice(0, LIMIT);
     if (!ids.length) return [];
     const { data } = await sb.from('questions').select(QUESTION_SELECT).in('id', ids);
-    return reorder<QuestionWithTopics>((data ?? []) as QuestionWithTopics[], ids);
+    return reorder<QuestionWithTopics>((data ?? []) as unknown as QuestionWithTopics[], ids);
   } catch {
     // 降级：ilike 子串（迁移未跑 / RPC 缺失）
     try {
@@ -140,21 +139,21 @@ async function searchQuestions(sb: any, q: string): Promise<QuestionWithTopics[]
         .eq('is_public', true)
         .or(`content.ilike.%${q}%,source.ilike.%${q}%`)
         .limit(LIMIT);
-      return (data ?? []) as QuestionWithTopics[];
+      return (data ?? []) as unknown as QuestionWithTopics[];
     } catch {
       return [];
     }
   }
 }
 
-async function searchPosts(sb: any, q: string): Promise<PostHit[]> {
+async function searchPosts(sb: SupabaseServerClient, q: string): Promise<PostHit[]> {
   try {
     const { data: idRows, error } = await sb.rpc('search_post_ids', { q, lim: LIMIT });
     if (error) throw error;
-    const ids = (idRows ?? []).map((r: any) => r.id as string);
+    const ids = (idRows ?? []).map((r) => r.id);
     if (!ids.length) return [];
     const { data } = await sb.from('forum_posts').select(POST_SELECT).in('id', ids);
-    return reorder<{ id: string }>((data ?? []) as { id: string }[], ids).map(toPostHit);
+    return reorder((data ?? []), ids).map(toPostHit);
   } catch {
     try {
       const { data } = await sb

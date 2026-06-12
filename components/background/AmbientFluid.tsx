@@ -30,24 +30,36 @@ export interface FluidUniforms {
   uSpeed: { value: number };
 }
 
+export type FluidPalette = Record<'light' | 'dark', [string, string, string]>;
+
 export interface AmbientFluidProps {
   /** 当前站点主题，驱动 Uniform 颜色在亮/暗调色板间平滑插值 */
   theme?: 'light' | 'dark';
+  /** 三主色调色板（须传模块级稳定引用，勿在 render 里现造对象）；缺省=全站极淡微光 */
+  palette?: FluidPalette;
+  /** 流速；缺省 0.15 极缓呼吸，首页可见流动用 ~0.5 */
+  speed?: number;
+  /** 帧率上限；缺省 20（微光肉眼无感），可见流动建议 30 */
+  fps?: number;
 }
 
 // 极度克制的靛紫蓝调色板（对标 Stripe），明度/饱和度压到极低，仅作底色微光
-const PALETTE: Record<'light' | 'dark', [string, string, string]> = {
+const DEFAULT_PALETTE: FluidPalette = {
   light: ['#eef2ff', '#faf5ff', '#ecfeff'],
   dark: ['#0c0c16', '#100b1c', '#0a1016'],
 };
 
-const TARGET_FPS = 20; // 帧率上限，落在需求要求的 15–24fps 区间内
-const FRAME_INTERVAL = 1000 / TARGET_FPS;
+const TARGET_FPS = 20; // 缺省帧率上限，落在需求要求的 15–24fps 区间内
 const COLOR_LERP = 0.06; // 主题切换调色板插值阻尼（~0.6s 平滑过渡）
 const MOUSE_LERP = 0.06; // 鼠标跟随阻尼
 const DEFAULT_SPEED = 0.15; // 极缓流动
 
-function FluidScene({ theme = 'light' }: AmbientFluidProps) {
+function FluidScene({
+  theme = 'light',
+  palette = DEFAULT_PALETTE,
+  speed = DEFAULT_SPEED,
+  fps = TARGET_FPS,
+}: AmbientFluidProps) {
   const gl = useThree((s) => s.gl);
   const invalidate = useThree((s) => s.invalidate);
 
@@ -56,7 +68,7 @@ function FluidScene({ theme = 'light' }: AmbientFluidProps) {
 
   // uniforms 只初始化一次：主题切换走颜色 lerp，不重建 material
   const uniforms = useMemo<FluidUniforms>(() => {
-    const [c1, c2, c3] = PALETTE[theme];
+    const [c1, c2, c3] = palette[theme];
     return {
       uTime: { value: 0 },
       uMouse: { value: new THREE.Vector2(0, 0) },
@@ -64,7 +76,7 @@ function FluidScene({ theme = 'light' }: AmbientFluidProps) {
       uColor1: { value: new THREE.Color(c1) },
       uColor2: { value: new THREE.Color(c2) },
       uColor3: { value: new THREE.Color(c3) },
-      uSpeed: { value: DEFAULT_SPEED },
+      uSpeed: { value: speed },
     };
     // 初始主题仅作首帧底色；后续切换由下方 effect 更新 lerp 目标
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -86,18 +98,19 @@ function FluidScene({ theme = 'light' }: AmbientFluidProps) {
   // 鼠标 NDC 目标 & 主题色插值目标，存 ref 供节流循环消费
   const mouseTarget = useRef(new THREE.Vector2(0, 0));
   const colorTargets = useRef<[THREE.Color, THREE.Color, THREE.Color]>([
-    new THREE.Color(PALETTE[theme][0]),
-    new THREE.Color(PALETTE[theme][1]),
-    new THREE.Color(PALETTE[theme][2]),
+    new THREE.Color(palette[theme][0]),
+    new THREE.Color(palette[theme][1]),
+    new THREE.Color(palette[theme][2]),
   ]);
 
-  // 主题变化 → 仅更新插值目标，material 不重建
+  // 主题/调色板变化 → 仅更新插值目标，material 不重建。
+  // （speed 仅在 uniforms 初始化时生效：流速按挂载固定，无运行时切换需求。）
   useEffect(() => {
-    const [c1, c2, c3] = PALETTE[theme];
+    const [c1, c2, c3] = palette[theme];
     colorTargets.current[0].set(c1);
     colorTargets.current[1].set(c2);
     colorTargets.current[2].set(c3);
-  }, [theme]);
+  }, [theme, palette]);
 
   useEffect(() => {
     let rafId = 0;
@@ -114,10 +127,11 @@ function FluidScene({ theme = 'light' }: AmbientFluidProps) {
     };
     setResolution();
 
+    const frameInterval = 1000 / fps;
     const tick = (nowMs: number) => {
       rafId = requestAnimationFrame(tick);
-      // 节流到 ~TARGET_FPS（减 4ms 容差，抵消 60Hz rAF 量化导致的掉速）
-      if (nowMs - lastRenderMs < FRAME_INTERVAL - 4) return;
+      // 节流到 ~fps（减 4ms 容差，抵消 60Hz rAF 量化导致的掉速）
+      if (nowMs - lastRenderMs < frameInterval - 4) return;
 
       const dt = Math.min((nowMs - lastTickMs) / 1000, 0.1); // clamp 防时间跳变
       lastTickMs = nowMs;
@@ -177,12 +191,12 @@ function FluidScene({ theme = 'light' }: AmbientFluidProps) {
       material.dispose();
       geometry.dispose();
     };
-  }, [gl, invalidate, uniforms, material, geometry]);
+  }, [gl, invalidate, uniforms, material, geometry, fps]);
 
   return <mesh geometry={geometry} material={material} frustumCulled={false} />;
 }
 
-export default function AmbientFluid({ theme = 'light' }: AmbientFluidProps) {
+export default function AmbientFluid({ theme = 'light', palette, speed, fps }: AmbientFluidProps) {
   return (
     <Canvas
       // linear + flat：不做色彩管理/色调映射，保证极淡调色板所见即所得
@@ -199,7 +213,7 @@ export default function AmbientFluid({ theme = 'light' }: AmbientFluidProps) {
       }}
       style={{ width: '100%', height: '100%', display: 'block' }}
     >
-      <FluidScene theme={theme} />
+      <FluidScene theme={theme} palette={palette} speed={speed} fps={fps} />
     </Canvas>
   );
 }

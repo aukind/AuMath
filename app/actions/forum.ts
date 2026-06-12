@@ -4,13 +4,8 @@
 // 写操作的作者一律取自服务端 session（绝不信任客户端传入的 author），
 // 权限由数据库 RLS 兜底（见 supabase/migrations/010_forum.sql）。
 //
-// 注：forum_* / profiles 表未纳入 types/database.ts 的 Database 泛型，
-// 沿用本仓约定 `const sb = supabase as any` 做表查询（见 user-workspace.ts）。
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { revalidatePath } from 'next/cache';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, type SupabaseServerClient } from '@/lib/supabase/server';
 import { notify } from '@/lib/notifications';
 import type {
   ForumComment,
@@ -45,8 +40,18 @@ function first<T>(v: T | T[] | null | undefined): T | null {
   return v ?? null;
 }
 
+interface PostRowLike {
+  id: string;
+  title: string;
+  content: string;
+  view_count: number;
+  tags: string[] | null;
+  created_at: string;
+  author: ProfileRow | ProfileRow[] | null;
+}
+
 function mapPost(
-  d: any,
+  d: PostRowLike,
   commentCount: number,
   upvotes = 0,
   upvotedByMe = false,
@@ -56,7 +61,7 @@ function mapPost(
     id: d.id,
     title: d.title,
     content: d.content,
-    author: toUser(first(d.author) as ProfileRow | null),
+    author: toUser(first(d.author)),
     createdAt: d.created_at,
     viewCount: d.view_count,
     commentCount,
@@ -69,7 +74,7 @@ function mapPost(
 
 // 帖子点赞/收藏聚合（分离查询，表未建/出错时降级为 0/false，绝不炸论坛页）。
 async function getPostInteractions(
-  sb: any,
+  sb: SupabaseServerClient,
   postId: string,
   uid: string | null,
 ): Promise<{ upvotes: number; upvotedByMe: boolean; favoritedByMe: boolean }> {
@@ -97,12 +102,12 @@ async function getPostInteractions(
 }
 
 // 列表批量点赞计数：一把查所有帖的点赞行后按 post_id 计数（表未建 → 空 Map）。
-async function getPostVoteCounts(sb: any, postIds: string[]): Promise<Map<string, number>> {
+async function getPostVoteCounts(sb: SupabaseServerClient, postIds: string[]): Promise<Map<string, number>> {
   const m = new Map<string, number>();
   if (postIds.length === 0) return m;
   try {
     const { data } = await sb.from('forum_post_votes').select('post_id').in('post_id', postIds);
-    for (const row of (data ?? []) as { post_id: string }[]) {
+    for (const row of data ?? []) {
       m.set(row.post_id, (m.get(row.post_id) ?? 0) + 1);
     }
   } catch {
@@ -114,7 +119,7 @@ async function getPostVoteCounts(sb: any, postIds: string[]): Promise<Map<string
 // ── 当前登录用户（供页面决定按钮可见性 / 作者归属）──────────
 export async function getSessionForumUser(): Promise<SessionUser> {
   const supabase = await createClient();
-  const sb = supabase as any;
+  const sb = supabase;
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -127,7 +132,7 @@ export async function getSessionForumUser(): Promise<SessionUser> {
     .single();
 
   return data
-    ? toUser(data as ProfileRow)
+    ? toUser(data)
     : { id: user.id, username: user.email?.split('@')[0] ?? '我', role: 'user' };
 }
 
@@ -135,7 +140,7 @@ export async function getSessionForumUser(): Promise<SessionUser> {
 // ── 帖子列表（论坛首页）置顶优先，再按时间倒序 ───────────────
 export async function getForumPosts(): Promise<ForumPost[]> {
   const supabase = await createClient();
-  const sb = supabase as any;
+  const sb = supabase;
   const { data, error } = await sb
     .from('forum_posts')
     .select(
@@ -150,10 +155,10 @@ export async function getForumPosts(): Promise<ForumPost[]> {
   if (error) throw new Error('帖子列表加载失败');
 
   // 批量点赞计数（单独一把查，表未建时降级为 0，不影响列表）
-  const voteCountByPost = await getPostVoteCounts(sb, (data ?? []).map((d: any) => d.id));
+  const voteCountByPost = await getPostVoteCounts(sb, (data ?? []).map((d) => d.id));
 
   // d.comments 返回的是类似 [{ count: 2 }] 的数组，提取并传给 mapPost
-  return (data ?? []).map((d: any) =>
+  return (data ?? []).map((d) =>
     mapPost(d, d.comments?.[0]?.count ?? 0, voteCountByPost.get(d.id) ?? 0),
   );
 }
@@ -161,16 +166,27 @@ export async function getForumPosts(): Promise<ForumPost[]> {
 // ── 发布新主贴，返回新帖 id（供客户端跳转）──────────────────
 export async function createForumPost(input: {
   title: string;
+  content: string;
+  tags: string[];
+}): Promise<ForumResult<{ id: string }>> {
+  return asResult(() => createForumPostImpl(input));
+}
+
+async function createForumPostImpl(input: {
+  title: string;
   content: string; // 序列化的 Lexical JSON
   tags: string[];
 }): Promise<{ id: string }> {
   const supabase = await createClient();
-  const sb = supabase as any;
+  const sb = supabase;
   const uid = await requireUserId();
 
   const title = input.title.trim();
   if (title.length < 1 || title.length > 200) {
     throw new Error('标题需在 1–200 字之间');
+  }
+  if (!input.content?.trim() || input.content.length > MAX_CONTENT_BYTES) {
+    throw new Error('正文为空或超出长度上限');
   }
 
   const tags = input.tags
@@ -192,7 +208,7 @@ export async function createForumPost(input: {
 // ── 读取主贴 ────────────────────────────────────────────────
 export async function getForumPost(postId: string): Promise<ForumPost> {
   const supabase = await createClient();
-  const sb = supabase as any;
+  const sb = supabase;
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -221,7 +237,7 @@ export async function getForumPost(postId: string): Promise<ForumPost> {
 // ── 读取评论树（一级 + 楼中楼 + 点赞数）────────────────────
 export async function getForumComments(postId: string): Promise<ForumComment[]> {
   const supabase = await createClient();
-  const sb = supabase as any;
+  const sb = supabase;
   const {
     data: { user },
   } = await supabase.auth.getUser();
@@ -244,21 +260,21 @@ export async function getForumComments(postId: string): Promise<ForumComment[]> 
   if (error) throw new Error('评论加载失败');
 
   const comments: ForumComment[] = (data ?? []).map(
-    (c: any): ForumComment => ({
+    (c): ForumComment => ({
       id: c.id,
       postId: c.post_id,
       content: c.content,
-      author: toUser(first(c.author) as ProfileRow | null),
+      author: toUser(first(c.author)),
       createdAt: c.created_at,
       upvotes: c.votes?.[0]?.count ?? 0,
       upvotedByMe: false,
       subComments: (c.sub_comments ?? []).map(
-        (s: any): SubComment => ({
+        (s): SubComment => ({
           id: s.id,
           parentId: s.parent_id,
           replyToUserId: s.reply_to_user_id ?? undefined,
           content: s.content,
-          author: toUser(first(s.author) as ProfileRow | null),
+          author: toUser(first(s.author)),
           createdAt: s.created_at,
         }),
       ),
@@ -272,7 +288,7 @@ export async function getForumComments(postId: string): Promise<ForumComment[]> 
       .select('comment_id')
       .eq('user_id', user.id)
       .in('comment_id', comments.map((c) => c.id));
-    const voted = new Set((votes ?? []).map((v: { comment_id: string }) => v.comment_id));
+    const voted = new Set((votes ?? []).map((v) => v.comment_id));
     for (const c of comments) c.upvotedByMe = voted.has(c.id);
   }
 
@@ -282,7 +298,28 @@ export async function getForumComments(postId: string): Promise<ForumComment[]> 
 // ── 浏览数自增（每次进入详情页调用一次）────────────────────
 export async function incrementForumView(postId: string): Promise<void> {
   const supabase = await createClient();
-  await (supabase as any).rpc('increment_post_view', { p_post_id: postId });
+  await supabase.rpc('increment_post_view', { p_post_id: postId });
+}
+
+// 帖子/回复正文（序列化 Lexical JSON）长度上限：正常长帖含若干公式 ~几十 KB，
+// 200K 字符留足余量，挡住脚本灌入 MB 级垃圾数据。
+const MAX_CONTENT_BYTES = 200_000;
+
+// ── 写操作统一返回判别联合 ───────────────────────────────────
+// 生产环境 Next.js 会把 Server Action 抛出的 Error 文案脱敏成通用报错，
+// 「请先登录」这类业务提示根本到不了用户眼前。所有 mutation 一律经 asResult
+// 把内部 throw 转成可序列化的 { ok, error }，客户端拿到真实文案后自行决定
+// toast / 本地重抛（重抛用于触发 SWR 乐观回滚）。
+export type ForumResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; error: string };
+
+async function asResult<T>(fn: () => Promise<T>): Promise<ForumResult<T>> {
+  try {
+    return { ok: true, data: await fn() };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '操作失败，请稍后再试' };
+  }
 }
 
 async function requireUserId(): Promise<string> {
@@ -295,13 +332,28 @@ async function requireUserId(): Promise<string> {
 }
 
 // ── 发表回复（一级 / 楼中楼）统一入口 ───────────────────────
+export type ForumReplyData =
+  | { kind: 'comment'; data: ForumComment }
+  | { kind: 'sub'; data: SubComment };
+
 export async function submitForumReply(
   target: ReplyTarget,
   content: string,
-): Promise<{ kind: 'comment'; data: ForumComment } | { kind: 'sub'; data: SubComment }> {
+): Promise<ForumResult<ForumReplyData>> {
+  return asResult(() => submitForumReplyImpl(target, content));
+}
+
+async function submitForumReplyImpl(
+  target: ReplyTarget,
+  content: string,
+): Promise<ForumReplyData> {
   const supabase = await createClient();
-  const sb = supabase as any;
+  const sb = supabase;
   const uid = await requireUserId();
+
+  if (!content?.trim() || content.length > MAX_CONTENT_BYTES) {
+    throw new Error('回复内容为空或超出长度上限');
+  }
 
   if (target.kind === 'post') {
     const { data, error } = await sb
@@ -323,7 +375,7 @@ export async function submitForumReply(
         id: data.id,
         postId: data.post_id,
         content: data.content,
-        author: toUser(first(data.author) as ProfileRow | null),
+        author: toUser(first(data.author)),
         createdAt: data.created_at,
         upvotes: 0,
         subComments: [],
@@ -366,17 +418,31 @@ export async function submitForumReply(
       parentId: data.parent_id,
       replyToUserId: data.reply_to_user_id ?? undefined,
       content: data.content,
-      author: toUser(first(data.author) as ProfileRow | null),
+      author: toUser(first(data.author)),
       createdAt: data.created_at,
     },
   };
 }
 
 // ── 评论点赞 / 取消点赞，返回最新计数 + 切换后状态 ───────────
-export async function toggleForumUpvote(commentId: string): Promise<{ upvotes: number; upvoted: boolean }> {
+export async function toggleForumUpvote(commentId: string): Promise<ForumResult<{ upvotes: number; upvoted: boolean }>> {
+  return asResult(() => toggleForumUpvoteImpl(commentId));
+}
+
+async function toggleForumUpvoteImpl(commentId: string): Promise<{ upvotes: number; upvoted: boolean }> {
   const supabase = await createClient();
-  const sb = supabase as any;
+  const sb = supabase;
   const uid = await requireUserId();
+
+  // 迁移 029 后：单次往返 RPC（切换+通知+计数一把完成，替代下方 4 次串行查询）。
+  // RPC 未建（迁移没跑）或异常 → 回退老路径，行为不变。
+  const { data: rpcData, error: rpcErr } = await sb.rpc('toggle_comment_vote', { p_comment_id: commentId });
+  if (!rpcErr && rpcData) {
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    if (row && typeof row.upvotes === 'number') {
+      return { upvotes: row.upvotes, upvoted: !!row.upvoted };
+    }
+  }
 
   const { data: existing } = await sb
     .from('forum_comment_votes')
@@ -417,10 +483,24 @@ export async function toggleForumUpvote(commentId: string): Promise<{ upvotes: n
 }
 
 // ── 帖子点赞 / 取消点赞（公开计数，仿评论点赞）──────────────
-export async function toggleForumPostUpvote(postId: string): Promise<{ upvotes: number; upvoted: boolean }> {
+export async function toggleForumPostUpvote(postId: string): Promise<ForumResult<{ upvotes: number; upvoted: boolean }>> {
+  return asResult(() => toggleForumPostUpvoteImpl(postId));
+}
+
+async function toggleForumPostUpvoteImpl(postId: string): Promise<{ upvotes: number; upvoted: boolean }> {
   const supabase = await createClient();
-  const sb = supabase as any;
+  const sb = supabase;
   const uid = await requireUserId();
+
+  // 迁移 029 后：单次往返 RPC；未建/异常回退老路径（同 toggle_comment_vote）。
+  const { data: rpcData, error: rpcErr } = await sb.rpc('toggle_post_vote', { p_post_id: postId });
+  if (!rpcErr && rpcData) {
+    const row = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    if (row && typeof row.upvotes === 'number') {
+      revalidatePath(`/forum/${postId}`);
+      return { upvotes: row.upvotes, upvoted: !!row.upvoted };
+    }
+  }
 
   const { data: existing } = await sb
     .from('forum_post_votes')
@@ -452,9 +532,13 @@ export async function toggleForumPostUpvote(postId: string): Promise<{ upvotes: 
 }
 
 // ── 帖子收藏 / 取消收藏（私有书签，仿题目收藏）──────────────
-export async function toggleForumPostFavorite(postId: string): Promise<{ favorited: boolean }> {
+export async function toggleForumPostFavorite(postId: string): Promise<ForumResult<{ favorited: boolean }>> {
+  return asResult(() => toggleForumPostFavoriteImpl(postId));
+}
+
+async function toggleForumPostFavoriteImpl(postId: string): Promise<{ favorited: boolean }> {
   const supabase = await createClient();
-  const sb = supabase as any;
+  const sb = supabase;
   const uid = await requireUserId();
 
   const { data: existing } = await sb
@@ -475,35 +559,41 @@ export async function toggleForumPostFavorite(postId: string): Promise<{ favorit
 }
 
 // ── 删除评论（作者或管理员；RLS 最终把关）──────────────────
-export async function deleteForumComment(commentId: string): Promise<void> {
-  const supabase = await createClient();
-  const sb = supabase as any;
-  await requireUserId();
-  const { error } = await sb.from('forum_comments').delete().eq('id', commentId);
-  if (error) throw new Error('删除失败，可能无权限');
+export async function deleteForumComment(commentId: string): Promise<ForumResult<null>> {
+  return asResult(async () => {
+    const supabase = await createClient();
+    await requireUserId();
+    const { error } = await supabase.from('forum_comments').delete().eq('id', commentId);
+    if (error) throw new Error('删除失败，可能无权限');
+    return null;
+  });
 }
 
 // ── 管理员：置顶 / 加精 ─────────────────────────────────────
 export async function setForumPostFlags(
   postId: string,
   flags: { isPinned?: boolean; isFeatured?: boolean },
-): Promise<void> {
-  const supabase = await createClient();
-  const sb = supabase as any;
-  await requireUserId();
-  const patch: Record<string, boolean> = {};
-  if (flags.isPinned !== undefined) patch.is_pinned = flags.isPinned;
-  if (flags.isFeatured !== undefined) patch.is_featured = flags.isFeatured;
-  const { error } = await sb.from('forum_posts').update(patch).eq('id', postId);
-  if (error) throw new Error('操作失败，需要管理员权限');
-  revalidatePath(`/forum/${postId}`);
+): Promise<ForumResult<null>> {
+  return asResult(async () => {
+    const supabase = await createClient();
+    await requireUserId();
+    const patch: { is_pinned?: boolean; is_featured?: boolean } = {};
+    if (flags.isPinned !== undefined) patch.is_pinned = flags.isPinned;
+    if (flags.isFeatured !== undefined) patch.is_featured = flags.isFeatured;
+    const { error } = await supabase.from('forum_posts').update(patch).eq('id', postId);
+    if (error) throw new Error('操作失败，需要管理员权限');
+    revalidatePath(`/forum/${postId}`);
+    return null;
+  });
 }
 
 // ── 删帖（作者或管理员）─────────────────────────────────────
-export async function deleteForumPost(postId: string): Promise<void> {
-  const supabase = await createClient();
-  const sb = supabase as any;
-  await requireUserId();
-  const { error } = await sb.from('forum_posts').delete().eq('id', postId);
-  if (error) throw new Error('删除失败，需要作者或管理员权限');
+export async function deleteForumPost(postId: string): Promise<ForumResult<null>> {
+  return asResult(async () => {
+    const supabase = await createClient();
+    await requireUserId();
+    const { error } = await supabase.from('forum_posts').delete().eq('id', postId);
+    if (error) throw new Error('删除失败，需要作者或管理员权限');
+    return null;
+  });
 }

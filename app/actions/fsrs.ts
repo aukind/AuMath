@@ -18,8 +18,6 @@ import { createClient } from '@/lib/supabase/server';
 import type { QuestionWithTopics } from '@/types/database';
 import type { ReviewActionPayload, ReviewResult } from '@/types/fsrs';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 // 模块级单例调度器（FSRS 标准权重）。
 //   enable_short_term=false：(re)learning steps 不生效 → 间隔按「天」粒度，
 //     契合「每天推送到期错题」模型（Again 不会几分钟后又冒出来打断本场清空）。
@@ -52,10 +50,9 @@ export async function getTodayDueQuestions(): Promise<QuestionWithTopics[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const sb = supabase as any;
   const nowIso = new Date().toISOString();
 
-  const { data: rows } = await sb
+  const { data: rows } = await supabase
     .from('user_errors')
     .select('question_id')
     .eq('user_id', user.id)
@@ -65,7 +62,7 @@ export async function getTodayDueQuestions(): Promise<QuestionWithTopics[]> {
 
   if (!rows?.length) return [];
 
-  const ids: string[] = rows.map((r: { question_id: string }) => r.question_id);
+  const ids = rows.map((r) => r.question_id);
 
   const { data: questions } = await supabase
     .from('questions')
@@ -75,7 +72,7 @@ export async function getTodayDueQuestions(): Promise<QuestionWithTopics[]> {
 
   // 保持 due 升序（IN 查询不保证顺序），沿用 getWorkspaceQuestions 的重排法
   const qMap = new Map(
-    ((questions ?? []) as QuestionWithTopics[]).map((q) => [q.id, q]),
+    ((questions ?? []) as unknown as QuestionWithTopics[]).map((q) => [q.id, q]),
   );
   return ids.map((id) => qMap.get(id)).filter(Boolean) as QuestionWithTopics[];
 }
@@ -86,7 +83,7 @@ export async function getTodayDueCount(): Promise<number> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return 0;
 
-  const { count } = await (supabase as any)
+  const { count } = await supabase
     .from('user_errors')
     .select('*', { count: 'exact', head: true })
     .eq('user_id', user.id)
@@ -104,10 +101,8 @@ export async function submitReviewAction(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, nextDue: '' };
 
-  const sb = supabase as any;
-
   // 1) 读当前记忆状态
-  const { data: row, error: readErr } = await sb
+  const { data: row, error: readErr } = await supabase
     .from('user_errors')
     .select(
       'due, stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review',
@@ -121,7 +116,7 @@ export async function submitReviewAction(
     return { success: false, nextDue: '' };
   }
 
-  const r = row as UserErrorFSRSRow;
+  const r: UserErrorFSRSRow = row;
   const now = new Date();
 
   // 2) 组装 ts-fsrs Card：以 createEmptyCard 兜底必填字段（如 5.x 的 learning_steps），
@@ -170,7 +165,7 @@ export async function submitReviewAction(
   };
 
   // 5) 原子落库（UPDATE user_errors + INSERT user_review_logs 同事务）
-  const { error: rpcErr } = await sb.rpc('submit_fsrs_review', {
+  const { error: rpcErr } = await supabase.rpc('submit_fsrs_review', {
     p_question_id: payload.questionId,
     p_rating: payload.rating,
     p_duration_ms: Math.max(0, Math.round(payload.durationMs)),

@@ -74,6 +74,11 @@ function QuestionPreviewCard({
               {question.category}
             </span>
           )}
+          {(question.knowledge_points ?? []).map(kp => (
+            <span key={kp} className="rounded-full border border-zinc-200 dark:border-zinc-700 px-2 py-0.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+              {kp}
+            </span>
+          ))}
         </div>
         {publishResult && (
           publishResult.dbId

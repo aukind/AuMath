@@ -15,8 +15,6 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 // gemini-embedding-001：当前 GA 的嵌入模型（text-embedding-004 在该 API 版本已 404）。
 // 默认 3072 维，这里用 outputDimensionality=768 对齐 questions.embedding vector(768)。
 const EMBED_MODEL = 'gemini-embedding-001';
@@ -68,7 +66,7 @@ export async function embedQuestion(
   if (!vec) return;
   try {
     const admin = createAdminClient();
-    await (admin as any).from('questions').update({ embedding: vec }).eq('id', questionId);
+    await admin.from('questions').update({ embedding: vec }).eq('id', questionId);
   } catch (e) {
     console.warn('[embedQuestion] 写入失败（已降级）：', (e as Error).message);
   }
@@ -97,7 +95,7 @@ export async function backfillEmbeddings(
 
   let rows: { id: string; content: string; source: string | null }[];
   try {
-    const { data, error } = await (admin as any)
+    const { data, error } = await admin
       .from('questions')
       .select('id, content, source')
       .is('embedding', null)
@@ -121,7 +119,7 @@ export async function backfillEmbeddings(
     await Promise.all(slice.map(async (r) => {
       const vec = await embedText(buildEmbeddingInput(r.content, r.source), 'RETRIEVAL_DOCUMENT');
       if (!vec) return;
-      const { error } = await (admin as any).from('questions').update({ embedding: vec }).eq('id', r.id);
+      const { error } = await admin.from('questions').update({ embedding: vec }).eq('id', r.id);
       if (!error) embedded++;
     }));
   }
@@ -138,13 +136,13 @@ export async function semanticSearchQuestionIds(query: string, limit = 20): Prom
   if (!vec) return [];
   try {
     const supabase = await createClient();
-    const { data, error } = await (supabase as any).rpc('match_questions', {
+    const { data, error } = await supabase.rpc('match_questions', {
       query_embedding: vec,
       match_count: limit,
       similarity_threshold: 0.2,
     });
     if (error) throw error;
-    return (data ?? []).map((r: any) => r.id as string);
+    return (data ?? []).map((r) => r.id);
   } catch {
     return [];
   }
@@ -157,12 +155,12 @@ export async function semanticSearchQuestionIds(query: string, limit = 20): Prom
 export async function findSimilarQuestionIds(questionId: string, limit = 6): Promise<string[]> {
   try {
     const supabase = await createClient();
-    const { data, error } = await (supabase as any).rpc('find_similar_questions', {
+    const { data, error } = await supabase.rpc('find_similar_questions', {
       p_question_id: questionId,
       match_count: limit,
     });
     if (error) throw error;
-    return (data ?? []).map((r: any) => r.id as string);
+    return (data ?? []).map((r) => r.id);
   } catch {
     return [];
   }
@@ -183,11 +181,11 @@ export async function getSimilarQuestions(questionId: string, limit = 6): Promis
   if (!ids.length) return [];
   try {
     const supabase = await createClient();
-    const { data } = await (supabase as any)
+    const { data } = await supabase
       .from('questions')
       .select('id, content, source')
       .in('id', ids);
-    const map = new Map((data ?? []).map((r: any) => [r.id, r as SimilarQuestion]));
+    const map = new Map((data ?? []).map((r) => [r.id, r]));
     return ids.map((id) => map.get(id)).filter((x): x is SimilarQuestion => !!x);
   } catch {
     return [];

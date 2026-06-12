@@ -25,9 +25,11 @@ interface Props {
   redirectTo?: string;
 }
 
-export default function LoginForm({ action }: Props) {
+export default function LoginForm({ action, redirectTo }: Props) {
   return (
     <form action={action} className="space-y-4">
+      {/* middleware 弹来登录时带的回跳地址，随表单提交给 login action */}
+      {redirectTo && <input type="hidden" name="redirectTo" value={redirectTo} />}
       <div className="space-y-1.5">
         <label htmlFor="email" className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
           邮箱

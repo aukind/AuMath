@@ -7,18 +7,21 @@ import { createAdminClient } from '@/lib/supabase/admin';
 import { isAdminUser } from '@/lib/utils/auth';
 import { isMultiAnswer } from '@/lib/questions/content';
 import { embedQuestion } from '@/app/actions/embeddings';
+import { classifyKnowledgePoints } from '@/lib/knowledge/classify';
+import { linkQuestionsToKnowledgePoints } from '@/lib/knowledge/linker';
 
 /** 无 cookie 的匿名只读客户端，专供 unstable_cache 缓存公共数据（试卷/分类，RLS 公开可读）。
  *  unstable_cache 内不能访问 cookies/headers，故不能用 server.ts 的 createClient。
  *  公共环境变量必定存在，不会失败。 */
 function createPublicClient() {
-  return createSupabaseJsClient(
+  return createSupabaseJsClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     { auth: { persistSession: false } },
   );
 }
-import type { QuestionWithTopics, QuestionWithNumber, PaperRow, TopicWithChildren, TopicRow, QuestionType, Difficulty, QuestionStatus, InteractiveSandboxConfig } from '@/types/database';
+import type { QuestionWithTopics, QuestionWithNumber, PaperRow, TopicWithChildren, TopicRow, QuestionType, QuestionMetadata, Difficulty, QuestionStatus, InteractiveSandboxConfig } from '@/types/database';
+import type { Database, Json } from '@/types/supabase';
 
 // ── 录题 ─────────────────────────────────────────────────────
 
@@ -71,7 +74,7 @@ export async function createQuestion(
   const asAdmin = isAdminUser(user);
 
   const opts = cleanOptions(input.options);
-  const metadata: Record<string, unknown> = {};
+  const metadata: { [key: string]: Json | undefined } = {};
   if (opts.length) {
     metadata.options = opts;
     metadata.choice_type = input.choice_type === 'multi' ? 'multi' : 'single';
@@ -89,7 +92,7 @@ export async function createQuestion(
       status:              input.status,
       is_public:           asAdmin,
       created_by:          user.id,
-      interactive_sandbox: input.interactive_sandbox ?? null,
+      interactive_sandbox: (input.interactive_sandbox ?? null) as unknown as Json,
       metadata,
     })
     .select('id')
@@ -102,6 +105,17 @@ export async function createQuestion(
       .from('question_topic_relations')
       .insert(input.topic_ids.map(tid => ({ question_id: data.id, topic_id: tid })));
     if (relError) return { success: false, error: relError.message };
+  } else {
+    // 未手选知识点 → Gemini 受控词表自动标注兜底，喂知识星图共现边/反链。
+    // 尽力而为：分类/落库失败都静默跳过，不影响录题；存量可由管理端回填补救。
+    const classified = await classifyKnowledgePoints([
+      { id: data.id, text: `${input.content}\n\n【解析摘要】${input.analysis.slice(0, 1000)}` },
+    ]);
+    const points = classified.get(data.id);
+    if (points?.length) {
+      const { linked } = await linkQuestionsToKnowledgePoints(admin, [{ questionId: data.id, points }]);
+      if (linked > 0) revalidateTag('topics', 'max');
+    }
   }
 
   // 公开题写入语义向量（私题/草稿不索引，省 Gemini 调用）。失败已内部吞掉，不影响录题。
@@ -132,31 +146,39 @@ export interface QuestionForEdit {
 }
 
 export async function getQuestionById(id: string): Promise<QuestionForEdit | null> {
+  // 鉴权：本函数走 service-role 绕过 RLS，必须先验明身份——
+  // 管理员可读任意题（编辑台）；普通用户只能读自己录入的题（私题编辑回显）。
+  const userClient = await createClient();
+  const { data: { user } } = await userClient.auth.getUser();
+  if (!user) return null;
+
   let supabase;
   try { supabase = createAdminClient(); } catch { return null; }
 
   const { data, error } = await supabase
     .from('questions')
-    .select('id, content, answer, analysis, question_type, difficulty, year, source, status, metadata, interactive_sandbox, question_topic_relations(topic_id)')
+    .select('id, content, answer, analysis, question_type, difficulty, year, source, status, metadata, interactive_sandbox, created_by, question_topic_relations(topic_id)')
     .eq('id', id)
     .maybeSingle();
 
   if (error || !data) return null;
+  if (!isAdminUser(user) && data.created_by !== user.id) return null;
 
+  const metadata = (data.metadata ?? {}) as QuestionMetadata;
   return {
     id:                  data.id,
     content:             data.content,
     answer:              data.answer,
-    analysis:            (data as any).analysis ?? '',
-    question_type:       (data as any).question_type ?? 'calculation',
-    difficulty:          data.difficulty as Difficulty,
+    analysis:            data.analysis,
+    question_type:       data.question_type,
+    difficulty:          (data.difficulty ?? 3) as Difficulty,
     year:                data.year ?? null,
     source:              data.source ?? null,
-    status:              (data as any).status ?? 'published',
-    topic_ids:           ((data as any).question_topic_relations ?? []).map((r: any) => r.topic_id),
-    interactive_sandbox: ((data as any).interactive_sandbox ?? null) as InteractiveSandboxConfig | null,
-    options:             optionsToStringArray((data as any).metadata?.options),
-    choice_type:         (data as any).metadata?.choice_type === 'multi' || isMultiAnswer((data as any).answer ?? '')
+    status:              data.status,
+    topic_ids:           (data.question_topic_relations ?? []).map((r) => r.topic_id),
+    interactive_sandbox: (data.interactive_sandbox ?? null) as unknown as InteractiveSandboxConfig | null,
+    options:             optionsToStringArray(metadata.options),
+    choice_type:         metadata.choice_type === 'multi' || isMultiAnswer(data.answer ?? '')
                            ? 'multi' : 'single',
   };
 }
@@ -167,6 +189,12 @@ export async function updateQuestion(
   id: string,
   input: CreateQuestionInput,
 ): Promise<{ success: boolean; error?: string }> {
+  // 鉴权（与 deleteQuestion 同规则）：管理员可改任意题；普通用户只能改自己的私有题。
+  // 本函数走 service-role 绕过 RLS，这道校验是唯一的防线，绝不能省。
+  const userClient = await createClient();
+  const { data: { user } } = await userClient.auth.getUser();
+  if (!user) return { success: false, error: '请先登录' };
+
   let supabase;
   try { supabase = createAdminClient(); } catch {
     return { success: false, error: '服务端配置错误：缺少 SUPABASE_SERVICE_ROLE_KEY' };
@@ -174,8 +202,14 @@ export async function updateQuestion(
 
   // 合并 metadata：保留既有的 tags/exam_number 等键，只覆写 options。
   const { data: existing } = await supabase
-    .from('questions').select('metadata, is_public').eq('id', id).maybeSingle();
-  const metadata: Record<string, unknown> = { ...((existing as any)?.metadata ?? {}) };
+    .from('questions').select('metadata, is_public, created_by').eq('id', id).maybeSingle();
+  if (!existing) return { success: false, error: '题目不存在' };
+  if (!isAdminUser(user)) {
+    if (existing.is_public || existing.created_by !== user.id) {
+      return { success: false, error: '无权限修改该题目' };
+    }
+  }
+  const metadata: { [key: string]: Json | undefined } = { ...((existing.metadata as Record<string, Json | undefined> | null) ?? {}) };
   const opts = cleanOptions(input.options);
   if (opts.length) {
     metadata.options = opts;
@@ -196,7 +230,7 @@ export async function updateQuestion(
       year:                input.year,
       source:              input.source,
       status:              input.status,
-      interactive_sandbox: input.interactive_sandbox ?? null,
+      interactive_sandbox: (input.interactive_sandbox ?? null) as unknown as Json,
       metadata,
     })
     .eq('id', id);
@@ -214,7 +248,7 @@ export async function updateQuestion(
   }
 
   // 正文可能已改，公开题重算语义向量；私题不索引。失败已内部吞掉。
-  if ((existing as any)?.is_public) await embedQuestion(id, input.content, input.source);
+  if (existing?.is_public) await embedQuestion(id, input.content, input.source);
 
   revalidatePath('/');
   revalidatePath(`/admin/edit/${id}`);
@@ -319,7 +353,7 @@ function buildTopicTree(flat: TopicRow[]): TopicWithChildren[] {
   }
 
   const sortNodes = (nodes: TopicWithChildren[]) => {
-    nodes.sort((a, b) => ((a as any).sort_order ?? a.order_index) - ((b as any).sort_order ?? b.order_index));
+    nodes.sort((a, b) => (a.sort_order ?? a.order_index) - (b.sort_order ?? b.order_index));
     nodes.forEach(n => sortNodes(n.children));
   };
   sortNodes(roots);
@@ -355,23 +389,18 @@ export async function getQuestionTopics(): Promise<TopicWithChildren[]> {
 // 是切卷「转圈圈」的主要成本，故用 unstable_cache 缓存；失效靠 tag 'papers' 或 1 小时 TTL。
 const getAllPapersCached = unstable_cache(
   async (): Promise<PaperRow[]> => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb = createPublicClient() as any;
-
-  // track/region/contest 由 migration 024 引入；select '*' 在迁移前后都不报错（缺列即缺字段）。
-  type PaperRaw = { id: string; title: string; year: number | null; type: 'real' | 'mock'; grade: string | null; track?: 'gaokao' | 'competition'; region?: string | null; contest?: string | null; created_at: string; updated_at: string };
-  type PqRaw = { paper_id: string };
+  const sb = createPublicClient();
 
   // 分页拉全 paper_questions —— Supabase 默认 range 0-999，行数破千后会被悄悄截断，
   // 导致部分试卷在 countMap 里缺失、PaperList 不显示题数徽章。
-  async function fetchAllPaperQuestionIds(): Promise<PqRaw[]> {
+  async function fetchAllPaperQuestionIds(): Promise<{ paper_id: string }[]> {
     const PAGE = 1000;
-    const all: PqRaw[] = [];
+    const all: { paper_id: string }[] = [];
     for (let offset = 0; ; offset += PAGE) {
       const { data, error } = await sb
         .from('paper_questions')
         .select('paper_id')
-        .range(offset, offset + PAGE - 1) as { data: PqRaw[] | null; error: { message: string } | null };
+        .range(offset, offset + PAGE - 1);
       if (error) {
         console.error('[getPapers] paper_questions page', offset, error.message);
         break;
@@ -383,22 +412,32 @@ const getAllPapersCached = unstable_cache(
     return all;
   }
 
-  const [papersResult, pqRows] = await Promise.all([
+  // 题数统计：迁移 029 后用库内 GROUP BY 一把返回（paper_question_counts RPC）；
+  // RPC 未建/异常 → 回退分页扫全表的老路径。
+  async function fetchCountMap(): Promise<Map<string, number>> {
+    const m = new Map<string, number>();
+    const { data, error } = await sb.rpc('paper_question_counts');
+    if (!error && data) {
+      for (const row of data) m.set(row.paper_id, Number(row.question_count));
+      return m;
+    }
+    for (const pq of await fetchAllPaperQuestionIds()) {
+      m.set(pq.paper_id, (m.get(pq.paper_id) ?? 0) + 1);
+    }
+    return m;
+  }
+
+  const [papersResult, countMap] = await Promise.all([
     sb.from('papers')
       .select('*')
       .order('year', { ascending: false, nullsFirst: false })
-      .order('created_at', { ascending: false }) as Promise<{ data: PaperRaw[] | null; error: { message: string } | null }>,
-    fetchAllPaperQuestionIds(),
+      .order('created_at', { ascending: false }),
+    fetchCountMap(),
   ]);
 
   if (papersResult.error) {
     console.error('[getPapers]', papersResult.error.message);
     return [];
-  }
-
-  const countMap = new Map<string, number>();
-  for (const pq of pqRows) {
-    countMap.set(pq.paper_id, (countMap.get(pq.paper_id) ?? 0) + 1);
   }
 
   return (papersResult.data ?? []).map(p => ({
@@ -450,7 +489,7 @@ export async function deleteQuestion(
   }
 
   await admin.from('question_topic_relations').delete().eq('question_id', id);
-  await (admin as any).from('paper_questions').delete().eq('question_id', id);
+  await admin.from('paper_questions').delete().eq('question_id', id);
   const { error } = await admin.from('questions').delete().eq('id', id);
   if (error) return { success: false, error: error.message };
 
@@ -483,7 +522,7 @@ export async function updateQuestionCategory(
     }
   }
 
-  const metadata = { ...(existing?.metadata as Record<string, unknown> ?? {}), tags: [categoryName] };
+  const metadata = { ...((existing?.metadata as Record<string, Json | undefined> | null) ?? {}), tags: [categoryName] };
   await admin.from('questions').update({ metadata }).eq('id', questionId);
 
   const { error: delErr } = await admin
@@ -546,10 +585,10 @@ export async function getQuestionsByPaperId(paperId: string): Promise<PaperQuest
   }
 
   const questions: QuestionWithNumber[] = (rows ?? [])
-    .filter((row: any) => row.questions)
-    .map((row: any) => ({
-      ...(row.questions as QuestionWithTopics),
-      question_number: row.question_number as number,
+    .filter((row) => row.questions)
+    .map((row) => ({
+      ...(row.questions as unknown as QuestionWithTopics),
+      question_number: row.question_number,
     }));
 
   return { paper: paper as PaperRow | null, questions };

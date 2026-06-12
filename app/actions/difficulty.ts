@@ -30,10 +30,7 @@ export async function rateDifficulty(questionId: string, rating: number): Promis
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: '请先登录再评分' };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb = supabase as any;
-
-  const { error: upErr } = await sb
+  const { error: upErr } = await supabase
     .from('question_difficulty_ratings')
     .upsert(
       { question_id: questionId, user_id: user.id, rating, updated_at: new Date().toISOString() },
@@ -45,7 +42,7 @@ export async function rateDifficulty(questionId: string, rating: number): Promis
   }
 
   // 触发器已更新聚合列，回读最新值（实时反映本次评分）。
-  const { data: q } = await sb
+  const { data: q } = await supabase
     .from('questions')
     .select('rating_count, rating_sum, rating_avg')
     .eq('id', questionId)
@@ -69,8 +66,7 @@ export async function getMyDifficultyRatings(): Promise<Record<string, number>> 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return {};
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data, error } = await (supabase as any)
+  const { data, error } = await supabase
     .from('question_difficulty_ratings')
     .select('question_id, rating')
     .eq('user_id', user.id);
@@ -81,7 +77,7 @@ export async function getMyDifficultyRatings(): Promise<Record<string, number>> 
   }
 
   const map: Record<string, number> = {};
-  for (const r of (data ?? []) as { question_id: string; rating: number }[]) {
+  for (const r of data ?? []) {
     map[r.question_id] = r.rating;
   }
   return map;

@@ -6,12 +6,11 @@
 //   · 来源 library：资源大厅一键收藏，存引用快照（library_item_id + 标题/封面/url），不复制文件。
 //   · 读写均走带 cookie 的用户态客户端，过 user_documents 的 owner-only RLS。
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
 import type { KnowledgeDoc } from '@/types/library';
+import type { Database } from '@/types/supabase';
 
 const BUCKET = 'library-pdfs';
 const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46]; // "%PDF"
@@ -22,11 +21,11 @@ function publicUrl(objectName: string): string {
   return `${base}/storage/v1/object/public/${BUCKET}/${objectName}`;
 }
 
-function mapDoc(row: any): KnowledgeDoc {
+function mapDoc(row: Database['public']['Tables']['user_documents']['Row']): KnowledgeDoc {
   return {
     id: row.id,
     title: row.title,
-    source: row.source,
+    source: row.source as KnowledgeDoc['source'],
     pdf_url: row.pdf_url,
     cover_url: row.cover_url ?? null,
     library_item_id: row.library_item_id ?? null,
@@ -40,7 +39,7 @@ export async function getMyKnowledgeDocs(): Promise<KnowledgeDoc[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data, error } = await (supabase as any)
+  const { data, error } = await supabase
     .from('user_documents')
     .select('*')
     .eq('user_id', user.id)
@@ -59,7 +58,7 @@ export async function getMyKnowledgeItemIds(): Promise<string[]> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return [];
 
-  const { data, error } = await (supabase as any)
+  const { data, error } = await supabase
     .from('user_documents')
     .select('library_item_id')
     .eq('user_id', user.id)
@@ -68,7 +67,7 @@ export async function getMyKnowledgeItemIds(): Promise<string[]> {
     console.error('[getMyKnowledgeItemIds]', error.message);
     return [];
   }
-  return (data ?? []).map((r: { library_item_id: string }) => r.library_item_id);
+  return (data ?? []).map((r) => r.library_item_id).filter((v): v is string => v !== null);
 }
 
 /**
@@ -82,9 +81,8 @@ export async function saveLibraryItemToKnowledge(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: '请先登录' };
 
-  const sb = supabase as any;
   // 读公共资料快照（仅 published 可收藏）
-  const { data: item, error: readErr } = await sb
+  const { data: item, error: readErr } = await supabase
     .from('library_items')
     .select('id, title, pdf_url, cover_url, status')
     .eq('id', itemId)
@@ -92,7 +90,7 @@ export async function saveLibraryItemToKnowledge(
   if (readErr || !item) return { success: false, error: '资料不存在' };
   if (item.status !== 'published') return { success: false, error: '该资料暂不可收藏' };
 
-  const { error } = await sb.from('user_documents').insert({
+  const { error } = await supabase.from('user_documents').insert({
     user_id: user.id,
     title: item.title,
     source: 'library',
@@ -102,7 +100,7 @@ export async function saveLibraryItemToKnowledge(
   });
   if (error) {
     // 唯一索引冲突 = 已收藏过，视为幂等成功
-    if ((error as any).code === '23505') return { success: true, already: true };
+    if (error.code === '23505') return { success: true, already: true };
     return { success: false, error: error.message };
   }
 
@@ -118,7 +116,7 @@ export async function unsaveLibraryItem(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: '请先登录' };
 
-  const { error } = await (supabase as any)
+  const { error } = await supabase
     .from('user_documents')
     .delete()
     .eq('user_id', user.id)
@@ -170,8 +168,7 @@ export async function addStudioDocument(input: {
     return { success: false, error: '文件校验失败，请重试' };
   }
 
-  const sb = supabase as any;
-  const { data, error } = await sb
+  const { data, error } = await supabase
     .from('user_documents')
     .insert({
       user_id: user.id,
@@ -188,7 +185,7 @@ export async function addStudioDocument(input: {
   }
 
   revalidatePath('/');
-  return { success: true, id: (data as { id: string }).id };
+  return { success: true, id: data.id };
 }
 
 /** 从知识库移除一条（仅删本人；studio 来源的 Storage 对象一并回收，library 引用不动原文件）。 */
@@ -199,8 +196,7 @@ export async function removeKnowledgeDoc(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: '请先登录' };
 
-  const sb = supabase as any;
-  const { data: row } = await sb
+  const { data: row } = await supabase
     .from('user_documents')
     .select('source, pdf_url')
     .eq('id', id)
@@ -208,7 +204,7 @@ export async function removeKnowledgeDoc(
     .maybeSingle();
   if (!row) return { success: false, error: '文档不存在' };
 
-  const { error } = await sb
+  const { error } = await supabase
     .from('user_documents')
     .delete()
     .eq('id', id)
