@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState, useCallback, useEffect, useTransition } from 'react';
+import { Suspense, use, useId, useMemo, useState, useCallback, useEffect, useTransition } from 'react';
 import Link from 'next/link';
 import { motion, LayoutGroup } from 'framer-motion';
 import {
@@ -28,6 +28,7 @@ import ForumPostList from '@/components/forum/ForumPostList';
 import HeavyContentContainer from '@/components/dashboard/HeavyContentContainer';
 import EditPaperButton from '@/components/admin/EditPaperButton';
 import MyKnowledgeView from '@/components/knowledge/MyKnowledgeView';
+import { PersonalizationProvider } from '@/components/question/PersonalizationContext';
 import { useSoftNav, isPlainLeftClick } from '@/components/ui/useSoftNav';
 import { deleteQuestion, updateQuestionCategory } from '@/app/actions/questions';
 import type { SortOrder } from '@/app/actions/questions';
@@ -38,29 +39,43 @@ import type { ForumPost } from '@/types/forum';
 /** 主区显示模式：社区论坛 / 我的题库 / 题目浏览（点侧边栏知识点·真题·模拟题）。 */
 export type MainView = 'forum' | 'mybank' | 'browse';
 
-interface PageLayoutProps {
-  topics: TopicWithChildren[];
-  papers: PaperRow[];
-  questions: QuestionWithTopics[];
+/** 会话三要素——由 app/page.tsx 的 auth promise 推导，各 Suspense 子树 use() 解包。 */
+export interface SessionInfo {
   isAdmin: boolean;
   isLoggedIn: boolean;
   userId?: string;
+}
+
+/** 题目浏览视图的数据包（题目 + 试卷信息 + 标题），服务端聚合为单个 promise。 */
+export interface BrowseData {
+  questions: QuestionWithTopics[];
+  activePaper: PaperRow | null;
+  pageTitle: string;
+}
+
+interface PageLayoutProps {
+  // ── URL 派生（同步可得，决定渲染哪些区块）──
   topicId?: string;
   paperId?: string;
-  pageTitle: string;
-  activePaper: PaperRow | null;
   validSort: SortOrder;
   mainView: MainView;
-  forumPosts: ForumPost[];
   mybankTab: WorkspaceType;
   /** 我的题库当前在「知识库」标签页（workspace=documents），渲染 PDF 知识库而非题目。 */
   isDocsTab?: boolean;
-  knowledgeDocs?: KnowledgeDoc[];
-  favoritedIds: string[];
-  erroredIds: string[];
-  myRatings: Record<string, number>;
-  siteViews: number;
-  dueCount?: number;
+  // ── 流式数据（RSC 只创建 promise 不 await；各 Suspense 子树 use() 解包注水）──
+  sessionPromise: Promise<SessionInfo>;
+  topicsPromise: Promise<TopicWithChildren[]>;
+  papersPromise: Promise<PaperRow[]>;
+  /** 仅 browse 视图（?topic / ?paper）存在，其余为 null。 */
+  browsePromise: Promise<BrowseData> | null;
+  workspaceQuestionsPromise: Promise<QuestionWithTopics[]>;
+  knowledgeDocsPromise: Promise<KnowledgeDoc[]>;
+  forumPostsPromise: Promise<ForumPost[]>;
+  favoritedIdsPromise: Promise<string[]>;
+  erroredIdsPromise: Promise<string[]>;
+  myRatingsPromise: Promise<Record<string, number>>;
+  siteViewsPromise: Promise<number>;
+  dueCountPromise: Promise<number>;
 }
 
 const MYBANK_TABS: { key: WorkspaceType; label: string; icon: typeof Star }[] = [
@@ -80,34 +95,31 @@ export default function PageLayout(props: PageLayoutProps) {
 }
 
 function PageLayoutInner({
-  topics,
-  papers,
-  questions,
-  isAdmin,
-  isLoggedIn,
-  userId,
   topicId,
   paperId,
-  pageTitle,
-  activePaper,
   validSort,
   mainView,
-  forumPosts,
   mybankTab,
   isDocsTab = false,
-  knowledgeDocs = [],
-  favoritedIds,
-  erroredIds,
-  myRatings,
-  siteViews,
-  dueCount = 0,
+  sessionPromise,
+  topicsPromise,
+  papersPromise,
+  browsePromise,
+  workspaceQuestionsPromise,
+  knowledgeDocsPromise,
+  forumPostsPromise,
+  favoritedIdsPromise,
+  erroredIdsPromise,
+  myRatingsPromise,
+  siteViewsPromise,
+  dueCountPromise,
 }: PageLayoutProps) {
   // ── 沉浸阅读模式 ──────────────────────────────────────────────
   const { isZenMode } = useZenMode();
 
   // ── Optimistic delete ────────────────────────────────────────
+  // 列表数据已下沉到各 Suspense 子树解包，这里只保管「已删 id 集合」，子树各自过滤。
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set());
-  const visibleQuestions = questions.filter(q => !deletedIds.has(q.id));
 
   const handleDelete = useCallback(async (id: string) => {
     setDeletedIds(prev => new Set([...prev, id]));
@@ -121,6 +133,12 @@ function PageLayoutInner({
       showToast(`删除失败：${result.error}`, 'error');
     }
   }, []);
+
+  // ── 个人化数据（收藏/错题/评分）promise 直通：题卡小部件各自独立注水 ──
+  const personalization = useMemo(
+    () => ({ favoritedIds: favoritedIdsPromise, erroredIds: erroredIdsPromise, myRatings: myRatingsPromise }),
+    [favoritedIdsPromise, erroredIdsPromise, myRatingsPromise],
+  );
 
   // ── 论坛/我的题库 切换：状态提升至此，由左栏主导航驱动；保留 0ms keep-alive 秒切 ──
   // workspace（urgent）驱动左栏高亮与 URL 软更新；contentWorkspace（transition）驱动重子树显隐。
@@ -170,7 +188,9 @@ function PageLayoutInner({
   const dndId = useId();
 
   function handleDragStart(event: DragStartEvent) {
-    setActiveQuestion(questions.find(q => q.id === event.active.id) ?? null);
+    // 题目数组在 Suspense 子树内部，这里从 useDraggable 的 data 里取被拖的题
+    const dragged = (event.active.data.current as { question?: QuestionWithTopics } | undefined)?.question;
+    setActiveQuestion(dragged ?? null);
   }
 
   async function handleDragEnd(event: DragEndEvent) {
@@ -185,6 +205,7 @@ function PageLayoutInner({
 
   return (
     <DndContext id={dndId} sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+      <PersonalizationProvider value={personalization}>
       <div className="mx-auto max-w-7xl w-full flex flex-1 overflow-hidden">
 
         {/* ── Desktop sidebar：Linear 风全局导航 + 资源大厅/题库 语境面板 ── */}
@@ -198,20 +219,19 @@ function PageLayoutInner({
             isZenMode ? 'lg:w-0 lg:px-0 lg:border-0' : 'w-56 xl:w-64 px-3',
           ].join(' ')}
         >
-          <HomeSidebar
-            topics={topics}
-            papers={papers}
-            selectedTopicId={paperId ? undefined : topicId}
-            selectedPaperId={paperId}
-            isAdmin={isAdmin}
-            isLoggedIn={isLoggedIn}
-            mainView={mainView}
-            activeWorkspace={workspace}
-            onWorkspaceChange={switchWorkspace}
-          />
-          <div className="mt-auto flex flex-col gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
-            <SiteViewsBadge initialCount={siteViews} />
-          </div>
+          <Suspense fallback={<SidebarSkeleton />}>
+            <SidebarPanel
+              topicsPromise={topicsPromise}
+              papersPromise={papersPromise}
+              sessionPromise={sessionPromise}
+              siteViewsPromise={siteViewsPromise}
+              topicId={topicId}
+              paperId={paperId}
+              mainView={mainView}
+              activeWorkspace={workspace}
+              onWorkspaceChange={switchWorkspace}
+            />
+          </Suspense>
         </aside>
 
         {/* ── Main content ── */}
@@ -229,49 +249,43 @@ function PageLayoutInner({
             ].join(' ')}
           >
 
-          {mainView === 'browse' ? (
-            <BrowseView
-              pageTitle={pageTitle}
-              activePaper={activePaper}
-              validSort={validSort}
-              topicId={topicId}
-              paperId={paperId}
-              questions={visibleQuestions}
-              hasTopics={topics.length > 0}
-              isAdmin={isAdmin}
-              isLoggedIn={isLoggedIn}
-              userId={userId}
-              favoritedIds={favoritedIds}
-              erroredIds={erroredIds}
-              myRatings={myRatings}
-              onDelete={handleDelete}
-            />
+          {mainView === 'browse' && browsePromise ? (
+            <Suspense fallback={<BrowseSkeleton />}>
+              <BrowseView
+                browsePromise={browsePromise}
+                sessionPromise={sessionPromise}
+                topicsPromise={topicsPromise}
+                validSort={validSort}
+                topicId={topicId}
+                paperId={paperId}
+                deletedIds={deletedIds}
+                onDelete={handleDelete}
+              />
+            </Suspense>
           ) : (
             // ── 论坛 / 我的题库：左栏驱动 + 伪 Keep-Alive，两棵子树常驻、0ms 秒切 ──
             // isWorkspacePending 时容器轻微降透明，给「正在切」反馈而不阻塞点击。
             <div className={isWorkspacePending ? 'opacity-70 transition-opacity duration-200' : 'opacity-100 transition-opacity duration-200'}>
               <HeavyContentContainer
                 activeTab={contentWorkspace}
-                forum={<ForumPostList posts={forumPosts} canPost={isLoggedIn} />}
+                forum={
+                  <Suspense fallback={<ListSkeleton rows={4} />}>
+                    <ForumPanel forumPostsPromise={forumPostsPromise} sessionPromise={sessionPromise} />
+                  </Suspense>
+                }
                 bank={
-                  isLoggedIn ? (
-                    <MyBankView
-                      tab={mybankTab}
+                  <Suspense fallback={<ListSkeleton rows={3} />}>
+                    <BankPanel
+                      sessionPromise={sessionPromise}
+                      workspaceQuestionsPromise={workspaceQuestionsPromise}
+                      knowledgeDocsPromise={knowledgeDocsPromise}
+                      dueCountPromise={dueCountPromise}
+                      mybankTab={mybankTab}
                       isDocsTab={isDocsTab}
-                      knowledgeDocs={knowledgeDocs}
-                      questions={visibleQuestions}
-                      isAdmin={isAdmin}
-                      isLoggedIn={isLoggedIn}
-                      userId={userId}
-                      favoritedIds={favoritedIds}
-                      erroredIds={erroredIds}
-                      myRatings={myRatings}
-                      dueCount={dueCount}
+                      deletedIds={deletedIds}
                       onDelete={handleDelete}
                     />
-                  ) : (
-                    <MyBankGate />
-                  )
+                  </Suspense>
                 }
               />
             </div>
@@ -309,30 +323,152 @@ function PageLayoutInner({
           {toast.msg}
         </div>
       )}
+      </PersonalizationProvider>
     </DndContext>
+  );
+}
+
+// ── 侧栏（导航 + 题目树 + 访问量徽标）：等 topics/papers/session 解包后整体亮起 ──
+function SidebarPanel({
+  topicsPromise, papersPromise, sessionPromise, siteViewsPromise,
+  topicId, paperId, mainView, activeWorkspace, onWorkspaceChange,
+}: {
+  topicsPromise: Promise<TopicWithChildren[]>;
+  papersPromise: Promise<PaperRow[]>;
+  sessionPromise: Promise<SessionInfo>;
+  siteViewsPromise: Promise<number>;
+  topicId?: string;
+  paperId?: string;
+  mainView: MainView;
+  activeWorkspace: 'forum' | 'bank';
+  onWorkspaceChange: (w: 'forum' | 'bank') => void;
+}) {
+  const topics = use(topicsPromise);
+  const papers = use(papersPromise);
+  const { isAdmin, isLoggedIn } = use(sessionPromise);
+  const siteViews = use(siteViewsPromise);
+
+  return (
+    <>
+      <HomeSidebar
+        topics={topics}
+        papers={papers}
+        selectedTopicId={paperId ? undefined : topicId}
+        selectedPaperId={paperId}
+        isAdmin={isAdmin}
+        isLoggedIn={isLoggedIn}
+        mainView={mainView}
+        activeWorkspace={activeWorkspace}
+        onWorkspaceChange={onWorkspaceChange}
+      />
+      <div className="mt-auto flex flex-col gap-2 pt-3 border-t border-zinc-100 dark:border-zinc-800">
+        <SiteViewsBadge initialCount={siteViews} />
+      </div>
+    </>
+  );
+}
+
+function SidebarSkeleton() {
+  return (
+    <div aria-hidden className="flex flex-col gap-2 px-1 pt-1">
+      {Array.from({ length: 7 }).map((_, i) => (
+        <div
+          key={i}
+          className="h-8 rounded-lg bg-zinc-200/50 dark:bg-zinc-800/50 animate-pulse"
+          style={{ animationDelay: `${i * 90}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ── 论坛面板：帖子列表注水 ───────────────────────────────────
+function ForumPanel({
+  forumPostsPromise, sessionPromise,
+}: {
+  forumPostsPromise: Promise<ForumPost[]>;
+  sessionPromise: Promise<SessionInfo>;
+}) {
+  const posts = use(forumPostsPromise);
+  const { isLoggedIn } = use(sessionPromise);
+  return <ForumPostList posts={posts} canPost={isLoggedIn} />;
+}
+
+// ── 我的题库面板：会话解包后分流 登录墙 / 题库视图 ───────────
+function BankPanel({
+  sessionPromise, workspaceQuestionsPromise, knowledgeDocsPromise, dueCountPromise,
+  mybankTab, isDocsTab, deletedIds, onDelete,
+}: {
+  sessionPromise: Promise<SessionInfo>;
+  workspaceQuestionsPromise: Promise<QuestionWithTopics[]>;
+  knowledgeDocsPromise: Promise<KnowledgeDoc[]>;
+  dueCountPromise: Promise<number>;
+  mybankTab: WorkspaceType;
+  isDocsTab: boolean;
+  deletedIds: Set<string>;
+  onDelete: (id: string) => void;
+}) {
+  const session = use(sessionPromise);
+  if (!session.isLoggedIn) return <MyBankGate />;
+  return (
+    <MyBankView
+      tab={mybankTab}
+      isDocsTab={isDocsTab}
+      workspaceQuestionsPromise={workspaceQuestionsPromise}
+      knowledgeDocsPromise={knowledgeDocsPromise}
+      dueCountPromise={dueCountPromise}
+      isAdmin={session.isAdmin}
+      isLoggedIn={session.isLoggedIn}
+      userId={session.userId}
+      deletedIds={deletedIds}
+      onDelete={onDelete}
+    />
+  );
+}
+
+// ── 通用列表骨架（论坛/题库/浏览共用）────────────────────────
+function ListSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <div aria-hidden className="space-y-5 max-w-3xl">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div
+          key={i}
+          className="h-40 rounded-2xl border border-zinc-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm animate-pulse"
+          style={{ animationDelay: `${i * 120}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function BrowseSkeleton() {
+  return (
+    <div aria-hidden>
+      <div className="h-4 w-20 mb-4 rounded bg-zinc-200/60 dark:bg-zinc-800/60 animate-pulse" />
+      <div className="h-6 w-48 mb-6 rounded bg-zinc-200/60 dark:bg-zinc-800/60 animate-pulse" />
+      <ListSkeleton rows={3} />
+    </div>
   );
 }
 
 // ── 题目浏览（点侧边栏知识点 / 真题 / 模拟题）────────────────
 function BrowseView({
-  pageTitle, activePaper, validSort, topicId, paperId,
-  questions, hasTopics, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, myRatings, onDelete,
+  browsePromise, sessionPromise, topicsPromise,
+  validSort, topicId, paperId, deletedIds, onDelete,
 }: {
-  pageTitle: string;
-  activePaper: PaperRow | null;
+  browsePromise: Promise<BrowseData>;
+  sessionPromise: Promise<SessionInfo>;
+  topicsPromise: Promise<TopicWithChildren[]>;
   validSort: SortOrder;
   topicId?: string;
   paperId?: string;
-  questions: QuestionWithTopics[];
-  hasTopics: boolean;
-  isAdmin: boolean;
-  isLoggedIn: boolean;
-  userId?: string;
-  favoritedIds: string[];
-  erroredIds: string[];
-  myRatings: Record<string, number>;
+  deletedIds: Set<string>;
   onDelete: (id: string) => void;
 }) {
+  const { questions, activePaper, pageTitle } = use(browsePromise);
+  const { isAdmin, isLoggedIn, userId } = use(sessionPromise);
+  const hasTopics = use(topicsPromise).length > 0;
+  const visibleQuestions = questions.filter(q => !deletedIds.has(q.id));
   const { navigate, isPending } = useSoftNav();
   return (
     <>
@@ -354,7 +490,7 @@ function BrowseView({
         <div>
           <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">{pageTitle}</h1>
           {activePaper?.year && <span className="text-xs text-zinc-400">{activePaper.year} 年</span>}
-          {questions.length > 0 && <p className="text-xs text-zinc-400 mt-0.5">共 {questions.length} 道题</p>}
+          {visibleQuestions.length > 0 && <p className="text-xs text-zinc-400 mt-0.5">共 {visibleQuestions.length} 道题</p>}
         </div>
         <div className="flex items-center gap-2">
           {/* 管理员：直接在浏览页编辑当前试卷信息 */}
@@ -363,18 +499,15 @@ function BrowseView({
         </div>
       </div>
 
-      {questions.length === 0 ? (
+      {visibleQuestions.length === 0 ? (
         <EmptyBrowse hasTopics={hasTopics} isAdmin={isAdmin} />
       ) : (
         <QuestionSearch
-          questions={questions}
+          questions={visibleQuestions}
           isAdmin={isAdmin}
           isLoggedIn={isLoggedIn}
           userId={userId}
           onDelete={onDelete}
-          favoritedIds={favoritedIds}
-          erroredIds={erroredIds}
-          myRatings={myRatings}
           title={pageTitle}
         />
       )}
@@ -384,21 +517,24 @@ function BrowseView({
 
 // ── 我的题库（收藏 / 错题 / 最近浏览）────────────────────────
 function MyBankView({
-  tab, isDocsTab = false, knowledgeDocs = [], questions, isAdmin, isLoggedIn, userId, favoritedIds, erroredIds, myRatings, dueCount = 0, onDelete,
+  tab, isDocsTab = false, workspaceQuestionsPromise, knowledgeDocsPromise, dueCountPromise,
+  isAdmin, isLoggedIn, userId, deletedIds, onDelete,
 }: {
   tab: WorkspaceType;
   isDocsTab?: boolean;
-  knowledgeDocs?: KnowledgeDoc[];
-  questions: QuestionWithTopics[];
+  workspaceQuestionsPromise: Promise<QuestionWithTopics[]>;
+  knowledgeDocsPromise: Promise<KnowledgeDoc[]>;
+  dueCountPromise: Promise<number>;
   isAdmin: boolean;
   isLoggedIn: boolean;
   userId?: string;
-  favoritedIds: string[];
-  erroredIds: string[];
-  myRatings: Record<string, number>;
-  dueCount?: number;
+  deletedIds: Set<string>;
   onDelete: (id: string) => void;
 }) {
+  // 知识库标签页只拉文档、题目标签页只拉题目（另一侧是已解析的空 promise，use 不挂起）
+  const questions = use(workspaceQuestionsPromise).filter(q => !deletedIds.has(q.id));
+  const knowledgeDocs = isDocsTab ? use(knowledgeDocsPromise) : [];
+
   const meta: Record<WorkspaceType, { title: string; empty: string }> = {
     favorites: { title: '我的收藏', empty: '还没有收藏任何题目。浏览题目时点 ★ 即可加入收藏。' },
     errors: { title: '我的错题', empty: '错题本是空的。做题时标记错题，方便日后复盘。' },
@@ -496,39 +632,11 @@ function MyBankView({
       ) : (
       <>{/* 题目三 tab 内容 */}
 
-      {/* 错题本专属：FSRS 今日复习入口 */}
+      {/* 错题本专属：FSRS 今日复习入口 —— due 数独立注水，不阻塞错题列表 */}
       {tab === 'errors' && (
-        dueCount > 0 ? (
-          <Link
-            href="/mybank/review"
-            className="group mb-5 flex items-center gap-3 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 px-4 py-3.5 transition-colors hover:from-indigo-100 hover:to-violet-100 dark:border-indigo-500/30 dark:from-indigo-500/10 dark:to-violet-500/10 dark:hover:from-indigo-500/20 dark:hover:to-violet-500/20"
-          >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
-              <BrainCircuit size={20} />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm font-semibold text-indigo-900 dark:text-indigo-100">
-                开始今日复习
-                <span className="ml-1.5 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[0.7rem] font-bold text-white tabular-nums">
-                  {dueCount}
-                </span>
-              </span>
-              <span className="block text-xs text-indigo-500/80 dark:text-indigo-300/70">
-                FSRS 间隔重复 · 按记忆曲线精准召回到期错题
-              </span>
-            </span>
-            <ArrowRight size={18} className="shrink-0 text-indigo-400 transition-transform group-hover:translate-x-0.5" />
-          </Link>
-        ) : (
-          <div className="mb-5 flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3.5 dark:border-zinc-800 dark:bg-zinc-900/50">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-200 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500">
-              <CheckCircle2 size={20} />
-            </span>
-            <span className="text-sm text-zinc-500 dark:text-zinc-400">
-              今日复习已清空 🎉 暂无到期错题，明天再来。
-            </span>
-          </div>
-        )
+        <Suspense fallback={<FsrsEntrySkeleton />}>
+          <FsrsReviewEntry dueCountPromise={dueCountPromise} />
+        </Suspense>
       )}
 
       {questions.length === 0 ? (
@@ -546,15 +654,54 @@ function MyBankView({
             isLoggedIn={isLoggedIn}
             userId={userId}
             onDelete={onDelete}
-            favoritedIds={favoritedIds}
-            erroredIds={erroredIds}
-            myRatings={myRatings}
           />
         </>
       )}
       </>
       )}
     </div>
+  );
+}
+
+// ── FSRS 今日复习入口（错题 tab 顶部横幅）────────────────────
+function FsrsReviewEntry({ dueCountPromise }: { dueCountPromise: Promise<number> }) {
+  const dueCount = use(dueCountPromise);
+  return dueCount > 0 ? (
+    <Link
+      href="/mybank/review"
+      className="group mb-5 flex items-center gap-3 rounded-2xl border border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50 px-4 py-3.5 transition-colors hover:from-indigo-100 hover:to-violet-100 dark:border-indigo-500/30 dark:from-indigo-500/10 dark:to-violet-500/10 dark:hover:from-indigo-500/20 dark:hover:to-violet-500/20"
+    >
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white shadow-sm">
+        <BrainCircuit size={20} />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block text-sm font-semibold text-indigo-900 dark:text-indigo-100">
+          开始今日复习
+          <span className="ml-1.5 rounded-full bg-indigo-600 px-1.5 py-0.5 text-[0.7rem] font-bold text-white tabular-nums">
+            {dueCount}
+          </span>
+        </span>
+        <span className="block text-xs text-indigo-500/80 dark:text-indigo-300/70">
+          FSRS 间隔重复 · 按记忆曲线精准召回到期错题
+        </span>
+      </span>
+      <ArrowRight size={18} className="shrink-0 text-indigo-400 transition-transform group-hover:translate-x-0.5" />
+    </Link>
+  ) : (
+    <div className="mb-5 flex items-center gap-3 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3.5 dark:border-zinc-800 dark:bg-zinc-900/50">
+      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-zinc-200 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500">
+        <CheckCircle2 size={20} />
+      </span>
+      <span className="text-sm text-zinc-500 dark:text-zinc-400">
+        今日复习已清空 🎉 暂无到期错题，明天再来。
+      </span>
+    </div>
+  );
+}
+
+function FsrsEntrySkeleton() {
+  return (
+    <div aria-hidden className="mb-5 h-[4.25rem] rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 animate-pulse" />
   );
 }
 
