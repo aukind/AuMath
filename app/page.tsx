@@ -18,6 +18,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import AccountMenu from '@/components/AccountMenu';
 import NotificationBell from '@/components/NotificationBell';
 import CanvasScratchpad from '@/components/CanvasScratchpad';
+import FluidCursor from '@/components/background/FluidCursor';
 import MobileMenuDrawer from '@/components/MobileMenuDrawer';
 import type { User } from '@supabase/supabase-js';
 import type { TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceType } from '@/types/database';
@@ -180,6 +181,10 @@ export default async function HomePage({
       />
 
       <CanvasScratchpad />
+
+      {/* 首页专属：指针流体拖尾特效层（z-35 盖过内容、居演算板/弹窗之下，
+          mix-blend 融合不遮文字；reduced-motion / 无 WebGL2 时静默缺席） */}
+      <FluidCursor />
     </div>
   );
 }
