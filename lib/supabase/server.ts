@@ -1,6 +1,9 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
-import type { Database } from '@/types/database';
+import type { Database } from '@/types/supabase';
+
+/** 服务端客户端实例类型（供工具函数收参用，如 lib/notifications.ts） */
+export type SupabaseServerClient = Awaited<ReturnType<typeof createClient>>;
 
 /**
  * 服务端 Supabase 客户端（用于 Server Components 和 Server Actions）。

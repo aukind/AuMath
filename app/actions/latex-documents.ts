@@ -17,9 +17,7 @@ export async function listLatexDocuments(): Promise<LatexDocMeta[]> {
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sb = supabase as any;
-    const { data, error } = await sb
+    const { data, error } = await supabase
       .from('latex_documents')
       .select(COLS_META)
       .eq('user_id', user.id)
@@ -37,9 +35,7 @@ export async function getLatexDocument(id: string): Promise<LatexDocFull | null>
     const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const sb = supabase as any;
-    const { data, error } = await sb
+    const { data, error } = await supabase
       .from('latex_documents')
       .select(COLS_FULL)
       .eq('user_id', user.id)
@@ -59,9 +55,7 @@ export async function createLatexDocument(
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: '请先登录' };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb = supabase as any;
-  const { data, error } = await sb
+  const { data, error } = await supabase
     .from('latex_documents')
     .insert({
       user_id: user.id,
@@ -84,15 +78,13 @@ export async function updateLatexDocument(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: '请先登录' };
 
-  const fields: Record<string, unknown> = {};
+  const fields: { title?: string; content?: string; engine?: string } = {};
   if (typeof patch.title === 'string') fields.title = patch.title.trim() || '未命名文档';
   if (typeof patch.content === 'string') fields.content = patch.content;
   if (patch.engine) fields.engine = patch.engine;
   if (Object.keys(fields).length === 0) return { success: true };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb = supabase as any;
-  const { error } = await sb
+  const { error } = await supabase
     .from('latex_documents')
     .update(fields)
     .eq('user_id', user.id)
@@ -106,8 +98,7 @@ export async function deleteLatexDocument(id: string): Promise<{ success: boolea
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { success: false, error: '请先登录' };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (supabase as any)
+  const { error } = await supabase
     .from('latex_documents')
     .delete()
     .eq('user_id', user.id)

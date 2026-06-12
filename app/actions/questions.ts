@@ -12,13 +12,14 @@ import { embedQuestion } from '@/app/actions/embeddings';
  *  unstable_cache 内不能访问 cookies/headers，故不能用 server.ts 的 createClient。
  *  公共环境变量必定存在，不会失败。 */
 function createPublicClient() {
-  return createSupabaseJsClient(
+  return createSupabaseJsClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     { auth: { persistSession: false } },
   );
 }
-import type { QuestionWithTopics, QuestionWithNumber, PaperRow, TopicWithChildren, TopicRow, QuestionType, Difficulty, QuestionStatus, InteractiveSandboxConfig } from '@/types/database';
+import type { QuestionWithTopics, QuestionWithNumber, PaperRow, TopicWithChildren, TopicRow, QuestionType, QuestionMetadata, Difficulty, QuestionStatus, InteractiveSandboxConfig } from '@/types/database';
+import type { Database, Json } from '@/types/supabase';
 
 // ── 录题 ─────────────────────────────────────────────────────
 
@@ -71,7 +72,7 @@ export async function createQuestion(
   const asAdmin = isAdminUser(user);
 
   const opts = cleanOptions(input.options);
-  const metadata: Record<string, unknown> = {};
+  const metadata: { [key: string]: Json | undefined } = {};
   if (opts.length) {
     metadata.options = opts;
     metadata.choice_type = input.choice_type === 'multi' ? 'multi' : 'single';
@@ -89,7 +90,7 @@ export async function createQuestion(
       status:              input.status,
       is_public:           asAdmin,
       created_by:          user.id,
-      interactive_sandbox: input.interactive_sandbox ?? null,
+      interactive_sandbox: (input.interactive_sandbox ?? null) as unknown as Json,
       metadata,
     })
     .select('id')
@@ -143,20 +144,21 @@ export async function getQuestionById(id: string): Promise<QuestionForEdit | nul
 
   if (error || !data) return null;
 
+  const metadata = (data.metadata ?? {}) as QuestionMetadata;
   return {
     id:                  data.id,
     content:             data.content,
     answer:              data.answer,
-    analysis:            (data as any).analysis ?? '',
-    question_type:       (data as any).question_type ?? 'calculation',
-    difficulty:          data.difficulty as Difficulty,
+    analysis:            data.analysis,
+    question_type:       data.question_type,
+    difficulty:          (data.difficulty ?? 3) as Difficulty,
     year:                data.year ?? null,
     source:              data.source ?? null,
-    status:              (data as any).status ?? 'published',
-    topic_ids:           ((data as any).question_topic_relations ?? []).map((r: any) => r.topic_id),
-    interactive_sandbox: ((data as any).interactive_sandbox ?? null) as InteractiveSandboxConfig | null,
-    options:             optionsToStringArray((data as any).metadata?.options),
-    choice_type:         (data as any).metadata?.choice_type === 'multi' || isMultiAnswer((data as any).answer ?? '')
+    status:              data.status,
+    topic_ids:           (data.question_topic_relations ?? []).map((r) => r.topic_id),
+    interactive_sandbox: (data.interactive_sandbox ?? null) as unknown as InteractiveSandboxConfig | null,
+    options:             optionsToStringArray(metadata.options),
+    choice_type:         metadata.choice_type === 'multi' || isMultiAnswer(data.answer ?? '')
                            ? 'multi' : 'single',
   };
 }
@@ -175,7 +177,7 @@ export async function updateQuestion(
   // 合并 metadata：保留既有的 tags/exam_number 等键，只覆写 options。
   const { data: existing } = await supabase
     .from('questions').select('metadata, is_public').eq('id', id).maybeSingle();
-  const metadata: Record<string, unknown> = { ...((existing as any)?.metadata ?? {}) };
+  const metadata: { [key: string]: Json | undefined } = { ...((existing?.metadata as Record<string, Json | undefined> | null) ?? {}) };
   const opts = cleanOptions(input.options);
   if (opts.length) {
     metadata.options = opts;
@@ -196,7 +198,7 @@ export async function updateQuestion(
       year:                input.year,
       source:              input.source,
       status:              input.status,
-      interactive_sandbox: input.interactive_sandbox ?? null,
+      interactive_sandbox: (input.interactive_sandbox ?? null) as unknown as Json,
       metadata,
     })
     .eq('id', id);
@@ -214,7 +216,7 @@ export async function updateQuestion(
   }
 
   // 正文可能已改，公开题重算语义向量；私题不索引。失败已内部吞掉。
-  if ((existing as any)?.is_public) await embedQuestion(id, input.content, input.source);
+  if (existing?.is_public) await embedQuestion(id, input.content, input.source);
 
   revalidatePath('/');
   revalidatePath(`/admin/edit/${id}`);
@@ -319,7 +321,7 @@ function buildTopicTree(flat: TopicRow[]): TopicWithChildren[] {
   }
 
   const sortNodes = (nodes: TopicWithChildren[]) => {
-    nodes.sort((a, b) => ((a as any).sort_order ?? a.order_index) - ((b as any).sort_order ?? b.order_index));
+    nodes.sort((a, b) => (a.sort_order ?? a.order_index) - (b.sort_order ?? b.order_index));
     nodes.forEach(n => sortNodes(n.children));
   };
   sortNodes(roots);
@@ -355,23 +357,18 @@ export async function getQuestionTopics(): Promise<TopicWithChildren[]> {
 // 是切卷「转圈圈」的主要成本，故用 unstable_cache 缓存；失效靠 tag 'papers' 或 1 小时 TTL。
 const getAllPapersCached = unstable_cache(
   async (): Promise<PaperRow[]> => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sb = createPublicClient() as any;
-
-  // track/region/contest 由 migration 024 引入；select '*' 在迁移前后都不报错（缺列即缺字段）。
-  type PaperRaw = { id: string; title: string; year: number | null; type: 'real' | 'mock'; grade: string | null; track?: 'gaokao' | 'competition'; region?: string | null; contest?: string | null; created_at: string; updated_at: string };
-  type PqRaw = { paper_id: string };
+  const sb = createPublicClient();
 
   // 分页拉全 paper_questions —— Supabase 默认 range 0-999，行数破千后会被悄悄截断，
   // 导致部分试卷在 countMap 里缺失、PaperList 不显示题数徽章。
-  async function fetchAllPaperQuestionIds(): Promise<PqRaw[]> {
+  async function fetchAllPaperQuestionIds(): Promise<{ paper_id: string }[]> {
     const PAGE = 1000;
-    const all: PqRaw[] = [];
+    const all: { paper_id: string }[] = [];
     for (let offset = 0; ; offset += PAGE) {
       const { data, error } = await sb
         .from('paper_questions')
         .select('paper_id')
-        .range(offset, offset + PAGE - 1) as { data: PqRaw[] | null; error: { message: string } | null };
+        .range(offset, offset + PAGE - 1);
       if (error) {
         console.error('[getPapers] paper_questions page', offset, error.message);
         break;
@@ -387,7 +384,7 @@ const getAllPapersCached = unstable_cache(
     sb.from('papers')
       .select('*')
       .order('year', { ascending: false, nullsFirst: false })
-      .order('created_at', { ascending: false }) as Promise<{ data: PaperRaw[] | null; error: { message: string } | null }>,
+      .order('created_at', { ascending: false }),
     fetchAllPaperQuestionIds(),
   ]);
 
@@ -450,7 +447,7 @@ export async function deleteQuestion(
   }
 
   await admin.from('question_topic_relations').delete().eq('question_id', id);
-  await (admin as any).from('paper_questions').delete().eq('question_id', id);
+  await admin.from('paper_questions').delete().eq('question_id', id);
   const { error } = await admin.from('questions').delete().eq('id', id);
   if (error) return { success: false, error: error.message };
 
@@ -483,7 +480,7 @@ export async function updateQuestionCategory(
     }
   }
 
-  const metadata = { ...(existing?.metadata as Record<string, unknown> ?? {}), tags: [categoryName] };
+  const metadata = { ...((existing?.metadata as Record<string, Json | undefined> | null) ?? {}), tags: [categoryName] };
   await admin.from('questions').update({ metadata }).eq('id', questionId);
 
   const { error: delErr } = await admin
@@ -546,10 +543,10 @@ export async function getQuestionsByPaperId(paperId: string): Promise<PaperQuest
   }
 
   const questions: QuestionWithNumber[] = (rows ?? [])
-    .filter((row: any) => row.questions)
-    .map((row: any) => ({
-      ...(row.questions as QuestionWithTopics),
-      question_number: row.question_number as number,
+    .filter((row) => row.questions)
+    .map((row) => ({
+      ...(row.questions as unknown as QuestionWithTopics),
+      question_number: row.question_number,
     }));
 
   return { paper: paper as PaperRow | null, questions };

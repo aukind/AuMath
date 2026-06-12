@@ -3,8 +3,6 @@
 // 每日一题：以东八区日期为种子，确定性地从「公开且已发布」的题目中选一道。
 // 同一天所有人看到同一题，次日自动更换。无题/异常 → null。
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { createClient } from '@/lib/supabase/server';
 import type { QuestionWithTopics } from '@/types/database';
 
@@ -22,9 +20,8 @@ function hashToIndex(seed: string, mod: number): number {
 export async function getDailyQuestion(): Promise<{ question: QuestionWithTopics | null; date: string }> {
   const date = cnDateSeed();
   const supabase = await createClient();
-  const sb = supabase as any;
   try {
-    const { count } = await sb
+    const { count } = await supabase
       .from('questions')
       .select('id', { count: 'exact', head: true })
       .eq('status', 'published')
@@ -34,7 +31,7 @@ export async function getDailyQuestion(): Promise<{ question: QuestionWithTopics
     if (!total) return { question: null, date };
 
     const idx = hashToIndex(date, total);
-    const { data } = await sb
+    const { data } = await supabase
       .from('questions')
       .select('*, question_topic_relations(question_id, topic_id, topics(*))')
       .eq('status', 'published')
@@ -42,7 +39,7 @@ export async function getDailyQuestion(): Promise<{ question: QuestionWithTopics
       .order('created_at', { ascending: true })
       .range(idx, idx);
 
-    return { question: (data ?? [])[0] ?? null, date };
+    return { question: ((data ?? []) as unknown as QuestionWithTopics[])[0] ?? null, date };
   } catch {
     return { question: null, date };
   }

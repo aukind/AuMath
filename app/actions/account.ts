@@ -3,8 +3,6 @@
 // 个人账号管理 Server Actions：用户名 / 头像 / 密码。
 // 头像存到公开 bucket `avatars`（首次使用时用 service_role 懒创建，无需额外迁移）。
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 import { revalidatePath } from 'next/cache';
 import { createClient } from '@/lib/supabase/server';
 import { createAdminClient } from '@/lib/supabase/admin';
@@ -27,8 +25,7 @@ export async function getMyAccount(): Promise<MyAccount | null> {
   } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const sb = supabase as any;
-  const { data } = await sb
+  const { data } = await supabase
     .from('profiles')
     .select('username, avatar_url, role')
     .eq('id', user.id)
@@ -53,8 +50,7 @@ export async function updateUsername(username: string): Promise<void> {
   const name = username.trim();
   if (name.length < 1 || name.length > 30) throw new Error('用户名需在 1–30 字之间');
 
-  const sb = supabase as any;
-  const { error } = await sb.from('profiles').update({ username: name }).eq('id', user.id);
+  const { error } = await supabase.from('profiles').update({ username: name }).eq('id', user.id);
   if (error) throw new Error('更新失败：' + error.message);
   revalidatePath('/account');
   revalidatePath('/');
@@ -101,8 +97,7 @@ export async function uploadAvatar(formData: FormData): Promise<{ url: string }>
 
   const { data: pub } = admin.storage.from(AVATAR_BUCKET).getPublicUrl(key);
 
-  const sb = supabase as any;
-  await sb.from('profiles').update({ avatar_url: pub.publicUrl }).eq('id', user.id);
+  await supabase.from('profiles').update({ avatar_url: pub.publicUrl }).eq('id', user.id);
   revalidatePath('/account');
   revalidatePath('/');
   return { url: pub.publicUrl };
