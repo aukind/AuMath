@@ -1,10 +1,14 @@
-// HomeAurora —— 首页「极光」动态背景（Server Component，零 JS、零 WebGL）。
-// 纯 CSS 三层：缓漂模糊光斑 ×3 + 180s 旋转 conic 扫光 + feTurbulence 胶片颗粒，
-// 样式全在 globals.css 的 .home-aurora-* / [data-home-aurora]（动画只碰 transform，
-// 走合成层，GPU 开销可忽略；reduced-motion 自动静止为渐变底）。
-//
-// 挂载约定：置于页面根容器（需 relative isolate）内的第一个子元素，-z-10 垫底；
-// 半透明表面（顶栏 bg-white/80、侧栏 bg-zinc-50/60）会自然透出极光。
+// HomeAurora —— 首页动态背景编排层（Server Component 外壳）。
+// 层序（下→上）：
+//   ① wash    静态渐变兜底（shader 加载前的首帧 / reduced-motion 降级底色）
+//   ② GLSL    HomeDynamicBackdrop：可见流动的丝绸光带（主角，client 懒加载）
+//   ③ veil    半透明薄纱压一档饱和度——光从「幕后」透出来，高级感关键
+//   ④ beam    巨幅 conic 扫光（CSS 慢旋转，叠加层次）
+//   ⑤ grain   feTurbulence 胶片颗粒压色带
+// 挂载约定：页面根容器（relative isolate）内第一个子元素，-z-10 垫底；
+// Zen Mode 由 globals.css 的 .zen-active [data-home-aurora] 整层淡出。
+import HomeDynamicBackdrop from './HomeDynamicBackdrop';
+
 export default function HomeAurora() {
   return (
     <div
@@ -13,10 +17,9 @@ export default function HomeAurora() {
       className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
     >
       <div className="home-aurora-wash" />
+      <HomeDynamicBackdrop />
+      <div className="absolute inset-0 bg-zinc-50/35 dark:bg-zinc-950/45" />
       <div className="home-aurora-beam" />
-      <div className="home-aurora-blob home-aurora-blob-a" />
-      <div className="home-aurora-blob home-aurora-blob-b" />
-      <div className="home-aurora-blob home-aurora-blob-c" />
       <div className="home-aurora-grain" />
     </div>
   );

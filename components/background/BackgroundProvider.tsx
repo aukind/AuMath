@@ -15,8 +15,8 @@
  */
 
 import dynamic from 'next/dynamic';
-import { useEffect, useState } from 'react';
 import { useTheme } from 'next-themes';
+import { useMounted, useReducedMotion } from './useClientMotionPrefs';
 
 // three 较大，按需懒加载；SSR 关闭（WebGL 仅在浏览器可用）
 const AmbientFluid = dynamic(() => import('./AmbientFluid'), { ssr: false });
@@ -43,17 +43,8 @@ export default function BackgroundProvider() {
   const { resolvedTheme } = useTheme();
   const theme: 'light' | 'dark' = resolvedTheme === 'dark' ? 'dark' : 'light';
 
-  const [mounted, setMounted] = useState(false);
-  const [reduced, setReduced] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    setReduced(mq.matches);
-    const onChange = (e: MediaQueryListEvent) => setReduced(e.matches);
-    mq.addEventListener('change', onChange);
-    return () => mq.removeEventListener('change', onChange);
-  }, []);
+  const mounted = useMounted();
+  const reduced = useReducedMotion();
 
   // 水合前不渲染：body 的 var(--background) 已铺满正确主题底色，无空白/CLS，
   // 也避免 resolvedTheme 未定时的亮/暗错配闪烁。

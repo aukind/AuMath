@@ -170,48 +170,13 @@ body:has([data-app-modal]) [data-app-shell] {
   --aurora-3: rgba(8, 145, 178, 0.14);
 }
 
-/* 基底色洗：顶部微亮、四角沉降，奠定纵深 */
+/* 基底色洗：GLSL shader 加载前的首帧兜底 / reduced-motion 降级底色 */
 .home-aurora-wash {
   position: absolute;
   inset: 0;
   background:
     radial-gradient(120% 85% at 50% -10%, var(--aurora-1), transparent 60%),
     radial-gradient(90% 70% at 85% 110%, var(--aurora-2), transparent 65%);
-}
-
-/* 光斑公共体：超大圆 + 重模糊，动画只碰 transform */
-.home-aurora-blob {
-  position: absolute;
-  border-radius: 9999px;
-  filter: blur(72px);
-  will-change: transform;
-}
-.home-aurora-blob-a {
-  width: 52vmax; height: 52vmax; left: -14vmax; top: -18vmax;
-  background: radial-gradient(circle at 35% 35%, var(--aurora-1), transparent 70%);
-  animation: home-aurora-a 46s ease-in-out infinite alternate;
-}
-.home-aurora-blob-b {
-  width: 44vmax; height: 44vmax; right: -12vmax; top: 4vmax;
-  background: radial-gradient(circle at 60% 40%, var(--aurora-2), transparent 70%);
-  animation: home-aurora-b 64s ease-in-out infinite alternate;
-}
-.home-aurora-blob-c {
-  width: 40vmax; height: 40vmax; left: 22vmax; bottom: -20vmax;
-  background: radial-gradient(circle at 50% 55%, var(--aurora-3), transparent 70%);
-  animation: home-aurora-c 78s ease-in-out infinite alternate;
-}
-@keyframes home-aurora-a {
-  from { transform: translate3d(0, 0, 0) scale(1); }
-  to   { transform: translate3d(9vmax, 7vmax, 0) scale(1.16); }
-}
-@keyframes home-aurora-b {
-  from { transform: translate3d(0, 0, 0) scale(1.08); }
-  to   { transform: translate3d(-8vmax, 9vmax, 0) scale(0.94); }
-}
-@keyframes home-aurora-c {
-  from { transform: translate3d(0, 0, 0) scale(0.96); }
-  to   { transform: translate3d(7vmax, -8vmax, 0) scale(1.12); }
 }
 
 /* 巨幅旋转光晕：低透明 conic 扫光，180s 一圈，几乎潜意识级 */
@@ -250,9 +215,19 @@ body:has([data-app-modal]) [data-app-shell] {
 }
 .dark .home-aurora-grain { opacity: 0.08; }
 
-/* 尊重「减少动态效果」：极光静止为渐变底（保留观感，去掉运动） */
+/* 尊重「减少动态效果」：扫光静止（GLSL 层由 HomeDynamicBackdrop 自行不挂载） */
 @media (prefers-reduced-motion: reduce) {
-  .home-aurora-blob, .home-aurora-beam {
+  .home-aurora-beam {
     animation: none;
   }
+}
+
+/* Zen 专注模式：动态背景与流体拖尾整层淡出，与纯色阅读画布无缝衔接（修黑框） */
+[data-home-aurora],
+[data-fluid-cursor] {
+  transition: opacity 0.45s ease;
+}
+.zen-active [data-home-aurora],
+.zen-active [data-fluid-cursor] {
+  opacity: 0 !important; /* 盖过 FluidCursor 的内联 opacity */
 }
