@@ -7,6 +7,7 @@ import rehypeRaw from 'rehype-raw';
 import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import type { KatexOptions } from 'katex';
 import { preprocessMathContent } from '@/lib/utils/mathPreprocess';
+import { linkifyWikiRefs } from '@/lib/utils/wikiLinks';
 
 export interface MathRendererProps {
   content: string;
@@ -104,7 +105,9 @@ export default function MathRenderer({
   dropCap = false,
 }: MathRendererProps) {
   const katexOpts  = { ...defaultKatexOptions, ...katexOptions };
-  const normalized = preprocessMathContent(content);
+  // 先做数学归一化（此后所有公式都在规范 $ 分隔符里），再把数学段之外的
+  // [[知识点]] 维基双链转成指向 /explore?focus= 的链接（Obsidian 式直达局部图谱）。
+  const normalized = linkifyWikiRefs(preprocessMathContent(content));
 
   return (
     <div

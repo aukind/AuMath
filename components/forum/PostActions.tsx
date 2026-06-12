@@ -43,12 +43,13 @@ export default function PostActions({
     startTransition(async () => {
       try {
         const res = await toggleForumPostUpvote(postId);
-        setUpvoted(res.upvoted);
-        setUpvotes(res.upvotes);
-      } catch {
+        if (!res.ok) throw new Error(res.error);
+        setUpvoted(res.data.upvoted);
+        setUpvotes(res.data.upvotes);
+      } catch (e) {
         setUpvoted(prevUpvoted);
         setUpvotes(prevCount);
-        toast.error('点赞失败，已回滚');
+        toast.error(e instanceof Error && e.message ? e.message : '点赞失败，已回滚');
       }
     });
   };
@@ -63,11 +64,12 @@ export default function PostActions({
     startTransition(async () => {
       try {
         const res = await toggleForumPostFavorite(postId);
-        setFavorited(res.favorited);
-        toast.success(res.favorited ? '已收藏' : '已取消收藏');
-      } catch {
+        if (!res.ok) throw new Error(res.error);
+        setFavorited(res.data.favorited);
+        toast.success(res.data.favorited ? '已收藏' : '已取消收藏');
+      } catch (e) {
         setFavorited(prev);
-        toast.error('收藏失败，已回滚');
+        toast.error(e instanceof Error && e.message ? e.message : '收藏失败，已回滚');
       }
     });
   };

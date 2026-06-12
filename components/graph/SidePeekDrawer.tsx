@@ -26,11 +26,19 @@ export default function SidePeekDrawer({ questionId, onClose }: Props) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // 渲染期调整（仓库约定：set-state-in-effect 会卡 build）：questionId 变更时同步进入加载态。
+  const [prevQuestionId, setPrevQuestionId] = useState<string | null>(null);
+  if (questionId !== prevQuestionId) {
+    setPrevQuestionId(questionId);
+    if (questionId) {
+      setLoading(true);
+      setDetail(null);
+    }
+  }
+
   useEffect(() => {
     if (!questionId) return;
     let cancelled = false;
-    setLoading(true);
-    setDetail(null);
     getQuestionForGraph(questionId)
       .then(res => {
         if (!cancelled) {

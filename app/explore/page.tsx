@@ -7,7 +7,13 @@ import GraphExplorer from '@/components/graph/GraphExplorer';
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '知识星图 · AuMath' };
 
-export default async function ExplorePage() {
+export default async function ExplorePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ focus?: string }>;
+}) {
+  // ?focus=知识点名：来自正文 [[维基链接]] 的直达入口，进场即聚焦局部图谱。
+  const { focus } = await searchParams;
   const data = await getPersonalizedGraphData();
-  return <GraphExplorer data={data} />;
+  return <GraphExplorer data={data} initialFocusName={focus || undefined} />;
 }

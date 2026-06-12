@@ -806,6 +806,45 @@ export type Database = {
         }
         Relationships: []
       }
+      topic_links: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          note: string | null
+          source_topic_id: string
+          target_topic_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          note?: string | null
+          source_topic_id: string
+          target_topic_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          note?: string | null
+          source_topic_id?: string
+          target_topic_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "topic_links_source_topic_id_fkey"
+            columns: ["source_topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "topic_links_target_topic_id_fkey"
+            columns: ["target_topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       topics: {
         Row: {
           created_at: string
@@ -1181,6 +1220,13 @@ export type Database = {
           similarity: number
         }[]
       }
+      paper_question_counts: {
+        Args: never
+        Returns: {
+          paper_id: string
+          question_count: number
+        }[]
+      }
       report_library_item: { Args: { p_id: string }; Returns: Json }
       search_post_ids: {
         Args: { lim?: number; q: string }
@@ -1206,7 +1252,21 @@ export type Database = {
         }
         Returns: Json
       }
+      toggle_comment_vote: {
+        Args: { p_comment_id: string }
+        Returns: {
+          upvotes: number
+          upvoted: boolean
+        }[]
+      }
       toggle_library_upvote: { Args: { p_id: string }; Returns: Json }
+      toggle_post_vote: {
+        Args: { p_post_id: string }
+        Returns: {
+          upvotes: number
+          upvoted: boolean
+        }[]
+      }
     }
     Enums: {
       question_status: "draft" | "published" | "archived"

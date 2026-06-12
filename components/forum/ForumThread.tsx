@@ -85,13 +85,17 @@ export default function ForumThread({
 
   const handleFlag = (flags: { isPinned?: boolean; isFeatured?: boolean }, label: string) => {
     setForumPostFlags(postId, flags)
-      .then(() => toast.success(label))
+      .then((res) => (res.ok ? toast.success(label) : toast.error(res.error)))
       .catch((e) => toast.error(e instanceof Error ? e.message : '操作失败'));
   };
 
   const handleDeletePost = () => {
     deleteForumPost(postId)
-      .then(() => { toast.success('帖子已删除'); router.push('/forum'); })
+      .then((res) => {
+        if (!res.ok) { toast.error(res.error); return; }
+        toast.success('帖子已删除');
+        router.push('/forum');
+      })
       .catch((e) => toast.error(e instanceof Error ? e.message : '删除失败'));
   };
 
