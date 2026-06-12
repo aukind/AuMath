@@ -15,9 +15,6 @@ interface Props {
   userId?: string;
   onDelete?: (id: string) => void;
   isLoggedIn?: boolean;
-  favoritedIds?: string[];
-  erroredIds?: string[];
-  myRatings?: Record<string, number>;
   /** 当前列表标题（如试卷名），用作讲义抬头与文件名 */
   title?: string;
 }
@@ -66,22 +63,18 @@ function DraggableCard({
   canModify,
   onDelete,
   isLoggedIn,
-  initialFavorited,
-  initialErrored,
-  initialMyRating,
 }: {
   question: QuestionWithTopics;
   isAdmin: boolean;
   canModify: boolean;
   onDelete?: (id: string) => void;
   isLoggedIn?: boolean;
-  initialFavorited?: boolean;
-  initialErrored?: boolean;
-  initialMyRating?: number | null;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: question.id,
     disabled: !canModify,
+    // 拖拽幽灵卡（PageLayout 的 DragOverlay）从事件里取题，免去父层持有全量题目数组
+    data: { question },
   });
 
   return (
@@ -94,15 +87,12 @@ function DraggableCard({
         isDragging={isDragging}
         dragHandleProps={canModify ? { ...listeners, ...attributes } : undefined}
         isLoggedIn={isLoggedIn}
-        initialFavorited={initialFavorited}
-        initialErrored={initialErrored}
-        initialMyRating={initialMyRating}
       />
     </div>
   );
 }
 
-export default function QuestionSearch({ questions, isAdmin, userId, onDelete, isLoggedIn = false, favoritedIds = [], erroredIds = [], myRatings = {}, title }: Props) {
+export default function QuestionSearch({ questions, isAdmin, userId, onDelete, isLoggedIn = false, title }: Props) {
   const [query, setQuery] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showExport, setShowExport] = useState(false);
@@ -271,9 +261,6 @@ export default function QuestionSearch({ questions, isAdmin, userId, onDelete, i
                   canModify={isAdmin || (!!userId && q.created_by === userId)}
                   onDelete={onDelete}
                   isLoggedIn={isLoggedIn}
-                  initialFavorited={favoritedIds.includes(q.id)}
-                  initialErrored={erroredIds.includes(q.id)}
-                  initialMyRating={myRatings[q.id] ?? null}
                 />
               </div>
             </div>

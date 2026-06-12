@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { Suspense, use, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { ChevronDown, GripVertical, Layers, Pencil, Sparkles, Star, Trash2, X } from 'lucide-react';
 import MathRenderer from '@/components/MathRenderer';
@@ -9,6 +9,7 @@ import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox'
 import DifficultyRating from '@/components/DifficultyRating';
 import Magnetic from '@/components/motion/Magnetic';
 import SquishyButton from '@/components/motion/SquishyButton';
+import { usePersonalization } from '@/components/question/PersonalizationContext';
 import { toggleFavorite, markError, removeError, recordView, recordAttempt } from '@/app/actions/user-workspace';
 import { stripInlineOptionTail, withAnswerBlank, isBlankOption, normalizeOptions, isMultiAnswer } from '@/lib/questions/content';
 import type { QuestionWithTopics } from '@/types/database';
@@ -33,8 +34,6 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
   const [solutionOpen, setSolutionOpen] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [favorited, setFavorited] = useState(initialFavorited);
-  const [errored, setErrored] = useState(initialErrored);
   const [gradedCorrect, setGradedCorrect] = useState(false);
   const [isPending, startTransition] = useTransition();
 
@@ -61,26 +60,6 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
     if (opening && isLoggedIn) {
       recordView(question.id).catch(() => {});
     }
-  }
-
-  function handleToggleFavorite(e: React.MouseEvent) {
-    e.preventDefault();
-    startTransition(async () => {
-      const result = await toggleFavorite(question.id);
-      if (result.success) setFavorited(result.favorited);
-    });
-  }
-
-  function handleToggleError() {
-    startTransition(async () => {
-      if (errored) {
-        const result = await removeError(question.id);
-        if (result.success) setErrored(false);
-      } else {
-        const result = await markError(question.id);
-        if (result.success) setErrored(true);
-      }
-    });
   }
 
   // 自评「我做对了」—— 知识星图绿色(已掌握)节点的数据来源。
@@ -138,24 +117,11 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
               <GripVertical size={13} />
             </button>
           )}
-          {/* 收藏键 —— 最左 */}
+          {/* 收藏键 —— 最左；个人化初值独立 Suspense 注水，不阻塞题面 */}
           {isLoggedIn && (
-            <Magnetic intensity={0.3} range={6}>
-              <SquishyButton
-                onClick={handleToggleFavorite}
-                disabled={isPending}
-                title={favorited ? '取消收藏' : '收藏此题'}
-                className={[
-                  'flex items-center justify-center w-6 h-6 rounded-md transition-colors shrink-0',
-                  favorited
-                    ? 'text-amber-400 hover:text-amber-500'
-                    : 'text-zinc-300 dark:text-zinc-600 hover:text-amber-400 dark:hover:text-amber-500',
-                  isPending && 'opacity-50 cursor-not-allowed',
-                ].join(' ')}
-              >
-                <Star size={14} fill={favorited ? 'currentColor' : 'none'} />
-              </SquishyButton>
-            </Magnetic>
+            <Suspense fallback={<FavoriteStarFallback />}>
+              <FavoriteStar questionId={question.id} initialFavorited={initialFavorited} />
+            </Suspense>
           )}
           {/* 题目来源（完整卷名，含年份）—— 收藏键右侧 */}
           {question.source && (
@@ -173,15 +139,29 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
             </span>
           )}
 
-          {/* 众包难度评分 —— 靠右 */}
+          {/* 众包难度评分 —— 靠右；全站均分同步可见，「我的评分」独立 Suspense 注水 */}
           <div className="ml-auto">
-            <DifficultyRating
-              questionId={question.id}
-              initialAvg={Number(question.rating_avg ?? 0)}
-              initialCount={question.rating_count ?? 0}
-              initialMyRating={initialMyRating}
-              isLoggedIn={isLoggedIn}
-            />
+            <Suspense
+              fallback={
+                <div className="pointer-events-none" aria-hidden>
+                  <DifficultyRating
+                    questionId={question.id}
+                    initialAvg={Number(question.rating_avg ?? 0)}
+                    initialCount={question.rating_count ?? 0}
+                    initialMyRating={null}
+                    isLoggedIn={false}
+                  />
+                </div>
+              }
+            >
+              <RatingSlot
+                questionId={question.id}
+                initialAvg={Number(question.rating_avg ?? 0)}
+                initialCount={question.rating_count ?? 0}
+                initialMyRating={initialMyRating}
+                isLoggedIn={isLoggedIn}
+              />
+            </Suspense>
           </div>
 
           {/* 管理员编辑/删除 —— hover 显示，靠右 */}
@@ -244,20 +224,9 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
             {solutionOpen ? '收起解析' : '查看解析'}
           </SquishyButton>
           {isLoggedIn && (
-            <SquishyButton
-              onClick={handleToggleError}
-              disabled={isPending}
-              title={errored ? '点击从错题本移除' : '标记为错题'}
-              className={[
-                'flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors',
-                errored
-                  ? 'border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/30 hover:border-red-300 dark:hover:border-red-700 hover:text-red-500 dark:hover:text-red-400 hover:bg-transparent'
-                  : 'border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-red-300 dark:hover:border-red-700 hover:text-red-500 dark:hover:text-red-400',
-                isPending && 'opacity-50 cursor-not-allowed',
-              ].join(' ')}
-            >
-              {errored ? '✓ 已记录' : '我做错了'}
-            </SquishyButton>
+            <Suspense fallback={<ErrorToggleFallback />}>
+              <ErrorToggle questionId={question.id} initialErrored={initialErrored} />
+            </Suspense>
           )}
           {isLoggedIn && (
             <SquishyButton
@@ -378,6 +347,121 @@ export default function QuestionCard({ question, isAdmin = false, canModify, onD
         </div>
       )}
     </>
+  );
+}
+
+// ── 个人化小部件 ───────────────────────────────────────────────────────────
+// 有 PersonalizationProvider（首页流式注水）时 use() 解包 promise——挂起只波及
+// 各自的小 Suspense；无 Provider 的页面直接用同步 initial props，行为不变。
+
+/** 收藏星标：含个人化初值解包 + 乐观切换。 */
+function FavoriteStar({ questionId, initialFavorited }: { questionId: string; initialFavorited: boolean }) {
+  const personalization = usePersonalization();
+  const favoritedIds = personalization ? use(personalization.favoritedIds) : null;
+  const [favorited, setFavorited] = useState(favoritedIds ? favoritedIds.includes(questionId) : initialFavorited);
+  const [isPending, startTransition] = useTransition();
+
+  function handleToggleFavorite(e: React.MouseEvent) {
+    e.preventDefault();
+    startTransition(async () => {
+      const result = await toggleFavorite(questionId);
+      if (result.success) setFavorited(result.favorited);
+    });
+  }
+
+  return (
+    <Magnetic intensity={0.3} range={6}>
+      <SquishyButton
+        onClick={handleToggleFavorite}
+        disabled={isPending}
+        title={favorited ? '取消收藏' : '收藏此题'}
+        className={[
+          'flex items-center justify-center w-6 h-6 rounded-md transition-colors shrink-0',
+          favorited
+            ? 'text-amber-400 hover:text-amber-500'
+            : 'text-zinc-300 dark:text-zinc-600 hover:text-amber-400 dark:hover:text-amber-500',
+          isPending && 'opacity-50 cursor-not-allowed',
+        ].join(' ')}
+      >
+        <Star size={14} fill={favorited ? 'currentColor' : 'none'} />
+      </SquishyButton>
+    </Magnetic>
+  );
+}
+
+function FavoriteStarFallback() {
+  return (
+    <span aria-hidden className="flex items-center justify-center w-6 h-6 rounded-md text-zinc-200 dark:text-zinc-700 shrink-0">
+      <Star size={14} fill="none" />
+    </span>
+  );
+}
+
+/** 错题本切换：含个人化初值解包 + 乐观切换。 */
+function ErrorToggle({ questionId, initialErrored }: { questionId: string; initialErrored: boolean }) {
+  const personalization = usePersonalization();
+  const erroredIds = personalization ? use(personalization.erroredIds) : null;
+  const [errored, setErrored] = useState(erroredIds ? erroredIds.includes(questionId) : initialErrored);
+  const [isPending, startTransition] = useTransition();
+
+  function handleToggleError() {
+    startTransition(async () => {
+      if (errored) {
+        const result = await removeError(questionId);
+        if (result.success) setErrored(false);
+      } else {
+        const result = await markError(questionId);
+        if (result.success) setErrored(true);
+      }
+    });
+  }
+
+  return (
+    <SquishyButton
+      onClick={handleToggleError}
+      disabled={isPending}
+      title={errored ? '点击从错题本移除' : '标记为错题'}
+      className={[
+        'flex items-center gap-1 text-xs px-2 py-1 rounded-md border transition-colors',
+        errored
+          ? 'border-green-200 dark:border-green-800 text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-950/30 hover:border-red-300 dark:hover:border-red-700 hover:text-red-500 dark:hover:text-red-400 hover:bg-transparent'
+          : 'border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-red-300 dark:hover:border-red-700 hover:text-red-500 dark:hover:text-red-400',
+        isPending && 'opacity-50 cursor-not-allowed',
+      ].join(' ')}
+    >
+      {errored ? '✓ 已记录' : '我做错了'}
+    </SquishyButton>
+  );
+}
+
+function ErrorToggleFallback() {
+  return (
+    <span aria-hidden className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 text-zinc-300 dark:text-zinc-600">
+      我做错了
+    </span>
+  );
+}
+
+/** 难度评分：解包「我的评分」后渲染交互版 DifficultyRating。 */
+function RatingSlot({
+  questionId, initialAvg, initialCount, initialMyRating, isLoggedIn,
+}: {
+  questionId: string;
+  initialAvg: number;
+  initialCount: number;
+  initialMyRating: number | null;
+  isLoggedIn: boolean;
+}) {
+  const personalization = usePersonalization();
+  const myRatings = personalization ? use(personalization.myRatings) : null;
+  return (
+    <DifficultyRating
+      questionId={questionId}
+      initialAvg={initialAvg}
+      initialCount={initialCount}
+      initialMyRating={myRatings ? (myRatings[questionId] ?? null) : initialMyRating}
+      isLoggedIn={isLoggedIn}
+    />
   );
 }
 
