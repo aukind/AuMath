@@ -516,7 +516,8 @@ function AiExtractPanel({
     setState({ status: 'done', papers, fileIdxOfPaper, usedModel: badge });
   }, [job]);
 
-  useEffect(() => { runExtraction(); }, [runExtraction]);
+  // 放进微任务回调再启动，避免 effect 体内同步 setState（runExtraction 开头会置 extracting 态）。
+  useEffect(() => { queueMicrotask(() => { void runExtraction(); }); }, [runExtraction]);
 
   // 提取成功后自动进入校对界面（少一次点击）；ref 防 StrictMode 重复触发导致图重复插入
   const advancedRef = useRef(false);
@@ -1246,17 +1247,19 @@ export default function PaperUploadWorkflow() {
   // CV 检图与 Gemini 提取并行：进第二步即启动检图，存其 promise，提取完成时再对位
   const figuresPromiseRef = useRef<Promise<{ raws: RawFigure[]; error?: string }> | null>(null);
 
-  // 恢复草稿
+  // 恢复草稿：sessionStorage 只在挂载后可读；放进微任务回调，避免 effect 体内同步 setState。
   useEffect(() => {
-    try {
-      const raw = sessionStorage.getItem(DRAFT_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw) as ExtractedPaperBundle[];
-      if (Array.isArray(saved) && saved.length > 0) {
-        setExtractedPapers(saved);
-        setStep(3);
-      }
-    } catch {}
+    queueMicrotask(() => {
+      try {
+        const raw = sessionStorage.getItem(DRAFT_KEY);
+        if (!raw) return;
+        const saved = JSON.parse(raw) as ExtractedPaperBundle[];
+        if (Array.isArray(saved) && saved.length > 0) {
+          setExtractedPapers(saved);
+          setStep(3);
+        }
+      } catch {}
+    });
   }, []);
 
   const handleUploadDone = useCallback((files: UploadedFile[]) => {

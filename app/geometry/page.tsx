@@ -229,7 +229,7 @@ export default function GeometryPage() {
               </p>
               <p>· <code className="text-blue-600 dark:text-blue-400">useImperativeHandle</code> 暴露 <code className="text-blue-600 dark:text-blue-400">drawPreciseFigure()</code></p>
               <p>· 调用 GeoGebra <code className="text-emerald-600 dark:text-emerald-400">evalCommand()</code> 批量执行</p>
-              <p>· <code className="text-purple-600 dark:text-purple-400">setPerspective('T')</code> 切换三维视图</p>
+              <p>· <code className="text-purple-600 dark:text-purple-400">setPerspective(&apos;T&apos;)</code> 切换三维视图</p>
               <p>· 脚本异步加载，支持多实例复用</p>
             </div>
           </div>

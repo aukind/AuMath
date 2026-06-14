@@ -44,12 +44,14 @@ export default function ForumPostList({ posts, canPost = true }: ForumPostListPr
           <div className="flex gap-2.5">
             {/* 用原生 <a> 做硬导航，绕过 @modal 的 (.)forum/[id] 拦截路由
                 （否则软导航 /forum/new 会被当成帖子 id 拦截，致 404 / 无响应）。 */}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 有意硬导航，见上 */}
             <a
               href="/forum/new?tag=产品建议"
               className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-colors"
             >
               <Lightbulb size={14} className="text-amber-500" /> 提建议
             </a>
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 有意硬导航，见上 */}
             <a
               href="/forum/new"
               className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 shadow-sm transition-colors"

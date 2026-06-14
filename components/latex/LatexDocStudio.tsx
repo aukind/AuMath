@@ -120,6 +120,15 @@ export default function LatexDocStudio({ initialDocs = [], userId = null }: { in
   const activePreview = activeId ? previews[activeId] : undefined;
   const isCompiling = !!(activeId && compilingIds.includes(activeId));
 
+  // 切换文档或重新编译后，复位导入态。
+  // 渲染期调整（替代 effect 里同步 setState）：对比上一轮 key，变了就当场复位。
+  const kbResetKey = `${activeId ?? ''}|${activePreview?.pdfUrl ?? ''}`;
+  const [prevKbResetKey, setPrevKbResetKey] = useState(kbResetKey);
+  if (kbResetKey !== prevKbResetKey) {
+    setPrevKbResetKey(kbResetKey);
+    setKbState('idle');
+  }
+
   // ── 自动保存 ──────────────────────────────────────────────────────────────
   const flushSave = useCallback(async (id: string) => {
     const t = saveTimers.current[id];
@@ -368,9 +377,6 @@ export default function LatexDocStudio({ initialDocs = [], userId = null }: { in
       setKbState('error');
     }
   }, [activeId, userId]);
-
-  // 切换文档或重新编译后，复位导入态
-  useEffect(() => { setKbState('idle'); }, [activeId, activePreview?.pdfUrl]);
 
   // Ctrl/Cmd+S 触发编译
   useEffect(() => {

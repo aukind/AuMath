@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import PaperUploadWorkflow from '@/components/admin/PaperUploadWorkflow';
 import { createAdminClient } from '@/lib/supabase/admin';
 
@@ -40,7 +41,7 @@ export default async function PaperUploadPage() {
       <div className="mx-auto max-w-5xl px-6 py-10">
         <header className="mb-6">
           <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
-            <a href="/" className="hover:text-foreground transition-colors">首页</a>
+            <Link href="/" className="hover:text-foreground transition-colors">首页</Link>
             <span>/</span>
             <span>试卷录入</span>
           </div>
