@@ -25,6 +25,8 @@ interface Props {
   onQuestionClick: (id: string) => void;
   /** 点击知识点节点回调 topic id（编排层打开 Inspector） */
   onTopicClick: (id: string) => void;
+  /** 点击定理节点回调 theorem id（编排层打开 TheoremInspector） */
+  onTheoremClick: (id: string) => void;
   /** 点击空白处（清除选中） */
   onBackgroundClick?: () => void;
   /** 当前选中节点（持久聚光灯 + 脉冲描环） */
@@ -47,6 +49,7 @@ const TOPIC_LEVEL_COLORS: { light: string; dark: string }[] = [
   { light: '#0ea5e9', dark: '#38bdf8' }, // level ≥2 天蓝
 ];
 const MANUAL_LINK_COLOR = { light: '#d97706', dark: '#fbbf24' }; // 手动双链=琥珀金
+const THEOREM_COLOR = { light: '#d97706', dark: '#fbbf24' };     // 定理=琥珀金菱形
 
 const idOf = (end: any): string => (typeof end === 'object' && end ? end.id : end);
 const nodeRadius = (n: GraphNode) => Math.sqrt(Math.max(1, n.val)) * 2.2;
@@ -71,7 +74,7 @@ function makeStars(count: number, spread: number): Star[] {
 }
 
 export default function KnowledgeCanvas({
-  data, onQuestionClick, onTopicClick, onBackgroundClick,
+  data, onQuestionClick, onTopicClick, onTheoremClick, onBackgroundClick,
   selectedId = null, matchIds = null, onHandleReady,
 }: Props) {
   const { resolvedTheme } = useTheme();
@@ -165,18 +168,24 @@ export default function KnowledgeCanvas({
 
   // ── 自绘节点（globalScale 为当前缩放，除之以保持标签屏幕字号恒定） ──
   const paintNode = useCallback((node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
+    // 力导向首帧可能尚未给新加入的节点（如定理）分配坐标 → node.x/y 为非有限值，
+    // createRadialGradient 会直接抛错。跳过本帧，待引擎定位后下一帧自然绘出。
+    if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
     const n = node as GraphNode;
     const r = nodeRadius(n);
     const isTopic = n.type === 'topic';
-    const color = isTopic ? topicColor(n.level, dark) : pick(STATUS_COLORS[n.status ?? 'unattempted']);
+    const isTheorem = n.type === 'theorem';
+    const color = isTopic ? topicColor(n.level, dark)
+      : isTheorem ? pick(THEOREM_COLOR)
+      : pick(STATUS_COLORS[n.status ?? 'unattempted']);
     const dimmed = isDimmed(n.id);
     const selected = selectedId === n.id;
 
     ctx.save();
     ctx.globalAlpha = dimmed ? 0.08 : 1;
 
-    // 恒星辉光：径向渐变光晕（比 shadowBlur 廉价且可控），聚光灯内增强
-    if (isTopic && !dimmed) {
+    // 辉光：径向渐变光晕（比 shadowBlur 廉价且可控），聚光灯内增强。知识点与定理皆有。
+    if ((isTopic || isTheorem) && !dimmed) {
       const haloR = r * (highlight?.has(n.id) ? 3.2 : 2.4);
       const grad = ctx.createRadialGradient(node.x, node.y, r * 0.4, node.x, node.y, haloR);
       grad.addColorStop(0, color + (dark ? '55' : '40'));
@@ -187,8 +196,17 @@ export default function KnowledgeCanvas({
       ctx.fill();
     }
 
+    // 节点本体：知识点/题目=圆，定理=菱形（一眼区分第三类节点）。
     ctx.beginPath();
-    ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+    if (isTheorem) {
+      ctx.moveTo(node.x, node.y - r);
+      ctx.lineTo(node.x + r, node.y);
+      ctx.lineTo(node.x, node.y + r);
+      ctx.lineTo(node.x - r, node.y);
+      ctx.closePath();
+    } else {
+      ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
+    }
     ctx.fillStyle = color;
     ctx.fill();
 
@@ -212,7 +230,7 @@ export default function KnowledgeCanvas({
       ctx.stroke();
     }
 
-    // 标签：恒星常驻（暗化时隐去）；题目标签在放大到 2.2x 后渐显（Obsidian 式 zoom-in 显字）。
+    // 标签：恒星/定理常驻（暗化时隐去）；题目标签在放大到 2.2x 后渐显（Obsidian 式 zoom-in 显字）。
     if (isTopic && !dimmed) {
       const fontSize = 12 / globalScale;
       ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
@@ -220,7 +238,14 @@ export default function KnowledgeCanvas({
       ctx.textBaseline = 'top';
       ctx.fillStyle = dark ? '#e4e4e7' : '#27272a';
       ctx.fillText(n.name, node.x, node.y + r + 1.5 / globalScale);
-    } else if (!isTopic && !dimmed && globalScale > 2.2) {
+    } else if (isTheorem && !dimmed) {
+      const fontSize = 11 / globalScale;
+      ctx.font = `italic 600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = dark ? '#fbbf24' : '#b45309';
+      ctx.fillText(n.name, node.x, node.y + r + 1.5 / globalScale);
+    } else if (n.type === 'question' && !dimmed && globalScale > 2.2) {
       const alpha = Math.min(1, (globalScale - 2.2) / 1.2);
       const fontSize = 10 / globalScale;
       ctx.globalAlpha = alpha * 0.85;
@@ -253,6 +278,10 @@ export default function KnowledgeCanvas({
       }
       case 'manual':
         return dark ? 'rgba(251,191,36,0.8)' : 'rgba(217,119,6,0.7)';
+      case 'theorem_topic':
+        return dark ? 'rgba(251,191,36,0.55)' : 'rgba(217,119,6,0.5)';
+      case 'theorem_cite':
+        return dark ? 'rgba(251,191,36,0.26)' : 'rgba(217,119,6,0.28)';
       default:
         return dark ? 'rgba(113,113,122,0.22)' : 'rgba(212,212,216,0.55)';
     }
@@ -276,7 +305,9 @@ export default function KnowledgeCanvas({
   const linkWidth = useCallback((link: any) => {
     const l = link as GraphLink;
     const base = l.kind === 'manual' ? 1.8
+      : l.kind === 'theorem_topic' ? 1.4
       : l.kind === 'hierarchy' ? 1.1
+      : l.kind === 'theorem_cite' ? 0.7
       : l.kind === 'cooccur' ? Math.min(2.2, 0.6 + Math.log2((l.weight ?? 1) + 1) * 0.5)
       : 0.5;
     if (!highlight && !matchIds) return base;
@@ -285,7 +316,8 @@ export default function KnowledgeCanvas({
   }, [highlight, matchIds, isDimmed]);
 
   const linkLineDash = useCallback((link: any) => {
-    return (link as GraphLink).kind === 'hierarchy' ? [3, 2] : null;
+    const k = (link as GraphLink).kind;
+    return k === 'hierarchy' ? [3, 2] : k === 'theorem_topic' ? [1, 3] : null;
   }, []);
 
   // 能量粒子：手动双链常驻流光；聚光灯内的连线点亮时也淌粒子（华丽但量小，不掉帧）。
@@ -315,8 +347,13 @@ export default function KnowledgeCanvas({
       if (fgRef.current && typeof node.x === 'number') {
         fgRef.current.centerAt(node.x, node.y, 600);
       }
+    } else if (node?.type === 'theorem') {
+      onTheoremClick(node.id);
+      if (fgRef.current && typeof node.x === 'number') {
+        fgRef.current.centerAt(node.x, node.y, 600);
+      }
     }
-  }, [onQuestionClick, onTopicClick]);
+  }, [onQuestionClick, onTopicClick, onTheoremClick]);
 
   const handleBackgroundClick = useCallback(() => {
     onBackgroundClick?.();
@@ -331,14 +368,11 @@ export default function KnowledgeCanvas({
     <div
       ref={containerRef}
       data-lenis-prevent
-      className="absolute inset-0"
-      style={{
-        touchAction: 'none',
-        // 深空径向渐变垫底（画布本身透明），光晕与星点浮于其上
-        background: dark
-          ? 'radial-gradient(ellipse 120% 90% at 50% 0%, #14143a 0%, #0b0b1e 48%, #09090b 100%)'
-          : 'radial-gradient(ellipse 120% 90% at 50% 0%, #eef2ff 0%, #fafaff 55%, #fafafa 100%)',
-      }}
+      // 深空径向渐变垫底（画布本身透明），光晕与星点浮于其上。
+      // 用 Tailwind dark: 类而非 JS 的 dark 三元——背景由 <html>.dark 决定（next-themes 在
+      // 注水前就置好该 class），避免「服务端 resolvedTheme=undefined 渲浅色 / 客户端渲深色」的注水失配。
+      className="absolute inset-0 bg-[radial-gradient(ellipse_120%_90%_at_50%_0%,#eef2ff_0%,#fafaff_55%,#fafafa_100%)] dark:bg-[radial-gradient(ellipse_120%_90%_at_50%_0%,#14143a_0%,#0b0b1e_48%,#09090b_100%)]"
+      style={{ touchAction: 'none' }}
     >
       {size.width > 0 && (
         <ForceGraph2DClient

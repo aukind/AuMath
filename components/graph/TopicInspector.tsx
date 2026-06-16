@@ -7,7 +7,7 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Link2, Sparkles, ChevronRight, CornerDownRight,
-  Crosshair, Plus, Trash2, CircleDot,
+  Crosshair, Plus, Trash2, CircleDot, Sigma,
 } from 'lucide-react';
 import { getTopicInspector, addTopicLink, removeTopicLink } from '@/app/actions/graph';
 import type { TopicInspectorData, NodeStatus } from '@/types/graph';
@@ -17,6 +17,8 @@ interface Props {
   onClose: () => void;
   /** 点击关联知识点 → 切换 Inspector 到该知识点并在画布上聚焦 */
   onNavigate: (topicId: string) => void;
+  /** 点击本知识点下的定理 → 打开 TheoremInspector */
+  onNavigateTheorem: (theoremId: string) => void;
   /** 「局部图谱」按钮 → 进入聚焦模式 */
   onFocusLocal: (topicId: string) => void;
   /** 点击关联题目 → 打开题目抽屉 */
@@ -34,7 +36,7 @@ const STATUS_DOT: Record<NodeStatus, string> = {
 };
 
 export default function TopicInspector({
-  topicId, onClose, onNavigate, onFocusLocal, onQuestionClick, onLinksChanged, allTopics,
+  topicId, onClose, onNavigate, onNavigateTheorem, onFocusLocal, onQuestionClick, onLinksChanged, allTopics,
 }: Props) {
   const [data, setData] = useState<TopicInspectorData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -281,6 +283,24 @@ export default function TopicInspector({
                           className="rounded-full border border-sky-200/70 bg-sky-50/70 px-2.5 py-1 text-xs font-medium text-sky-700 transition-colors hover:bg-sky-100/80 dark:border-sky-500/25 dark:bg-sky-500/10 dark:text-sky-300 dark:hover:bg-sky-500/20"
                         >
                           {c.name}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+
+                {/* 本知识点下的定理（定理库联动） */}
+                {data.theorems.length > 0 && (
+                  <section>
+                    <SectionTitle icon={<Sigma size={13} />} text="定理" count={data.theorems.length} />
+                    <div className="flex flex-wrap gap-1.5">
+                      {data.theorems.map(t => (
+                        <button
+                          key={t.id}
+                          onClick={() => onNavigateTheorem(t.id)}
+                          className="inline-flex items-center gap-1 rounded-full border border-amber-300/70 bg-amber-50/80 px-2.5 py-1 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100/80 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20"
+                        >
+                          <Sigma size={11} /> {t.name}
                         </button>
                       ))}
                     </div>

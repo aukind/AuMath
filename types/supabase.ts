@@ -806,6 +806,194 @@ export type Database = {
         }
         Relationships: []
       }
+      solving_sessions: {
+        Row: {
+          created_at: string
+          duration_sec: number
+          hints_used: number
+          id: string
+          max_hint_level: number
+          note: string | null
+          outcome: string
+          question_id: string
+          scratch_url: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          duration_sec?: number
+          hints_used?: number
+          id?: string
+          max_hint_level?: number
+          note?: string | null
+          outcome?: string
+          question_id: string
+          scratch_url?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          duration_sec?: number
+          hints_used?: number
+          id?: string
+          max_hint_level?: number
+          note?: string | null
+          outcome?: string
+          question_id?: string
+          scratch_url?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "solving_sessions_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      competitions: {
+        Row: {
+          created_at: string
+          description: string | null
+          exam_date: string
+          id: string
+          is_featured: boolean
+          level: string
+          location: string | null
+          name: string
+          registration_deadline: string | null
+          short_name: string | null
+          updated_at: string
+          url: string | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          exam_date: string
+          id?: string
+          is_featured?: boolean
+          level?: string
+          location?: string | null
+          name: string
+          registration_deadline?: string | null
+          short_name?: string | null
+          updated_at?: string
+          url?: string | null
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          exam_date?: string
+          id?: string
+          is_featured?: boolean
+          level?: string
+          location?: string | null
+          name?: string
+          registration_deadline?: string | null
+          short_name?: string | null
+          updated_at?: string
+          url?: string | null
+        }
+        Relationships: []
+      }
+      theorems: {
+        Row: {
+          created_at: string
+          description: string | null
+          figure_url: string | null
+          id: string
+          name: string
+          proof: string
+          slug: string
+          statement: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          figure_url?: string | null
+          id?: string
+          name: string
+          proof?: string
+          slug: string
+          statement?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          figure_url?: string | null
+          id?: string
+          name?: string
+          proof?: string
+          slug?: string
+          statement?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      theorem_topic_relations: {
+        Row: {
+          theorem_id: string
+          topic_id: string
+        }
+        Insert: {
+          theorem_id: string
+          topic_id: string
+        }
+        Update: {
+          theorem_id?: string
+          topic_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "theorem_topic_relations_theorem_id_fkey"
+            columns: ["theorem_id"]
+            isOneToOne: false
+            referencedRelation: "theorems"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "theorem_topic_relations_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      theorem_question_relations: {
+        Row: {
+          question_id: string
+          theorem_id: string
+        }
+        Insert: {
+          question_id: string
+          theorem_id: string
+        }
+        Update: {
+          question_id?: string
+          theorem_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "theorem_question_relations_question_id_fkey"
+            columns: ["question_id"]
+            isOneToOne: false
+            referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "theorem_question_relations_theorem_id_fkey"
+            columns: ["theorem_id"]
+            isOneToOne: false
+            referencedRelation: "theorems"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       topic_links: {
         Row: {
           created_at: string

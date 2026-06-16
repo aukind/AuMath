@@ -860,6 +860,7 @@ export async function publishQuestions(
   const rows = questions.map((q): Database['public']['Tables']['questions']['Insert'] => {
     const question_type = q.options.length > 0 ? ('multiple_choice' as const) : ('calculation' as const);
     const metadata: { [key: string]: Json | undefined } = {};
+    metadata.origin = 'official'; // 官方真题卷导入 → 题源溯源徽章「官方原题」
     if (q.category)                metadata.tags        = q.category;
     if (q.question_number != null) metadata.exam_number = `第${q.question_number}题`;
     if (q.options.length > 0)      metadata.options     = q.options;

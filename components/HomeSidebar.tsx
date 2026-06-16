@@ -25,6 +25,7 @@ import {
   Trophy,
   SquarePen,
   FileCode,
+  CalendarClock,
 } from 'lucide-react';
 import Magnetic from '@/components/motion/Magnetic';
 import SidebarTabs from '@/components/SidebarTabs';
@@ -164,6 +165,7 @@ export default function HomeSidebar({
   const libraryActive = pathname.startsWith('/library');
   const graphActive = pathname.startsWith('/explore');
   const dailyActive = pathname.startsWith('/daily');
+  const calendarActive = pathname.startsWith('/calendar');
   const contributeActive = pathname.startsWith('/contribute');
   const studioActive = pathname.startsWith('/studio');
 
@@ -258,6 +260,16 @@ export default function HomeSidebar({
           className={rowClass(dailyActive)}
         >
           <RowInner Icon={CalendarDays} label="每日一题" active={dailyActive} loading={pendingHref === '/daily'} />
+        </Link>
+
+        {/* 竞赛日历 */}
+        <Link
+          href="/calendar"
+          onClick={goLink('/calendar')}
+          aria-current={calendarActive ? 'page' : undefined}
+          className={rowClass(calendarActive)}
+        >
+          <RowInner Icon={CalendarClock} label="竞赛日历" active={calendarActive} loading={pendingHref === '/calendar'} />
         </Link>
 
         {/* 我的题库（工作区驱动） */}

@@ -12,6 +12,7 @@ import ThemeToggle from '@/components/ThemeToggle';
 import KnowledgeCanvas, { type CanvasHandle } from '@/components/graph/KnowledgeCanvas';
 import SidePeekDrawer from '@/components/graph/SidePeekDrawer';
 import TopicInspector from '@/components/graph/TopicInspector';
+import TheoremInspector from '@/components/graph/TheoremInspector';
 import type { GraphDataPayload, GraphLink, GraphNode } from '@/types/graph';
 
 interface Props {
@@ -22,6 +23,7 @@ interface Props {
 
 const NODE_LEGEND: { color: string; label: string }[] = [
   { color: '#8b5cf6', label: '知识点' },
+  { color: '#d97706', label: '定理' },
   { color: '#a1a1aa', label: '未做' },
   { color: '#ef4444', label: '错题' },
   { color: '#10b981', label: '已掌握' },
@@ -31,6 +33,7 @@ const LINK_LEGEND: { className: string; label: string }[] = [
   { className: 'border-t-2 border-dashed border-indigo-400', label: '层级' },
   { className: 'border-t-2 border-violet-400', label: '共现' },
   { className: 'border-t-2 border-amber-400', label: '双链' },
+  { className: 'border-t border-dotted border-amber-500', label: '定理' },
 ];
 
 const idOf = (end: unknown): string =>
@@ -40,15 +43,21 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
   const router = useRouter();
   // ?focus= 直达：按名称解析知识点（惰性初始化，仅首渲染执行一次），
   // 进场即打开 Inspector + 局部图谱。
+  // [[维基链接]] 可指向知识点或定理，故按名在两类节点里解析。
   const resolveInitialFocus = () => {
     if (!initialFocusName) return null;
-    const ts = data.nodes.filter(n => n.type === 'topic');
-    return ts.find(t => t.name === initialFocusName)
-      ?? ts.find(t => t.name.includes(initialFocusName))
+    const ns = data.nodes.filter(n => n.type === 'topic' || n.type === 'theorem');
+    return ns.find(n => n.name === initialFocusName)
+      ?? ns.find(n => n.name.includes(initialFocusName))
       ?? null;
   };
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null);
-  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(() => resolveInitialFocus()?.id ?? null);
+  const [selectedTopicId, setSelectedTopicId] = useState<string | null>(
+    () => { const h = resolveInitialFocus(); return h?.type === 'topic' ? h.id : null; },
+  );
+  const [selectedTheoremId, setSelectedTheoremId] = useState<string | null>(
+    () => { const h = resolveInitialFocus(); return h?.type === 'theorem' ? h.id : null; },
+  );
   const [focus, setFocus] = useState<{ id: string; depth: number } | null>(() => {
     const hit = resolveInitialFocus();
     return hit ? { id: hit.id, depth: 1 } : null;
@@ -106,7 +115,7 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
 
     if (!showQuestions) {
       nodes = nodes.filter(n => n.type !== 'question');
-      links = links.filter(l => l.kind !== 'qt');
+      links = links.filter(l => l.kind !== 'qt' && l.kind !== 'theorem_cite');
     }
 
     return { nodes, links };
@@ -124,8 +133,15 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
   }, [query, viewData]);
 
   const selectTopic = useCallback((id: string) => {
+    setSelectedTheoremId(null);
     setSelectedTopicId(id);
     setFocus(f => (f ? { id, depth: f.depth } : f)); // 聚焦模式下导航 = 换根
+    canvasRef.current?.focusNode(id);
+  }, []);
+
+  const selectTheorem = useCallback((id: string) => {
+    setSelectedTopicId(null);
+    setSelectedTheoremId(id);
     canvasRef.current?.focusNode(id);
   }, []);
 
@@ -136,8 +152,9 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
       ?? viewData.nodes.find(n => n.name.toLowerCase().includes(q));
     if (!hit) return;
     if (hit.type === 'topic') selectTopic(hit.id);
+    else if (hit.type === 'theorem') selectTheorem(hit.id);
     else setSelectedQuestionId(hit.id);
-  }, [query, viewData, selectTopic]);
+  }, [query, viewData, selectTopic, selectTheorem]);
 
   const exitFocus = useCallback(() => {
     setFocus(null);
@@ -157,6 +174,8 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
           (document.activeElement as HTMLElement).blur();
         } else if (selectedQuestionId) {
           setSelectedQuestionId(null);
+        } else if (selectedTheoremId) {
+          setSelectedTheoremId(null);
         } else if (selectedTopicId) {
           setSelectedTopicId(null);
         } else if (focus) {
@@ -168,12 +187,12 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedQuestionId, selectedTopicId, focus, query, exitFocus]);
+  }, [selectedQuestionId, selectedTheoremId, selectedTopicId, focus, query, exitFocus]);
 
   const topicCount = data.nodes.filter(n => n.type === 'topic').length;
   const questionCount = data.nodes.length - topicCount;
   const isEmpty = data.nodes.length === 0;
-  const focusName = focus ? topics.find(t => t.id === focus.id)?.name ?? '' : '';
+  const focusName = focus ? (data.nodes.find(n => n.id === focus.id)?.name ?? '') : '';
 
   return (
     <div className="relative h-dvh w-full overflow-hidden bg-zinc-50 dark:bg-zinc-950">
@@ -187,11 +206,12 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
       ) : (
         <KnowledgeCanvas
           data={viewData}
-          selectedId={selectedTopicId ?? selectedQuestionId}
+          selectedId={selectedTopicId ?? selectedQuestionId ?? selectedTheoremId}
           matchIds={matchIds}
           onQuestionClick={setSelectedQuestionId}
-          onTopicClick={id => setSelectedTopicId(id)}
-          onBackgroundClick={() => setSelectedTopicId(null)}
+          onTopicClick={id => { setSelectedTheoremId(null); setSelectedTopicId(id); }}
+          onTheoremClick={id => { setSelectedTopicId(null); setSelectedTheoremId(id); }}
+          onBackgroundClick={() => { setSelectedTopicId(null); setSelectedTheoremId(null); }}
           onHandleReady={h => { canvasRef.current = h; }}
         />
       )}
@@ -305,9 +325,19 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
         allTopics={topics}
         onClose={() => setSelectedTopicId(null)}
         onNavigate={selectTopic}
+        onNavigateTheorem={selectTheorem}
         onFocusLocal={id => setFocus(f => ({ id, depth: f?.depth ?? 1 }))}
         onQuestionClick={setSelectedQuestionId}
         onLinksChanged={() => router.refresh()}
+      />
+
+      {/* 定理 Inspector：点金色菱形节点弹出（定理库联动） */}
+      <TheoremInspector
+        theoremId={selectedTheoremId}
+        onClose={() => setSelectedTheoremId(null)}
+        onNavigateTopic={selectTopic}
+        onQuestionClick={setSelectedQuestionId}
+        onFocusLocal={id => setFocus(f => ({ id, depth: f?.depth ?? 1 }))}
       />
 
       {/* 右侧抽屉：点击题目节点弹出，不路由跳转 */}

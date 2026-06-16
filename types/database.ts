@@ -76,6 +76,10 @@ export interface QuestionMetadata {
   related_theorems?: string[];
   /** 常见错误，用于教学提示 */
   common_mistakes?: string[];
+  /** 题源类型：official 官方原题 / community 社区搬运 / derived 改编变式。缺省时按信号推断（见 lib/questions/provenance）。 */
+  origin?: 'official' | 'community' | 'derived';
+  /** 是否经人工核验（管理员标记），渲染「已核验」徽章。 */
+  verified?: boolean;
   /** 开放扩展，允许任意额外字段 */
   [key: string]: unknown;
 }

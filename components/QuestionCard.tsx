@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { ChevronDown, GripVertical, Layers, Pencil, Sparkles, Star, Trash2, X } from 'lucide-react';
 import MathRenderer from '@/components/MathRenderer';
+import ProvenanceBadge from '@/components/ProvenanceBadge';
 import { getSimilarQuestions, type SimilarQuestion } from '@/app/actions/embeddings';
 import QuestionInteractiveSandbox from '@/components/QuestionInteractiveSandbox';
 import DifficultyRating from '@/components/DifficultyRating';
@@ -149,6 +150,8 @@ function QuestionCard({ question, isAdmin = false, canModify, onDelete, isDraggi
               {question.source}
             </span>
           )}
+          {/* 题源溯源徽章（官方/社区/改编 + 已核验）；管理员可内联标注 */}
+          <ProvenanceBadge question={question} isAdmin={isAdmin} />
           {primaryTopic && (
             <span className="text-xs text-zinc-400 dark:text-zinc-500 truncate">· {primaryTopic.name}</span>
           )}
@@ -277,6 +280,14 @@ function QuestionCard({ question, isAdmin = false, canModify, onDelete, isDraggi
             相似题
           </SquishyButton>
           <VariantButton count={question.variations?.length ?? 0} />
+          {/* 解题工作台入口 —— 北极星功能：题面+手写演算+渐进提示。最右侧主 CTA。 */}
+          <Link
+            href={`/solve/${question.id}`}
+            title="进入解题工作台：全屏手写演算 + 卡住时渐进提示"
+            className="ml-auto flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition-transform hover:scale-[1.03] active:scale-95"
+          >
+            <Pencil size={13} /> 解题工作台
+          </Link>
         </div>
 
         {/* 相似题面板（语义近邻）—— 懒加载 */}

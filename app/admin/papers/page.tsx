@@ -7,6 +7,7 @@ import { ArrowLeft } from 'lucide-react';
 import AdminPaperList from '@/components/admin/AdminPaperList';
 import EmbeddingBackfillButton from '@/components/admin/EmbeddingBackfillButton';
 import KnowledgeBackfillButton from '@/components/admin/KnowledgeBackfillButton';
+import TheoremBackfillButton from '@/components/admin/TheoremBackfillButton';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '试卷管理 · AuMath' };
@@ -35,6 +36,7 @@ export default async function AdminPapersPage() {
           <div className="mt-4 flex flex-wrap items-start gap-4">
             <EmbeddingBackfillButton />
             <KnowledgeBackfillButton />
+            <TheoremBackfillButton />
           </div>
         </header>
 

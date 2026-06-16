@@ -6,7 +6,7 @@ import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
 import type {
   GraphDataPayload, GraphNode, GraphLink, NodeStatus,
-  TopicInspectorData, RelatedTopicRef,
+  TopicInspectorData, RelatedTopicRef, TheoremInspectorData,
 } from '@/types/graph';
 import type { QuestionWithTopics, QuestionMetadata } from '@/types/database';
 import type { Database } from '@/types/supabase';
@@ -45,6 +45,12 @@ interface BaseGraph {
   cooccurLinks: GraphLink[];
   /** 手动双向链接（topic_links 表；迁移 030 未跑时为空，静默降级） */
   manualLinks: GraphLink[];
+  /** 定理节点（id+name+简介，不含陈述/证明正文）；迁移 032 未跑时为空 */
+  theorems: { id: string; name: string; description: string | null }[];
+  /** 定理 → 知识点 归属边（theorem_topic） */
+  theoremTopicLinks: GraphLink[];
+  /** 定理 → 题 引用边（theorem_cite） */
+  theoremQuestionLinks: GraphLink[];
 }
 
 /** 由 source / year / metadata.exam_number 拼出题目摘要，如「2024上海卷 第21题」。 */
@@ -61,12 +67,16 @@ const pairKey = (a: string, b: string) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 const getBaseGraphCached = unstable_cache(
   async (): Promise<BaseGraph> => {
     const sb = createPublicClient();
-    const [topicsRes, relsRes, questionsRes, manualRes] = await Promise.all([
+    const [topicsRes, relsRes, questionsRes, manualRes, thRes, ttRes, tqRes] = await Promise.all([
       sb.from('topics').select('id, name, parent_id, level, description'),
       sb.from('question_topic_relations').select('question_id, topic_id'),
       sb.from('questions').select('id, year, source, metadata').eq('status', 'published').eq('is_public', true),
       // 迁移 030 未跑时此查询报错 → 当空数组处理（手动双链层缺席，星图其余功能不受影响）
       sb.from('topic_links').select('source_topic_id, target_topic_id'),
+      // 迁移 032（定理库）未跑时这三个查询报错 → 当空处理（定理层缺席，星图其余不受影响）
+      sb.from('theorems').select('id, name, description'),
+      sb.from('theorem_topic_relations').select('theorem_id, topic_id'),
+      sb.from('theorem_question_relations').select('theorem_id, question_id'),
     ]);
 
     if (topicsRes.error) console.error('[getBaseGraph/topics]', topicsRes.error.message);
@@ -115,6 +125,16 @@ const getBaseGraphCached = unstable_cache(
       .filter(l => topicIds.has(l.source_topic_id) && topicIds.has(l.target_topic_id))
       .map(l => ({ source: l.source_topic_id, target: l.target_topic_id, kind: 'manual' }));
 
+    // 定理层（迁移 032）：节点 + 归属边（定理→知识点）+ 引用边（定理→题），均过滤悬挂引用。
+    const theoremRows = thRes.error ? [] : thRes.data ?? [];
+    const theoremIds = new Set(theoremRows.map(t => t.id));
+    const theoremTopicLinks: GraphLink[] = (ttRes.error ? [] : ttRes.data ?? [])
+      .filter(r => theoremIds.has(r.theorem_id) && topicIds.has(r.topic_id))
+      .map(r => ({ source: r.theorem_id, target: r.topic_id, kind: 'theorem_topic' }));
+    const theoremQuestionLinks: GraphLink[] = (tqRes.error ? [] : tqRes.data ?? [])
+      .filter(r => theoremIds.has(r.theorem_id) && qIds.has(r.question_id))
+      .map(r => ({ source: r.theorem_id, target: r.question_id, kind: 'theorem_cite' }));
+
     return {
       topics: topicRows.map(t => ({
         id: t.id, name: t.name, parentId: t.parent_id, level: t.level, description: t.description,
@@ -124,9 +144,12 @@ const getBaseGraphCached = unstable_cache(
       hierarchyLinks,
       cooccurLinks,
       manualLinks,
+      theorems: theoremRows.map(t => ({ id: t.id, name: t.name, description: t.description })),
+      theoremTopicLinks,
+      theoremQuestionLinks,
     };
   },
-  ['knowledge-graph-base-v2'],
+  ['knowledge-graph-base-v3'],
   { tags: ['questions', 'topics'], revalidate: 300 },
 );
 
@@ -217,11 +240,38 @@ export async function getPersonalizedGraphData(): Promise<GraphDataPayload> {
     status: statusOf(q.id),
   }));
 
+  // ── 定理层：保留与「保留的知识点或题目」相连的定理，val 按被引用次数放大 ──
+  const theoremCiteCount = new Map<string, number>();
+  for (const l of base.theoremQuestionLinks) {
+    if (keptIds.has(l.target)) theoremCiteCount.set(l.source, (theoremCiteCount.get(l.source) ?? 0) + 1);
+  }
+  const theoremTopicLinks = base.theoremTopicLinks.filter(l => keptTopicIds.has(l.target));
+  const theoremLinkedIds = new Set<string>(theoremCiteCount.keys());
+  for (const l of theoremTopicLinks) theoremLinkedIds.add(l.source);
+
+  const theoremNodes: GraphNode[] = base.theorems
+    .filter(t => theoremLinkedIds.has(t.id))
+    .map(t => ({
+      id: t.id,
+      type: 'theorem',
+      name: t.name,
+      degree: theoremCiteCount.get(t.id) ?? 0,
+      // 介于恒星(知识点)与行星(题目)之间，按被引量略放大。
+      val: 4 + Math.log2((theoremCiteCount.get(t.id) ?? 0) + 1) * 1.8,
+    }));
+  const keptTheoremIds = new Set(theoremNodes.map(t => t.id));
+
+  const theoremEdges: GraphLink[] = [
+    ...theoremTopicLinks.filter(l => keptTheoremIds.has(l.source)),
+    ...base.theoremQuestionLinks.filter(l => keptTheoremIds.has(l.source) && keptIds.has(l.target)),
+  ];
+
   return {
-    nodes: [...topicNodes, ...questionNodes],
+    nodes: [...topicNodes, ...questionNodes, ...theoremNodes],
     links: [
       ...topicTopicLinks.filter(l => keptTopicIds.has(l.source) && keptTopicIds.has(l.target)),
       ...qtLinks.filter(l => keptTopicIds.has(l.target)),
+      ...theoremEdges,
     ],
   };
 }
@@ -282,6 +332,12 @@ export async function getTopicInspector(topicId: string): Promise<TopicInspector
       status: (errorSet.has(l.source) ? 'error_prone' : masteredSet.has(l.source) ? 'mastered' : 'unattempted') as NodeStatus,
     }));
 
+  // 本知识点下的定理（定理库联动）。
+  const thName = new Map(base.theorems.map(t => [t.id, t.name]));
+  const theorems = base.theoremTopicLinks
+    .filter(l => l.target === topicId && thName.has(l.source))
+    .map(l => ({ id: l.source, name: thName.get(l.source)! }));
+
   let canEdit = false;
   try {
     const supabase = await createClient();
@@ -300,7 +356,52 @@ export async function getTopicInspector(topicId: string): Promise<TopicInspector
     children,
     related,
     questions,
+    theorems,
     canEdit,
+  };
+}
+
+// ── 定理 Inspector：定理库联动星图的面板数据 ─────────────────
+
+/**
+ * 选中定理节点后右侧面板用：陈述/证明（现查 theorems 表，不进缓存底图）+ 所属知识点
+ * + 用到此定理的题目（带个人掌握度）。迁移 032 未跑 / 定理不存在时返回 null。
+ */
+export async function getTheoremInspector(theoremId: string): Promise<TheoremInspectorData | null> {
+  const base = await getBaseGraphCached();
+
+  const supabase = await createClient();
+  const { data: th, error } = await supabase
+    .from('theorems')
+    .select('id, name, statement, proof, figure_url, description')
+    .eq('id', theoremId)
+    .maybeSingle();
+  if (error || !th) return null;
+
+  const topicName = new Map(base.topics.map(t => [t.id, t.name]));
+  const topics = base.theoremTopicLinks
+    .filter(l => l.source === theoremId && topicName.has(l.target))
+    .map(l => ({ id: l.target, name: topicName.get(l.target)! }));
+
+  const qName = new Map(base.questions.map(q => [q.id, q.name]));
+  const { errorSet, masteredSet } = await getUserStatusSets();
+  const questions = base.theoremQuestionLinks
+    .filter(l => l.source === theoremId && qName.has(l.target))
+    .map(l => ({
+      id: l.target,
+      name: qName.get(l.target)!,
+      status: (errorSet.has(l.target) ? 'error_prone' : masteredSet.has(l.target) ? 'mastered' : 'unattempted') as NodeStatus,
+    }));
+
+  return {
+    id: th.id,
+    name: th.name,
+    statement: th.statement,
+    proof: th.proof,
+    description: th.description,
+    figureUrl: th.figure_url,
+    topics,
+    questions,
   };
 }
 
