@@ -2,6 +2,7 @@ import { Suspense } from 'react';
 import { getQuestions, getQuestionTopics, getPapers, getQuestionsByPaperId } from '@/app/actions/questions';
 import type { SortOrder } from '@/app/actions/questions';
 import { getFavoritedQuestionIds, getErroredQuestionIds, getWorkspaceQuestions } from '@/app/actions/user-workspace';
+import { getFavoriteQuestions, listFavoriteFolders } from '@/app/actions/favorites';
 import { getMyKnowledgeDocs } from '@/app/actions/knowledge';
 import { getTodayDueCount } from '@/app/actions/fsrs';
 import { getMyDifficultyRatings } from '@/app/actions/difficulty';
@@ -22,7 +23,7 @@ import FluidCursor from '@/components/background/FluidCursor';
 import HomeAurora from '@/components/background/HomeAurora';
 import MobileMenuDrawer from '@/components/MobileMenuDrawer';
 import type { User } from '@supabase/supabase-js';
-import type { TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceType } from '@/types/database';
+import type { TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceType, FavoriteFolderOverview } from '@/types/database';
 import type { KnowledgeDoc } from '@/types/library';
 import type { ForumPost } from '@/types/forum';
 
@@ -31,9 +32,9 @@ export const dynamic = 'force-dynamic';
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ topic?: string; sort?: string; paper?: string; workspace?: string; view?: string }>;
+  searchParams: Promise<{ topic?: string; sort?: string; paper?: string; workspace?: string; view?: string; folder?: string }>;
 }) {
-  const { topic: topicId, sort, paper: paperId, workspace, view } = await searchParams;
+  const { topic: topicId, sort, paper: paperId, workspace, view, folder } = await searchParams;
 
   const validSort: SortOrder = (sort === 'difficulty_asc' || sort === 'difficulty_desc' || sort === 'updated_at_desc')
     ? sort
@@ -100,9 +101,18 @@ export default async function HomePage({
   const forumPostsPromise = mainView !== 'browse'
     ? getForumPosts()
     : Promise.resolve<ForumPost[]>([]);
+  // 收藏夹过滤：仅「我的收藏」tab 生效（'all'/'uncategorized'/夹 id）；错题/历史走原通用查询
+  const favoriteFilter = mybankTab === 'favorites' ? (folder ?? 'all') : 'all';
   const workspaceQuestionsPromise = mainView !== 'browse' && !isDocsTab
-    ? getWorkspaceQuestions(mybankTab)
+    ? (mybankTab === 'favorites'
+        ? getFavoriteQuestions(favoriteFilter)
+        : getWorkspaceQuestions(mybankTab))
     : Promise.resolve<QuestionWithTopics[]>([]);
+  // 收藏夹概览（驱动收藏 tab 顶部过滤栏）；仅收藏 tab 才查，其余给已解析空值
+  const favoriteFoldersPromise: Promise<FavoriteFolderOverview> =
+    mainView !== 'browse' && !isDocsTab && mybankTab === 'favorites'
+      ? listFavoriteFolders()
+      : Promise.resolve({ folders: [], uncategorizedCount: 0, totalCount: 0 });
   const knowledgeDocsPromise = mainView !== 'browse' && isDocsTab
     ? getMyKnowledgeDocs()
     : Promise.resolve<KnowledgeDoc[]>([]);
@@ -170,11 +180,13 @@ export default async function HomePage({
         mainView={mainView}
         mybankTab={mybankTab}
         isDocsTab={isDocsTab}
+        activeFolder={favoriteFilter}
         sessionPromise={sessionPromise}
         topicsPromise={topicsPromise}
         papersPromise={papersPromise}
         browsePromise={browsePromise}
         workspaceQuestionsPromise={workspaceQuestionsPromise}
+        favoriteFoldersPromise={favoriteFoldersPromise}
         knowledgeDocsPromise={knowledgeDocsPromise}
         forumPostsPromise={forumPostsPromise}
         favoritedIdsPromise={favoritedIdsPromise}

@@ -1180,19 +1180,46 @@ export type Database = {
           },
         ]
       }
+      favorite_folders: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          sort_order: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          sort_order?: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          sort_order?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_favorites: {
         Row: {
           created_at: string
+          folder_id: string | null
           question_id: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          folder_id?: string | null
           question_id: string
           user_id: string
         }
         Update: {
           created_at?: string
+          folder_id?: string | null
           question_id?: string
           user_id?: string
         }
@@ -1202,6 +1229,13 @@ export type Database = {
             columns: ["question_id"]
             isOneToOne: false
             referencedRelation: "questions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "user_favorites_folder_id_fkey"
+            columns: ["folder_id"]
+            isOneToOne: false
+            referencedRelation: "favorite_folders"
             referencedColumns: ["id"]
           },
         ]

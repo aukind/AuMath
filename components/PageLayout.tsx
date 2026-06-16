@@ -28,11 +28,15 @@ import ForumPostList from '@/components/forum/ForumPostList';
 import HeavyContentContainer from '@/components/dashboard/HeavyContentContainer';
 import EditPaperButton from '@/components/admin/EditPaperButton';
 import MyKnowledgeView from '@/components/knowledge/MyKnowledgeView';
+import FavoriteFolderBar from '@/components/FavoriteFolderBar';
 import { PersonalizationProvider } from '@/components/question/PersonalizationContext';
 import { useSoftNav, isPlainLeftClick } from '@/components/ui/useSoftNav';
 import { deleteQuestion, updateQuestionCategory } from '@/app/actions/questions';
 import type { SortOrder } from '@/app/actions/questions';
-import type { TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceType } from '@/types/database';
+import type {
+  TopicWithChildren, PaperRow, QuestionWithTopics, WorkspaceType,
+  FavoriteFolderOverview, FavoriteFolderFilter,
+} from '@/types/database';
 import type { KnowledgeDoc } from '@/types/library';
 import type { ForumPost } from '@/types/forum';
 
@@ -62,6 +66,8 @@ interface PageLayoutProps {
   mybankTab: WorkspaceType;
   /** 我的题库当前在「知识库」标签页（workspace=documents），渲染 PDF 知识库而非题目。 */
   isDocsTab?: boolean;
+  /** 收藏 tab 当前选中的收藏夹过滤（'all'/'uncategorized'/夹 id），驱动顶部过滤栏高亮。 */
+  activeFolder: FavoriteFolderFilter;
   // ── 流式数据（RSC 只创建 promise 不 await；各 Suspense 子树 use() 解包注水）──
   sessionPromise: Promise<SessionInfo>;
   topicsPromise: Promise<TopicWithChildren[]>;
@@ -69,6 +75,8 @@ interface PageLayoutProps {
   /** 仅 browse 视图（?topic / ?paper）存在，其余为 null。 */
   browsePromise: Promise<BrowseData> | null;
   workspaceQuestionsPromise: Promise<QuestionWithTopics[]>;
+  /** 收藏夹概览（仅收藏 tab 真正查询，其余为已解析空值）。 */
+  favoriteFoldersPromise: Promise<FavoriteFolderOverview>;
   knowledgeDocsPromise: Promise<KnowledgeDoc[]>;
   forumPostsPromise: Promise<ForumPost[]>;
   favoritedIdsPromise: Promise<string[]>;
@@ -101,11 +109,13 @@ function PageLayoutInner({
   mainView,
   mybankTab,
   isDocsTab = false,
+  activeFolder,
   sessionPromise,
   topicsPromise,
   papersPromise,
   browsePromise,
   workspaceQuestionsPromise,
+  favoriteFoldersPromise,
   knowledgeDocsPromise,
   forumPostsPromise,
   favoritedIdsPromise,
@@ -278,6 +288,8 @@ function PageLayoutInner({
                     <BankPanel
                       sessionPromise={sessionPromise}
                       workspaceQuestionsPromise={workspaceQuestionsPromise}
+                      favoriteFoldersPromise={favoriteFoldersPromise}
+                      activeFolder={activeFolder}
                       knowledgeDocsPromise={knowledgeDocsPromise}
                       dueCountPromise={dueCountPromise}
                       mybankTab={mybankTab}
@@ -396,11 +408,14 @@ function ForumPanel({
 
 // ── 我的题库面板：会话解包后分流 登录墙 / 题库视图 ───────────
 function BankPanel({
-  sessionPromise, workspaceQuestionsPromise, knowledgeDocsPromise, dueCountPromise,
+  sessionPromise, workspaceQuestionsPromise, favoriteFoldersPromise, activeFolder,
+  knowledgeDocsPromise, dueCountPromise,
   mybankTab, isDocsTab, deletedIds, onDelete,
 }: {
   sessionPromise: Promise<SessionInfo>;
   workspaceQuestionsPromise: Promise<QuestionWithTopics[]>;
+  favoriteFoldersPromise: Promise<FavoriteFolderOverview>;
+  activeFolder: FavoriteFolderFilter;
   knowledgeDocsPromise: Promise<KnowledgeDoc[]>;
   dueCountPromise: Promise<number>;
   mybankTab: WorkspaceType;
@@ -415,6 +430,8 @@ function BankPanel({
       tab={mybankTab}
       isDocsTab={isDocsTab}
       workspaceQuestionsPromise={workspaceQuestionsPromise}
+      favoriteFoldersPromise={favoriteFoldersPromise}
+      activeFolder={activeFolder}
       knowledgeDocsPromise={knowledgeDocsPromise}
       dueCountPromise={dueCountPromise}
       isAdmin={session.isAdmin}
@@ -517,12 +534,15 @@ function BrowseView({
 
 // ── 我的题库（收藏 / 错题 / 最近浏览）────────────────────────
 function MyBankView({
-  tab, isDocsTab = false, workspaceQuestionsPromise, knowledgeDocsPromise, dueCountPromise,
+  tab, isDocsTab = false, workspaceQuestionsPromise, favoriteFoldersPromise, activeFolder,
+  knowledgeDocsPromise, dueCountPromise,
   isAdmin, isLoggedIn, userId, deletedIds, onDelete,
 }: {
   tab: WorkspaceType;
   isDocsTab?: boolean;
   workspaceQuestionsPromise: Promise<QuestionWithTopics[]>;
+  favoriteFoldersPromise: Promise<FavoriteFolderOverview>;
+  activeFolder: FavoriteFolderFilter;
   knowledgeDocsPromise: Promise<KnowledgeDoc[]>;
   dueCountPromise: Promise<number>;
   isAdmin: boolean;
@@ -534,6 +554,9 @@ function MyBankView({
   // 知识库标签页只拉文档、题目标签页只拉题目（另一侧是已解析的空 promise，use 不挂起）
   const questions = use(workspaceQuestionsPromise).filter(q => !deletedIds.has(q.id));
   const knowledgeDocs = isDocsTab ? use(knowledgeDocsPromise) : [];
+  // 收藏夹概览（非收藏 tab 为已解析空值，use 不挂起）；仅在收藏 tab 渲染过滤栏
+  const folderOverview = use(favoriteFoldersPromise);
+  const isFavorites = !isDocsTab && tab === 'favorites';
 
   const meta: Record<WorkspaceType, { title: string; empty: string }> = {
     favorites: { title: '我的收藏', empty: '还没有收藏任何题目。浏览题目时点 ★ 即可加入收藏。' },
@@ -639,11 +662,28 @@ function MyBankView({
         </Suspense>
       )}
 
+      {/* 收藏夹过滤栏：仅「我的收藏」且确有收藏时显示（空收藏不打扰） */}
+      {isFavorites && folderOverview.totalCount > 0 && (
+        <FavoriteFolderBar overview={folderOverview} activeFolder={activeFolder} />
+      )}
+
       {questions.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-3 py-24 text-center max-w-sm mx-auto">
           <div className="text-4xl">{tab === 'favorites' ? '⭐' : tab === 'errors' ? '✗' : '🕒'}</div>
-          <h2 className="font-semibold text-zinc-700 dark:text-zinc-300">{meta[tab].title}为空</h2>
-          <p className="text-sm text-zinc-400 leading-relaxed">{meta[tab].empty}</p>
+          <h2 className="font-semibold text-zinc-700 dark:text-zinc-300">
+            {isFavorites && folderOverview.totalCount > 0
+              ? (activeFolder === 'uncategorized' ? '「未分类」为空'
+                : activeFolder !== 'all' ? '这个收藏夹还没有题目'
+                : `${meta[tab].title}为空`)
+              : `${meta[tab].title}为空`}
+          </h2>
+          <p className="text-sm text-zinc-400 leading-relaxed">
+            {isFavorites && folderOverview.totalCount > 0
+              ? (activeFolder === 'uncategorized' ? '所有收藏都已归入收藏夹。'
+                : activeFolder !== 'all' ? '在其它收藏里勾选题目，点「移动到收藏夹」即可归到这里。'
+                : meta[tab].empty)
+              : meta[tab].empty}
+          </p>
         </div>
       ) : (
         <>
@@ -654,6 +694,8 @@ function MyBankView({
             isLoggedIn={isLoggedIn}
             userId={userId}
             onDelete={onDelete}
+            favoriteMode={isFavorites}
+            folders={folderOverview.folders}
           />
         </>
       )}

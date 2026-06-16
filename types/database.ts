@@ -234,6 +234,23 @@ export interface WorkspaceCounts {
   history: number;
 }
 
+/** 收藏夹（「我的收藏」分门别类用）。count 为该夹内的收藏题数。 */
+export interface FavoriteFolder {
+  id: string;
+  name: string;
+  count: number;
+}
+
+/** 收藏夹概览：用户自建的收藏夹列表 + 未分类/总数（驱动「我的收藏」过滤栏）。 */
+export interface FavoriteFolderOverview {
+  folders: FavoriteFolder[];
+  uncategorizedCount: number;
+  totalCount: number;
+}
+
+/** 收藏夹过滤选择：'all' 全部 · 'uncategorized' 未分类 · 其余为收藏夹 id。 */
+export type FavoriteFolderFilter = 'all' | 'uncategorized' | (string & {});
+
 export interface PaperQuestionRow {
   paper_id: string;
   question_id: string;
