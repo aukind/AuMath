@@ -235,6 +235,47 @@ export async function updateNote(input: {
   return { ok: true };
 }
 
+// ── Daily Note（学习日志）：按东八区当日日期取/建一篇笔记 ─────────────
+/** 东八区今天的 yyyy-MM-dd（确定性，不依赖服务器时区）。 */
+function todayCn(): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+}
+
+export async function getOrCreateDailyNote(): Promise<NoteResult<{ id: string; created: boolean }>> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: '请先登录' };
+
+  const title = todayCn();
+  const { data: existing } = await supabase
+    .from('user_notes')
+    .select('id')
+    .eq('user_id', user.id)
+    .eq('title', title)
+    .maybeSingle();
+  if (existing) return { ok: true, id: existing.id, created: false };
+
+  const body = `# ${title} 学习日志\n\n## 今日所学\n\n## 错题与反思\n\n## 待办\n`;
+  const { data, error } = await supabase
+    .from('user_notes')
+    .insert({ user_id: user.id, title, body_md: body })
+    .select('id')
+    .single();
+  if (error || !data) {
+    if (error?.code === '23505') {
+      // 并发下已被建出来：再查一次。
+      const { data: again } = await supabase.from('user_notes').select('id').eq('user_id', user.id).eq('title', title).maybeSingle();
+      if (again) return { ok: true, id: again.id, created: false };
+    }
+    console.error('[getOrCreateDailyNote]', error?.message);
+    return { ok: false, error: '创建失败，请确认迁移 036 已执行' };
+  }
+  revalidatePath('/notes');
+  return { ok: true, id: data.id, created: true };
+}
+
 // ── 未链接提及：正文里以纯文本出现、却没建双链的知识点/定理 ──────────
 export async function getUnlinkedMentions(noteId: string): Promise<UnlinkedMention[]> {
   if (!noteId) return [];

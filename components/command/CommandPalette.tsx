@@ -8,9 +8,12 @@ import { useRouter } from 'next/navigation';
 import {
   Search, Orbit, Sigma, NotebookPen, FileText, MessagesSquare, User as UserIcon,
   CornerDownLeft, CalendarDays, CalendarClock, Library, SquarePen, FileCode, Home,
+  FilePlus, LayoutDashboard, CalendarPlus,
 } from 'lucide-react';
 import { getCommandIndex, type CommandIndex } from '@/app/actions/command-palette';
 import { searchAll, type SearchResult } from '@/app/actions/search';
+import { getOrCreateDailyNote } from '@/app/actions/notes';
+import { createCanvas } from '@/app/actions/canvas';
 
 interface Item {
   key: string;
@@ -102,7 +105,18 @@ export default function CommandPalette() {
     const q = query.trim().toLowerCase();
     const match = (s: string) => s.toLowerCase().includes(q);
     const go = (href: string) => () => { close(); router.push(href); };
+    const act = (fn: () => Promise<void>) => () => { close(); void fn(); };
     const out: Group[] = [];
+
+    // 动作命令（新建类）：直接创建/打开并跳转
+    const ACTIONS: { label: string; kw: string; icon: React.ReactNode; run: () => void }[] = [
+      { label: '新建笔记', kw: 'new note xinjian biji', icon: <FilePlus size={15} className="text-cyan-500" />, run: go('/notes?new=1') },
+      { label: '今日学习日志', kw: 'daily today riji rizhi 今日', icon: <CalendarPlus size={15} className="text-amber-500" />, run: act(async () => { const r = await getOrCreateDailyNote(); if (r.ok) router.push(`/notes/${r.id}`); }) },
+      { label: '新建白板', kw: 'new canvas baiban', icon: <LayoutDashboard size={15} className="text-rose-500" />, run: act(async () => { const r = await createCanvas(); if (r.ok) router.push(`/canvas/${r.id}`); }) },
+    ];
+    const actionItems = (q ? ACTIONS.filter(a => match(a.label) || a.kw.includes(q)) : ACTIONS)
+      .map<Item>(a => ({ key: `act-${a.label}`, label: a.label, icon: a.icon, run: a.run }));
+    if (actionItems.length) out.push({ title: '新建', items: actionItems });
 
     // 命令（导航）
     const navItems = (q ? NAV.filter(n => match(n.label) || n.keywords.includes(q)) : NAV)

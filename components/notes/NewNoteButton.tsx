@@ -2,13 +2,15 @@
 
 // 新建笔记：弹出标题输入 → createNote → 跳转到详情页（进入编辑态）。
 import { useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, X } from 'lucide-react';
 import { createNote } from '@/app/actions/notes';
 
 export default function NewNoteButton() {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const searchParams = useSearchParams();
+  // 命令面板「新建笔记」会带 ?new=1 软导航过来，进场即弹出对话框（渲染期初始化，不用 effect）。
+  const [open, setOpen] = useState(searchParams.get('new') === '1');
   const [title, setTitle] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
