@@ -2,7 +2,7 @@
 import { notFound, redirect } from 'next/navigation';
 import CanvasBoard from '@/components/canvas/CanvasBoard';
 import { getCanvas } from '@/app/actions/canvas';
-import { getMyNotes } from '@/app/actions/notes';
+import { getCommandIndex } from '@/app/actions/command-palette';
 import { createClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
@@ -14,8 +14,14 @@ export default async function CanvasEditorPage({ params }: { params: Promise<{ i
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect(`/login?redirectTo=/canvas/${id}`);
 
-  const [doc, notes] = await Promise.all([getCanvas(id), getMyNotes()]);
+  const [doc, index] = await Promise.all([getCanvas(id), getCommandIndex()]);
   if (!doc) notFound();
 
-  return <CanvasBoard doc={doc} notes={notes.map((n) => ({ id: n.id, title: n.title }))} />;
+  return (
+    <CanvasBoard
+      doc={doc}
+      notes={index.notes.map((n) => ({ id: n.id, title: n.title }))}
+      theorems={index.theorems.map((t) => ({ id: t.id, title: t.name }))}
+    />
+  );
 }

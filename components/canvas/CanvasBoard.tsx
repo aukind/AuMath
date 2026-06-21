@@ -15,6 +15,10 @@ const CanvasEditor = dynamic(() => import('./CanvasEditor'), {
   ),
 });
 
-export default function CanvasBoard({ doc, notes }: { doc: CanvasDoc; notes: { id: string; title: string }[] }) {
-  return <CanvasEditor doc={doc} notes={notes} />;
+export default function CanvasBoard({ doc, notes, theorems }: {
+  doc: CanvasDoc;
+  notes: { id: string; title: string }[];
+  theorems: { id: string; title: string }[];
+}) {
+  return <CanvasEditor doc={doc} notes={notes} theorems={theorems} />;
 }

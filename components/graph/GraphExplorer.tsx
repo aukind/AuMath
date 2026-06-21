@@ -7,7 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronLeft, Search, Network, LogOut, Eye, EyeOff } from 'lucide-react';
+import { ChevronLeft, Search, Network, LogOut } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import KnowledgeCanvas, { type CanvasHandle } from '@/components/graph/KnowledgeCanvas';
 import SidePeekDrawer from '@/components/graph/SidePeekDrawer';
@@ -64,7 +64,8 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
     return hit ? { id: hit.id, depth: 1 } : null;
   });
   const [query, setQuery] = useState('');
-  const [showQuestions, setShowQuestions] = useState(true);
+  // 类型筛选（知识点恒显；题/定理/笔记可分别开关）。
+  const [show, setShow] = useState({ question: true, theorem: true, note: true });
   const searchRef = useRef<HTMLInputElement>(null);
   const canvasRef = useRef<CanvasHandle | null>(null);
 
@@ -114,13 +115,19 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
       links = links.filter(l => kept.has(idOf(l.source)) && kept.has(idOf(l.target)));
     }
 
-    if (!showQuestions) {
-      nodes = nodes.filter(n => n.type !== 'question');
-      links = links.filter(l => l.kind !== 'qt' && l.kind !== 'theorem_cite');
+    // 类型筛选：隐藏某类节点时，连带去掉只与该类相关的边。
+    const hide = new Set<string>();
+    if (!show.question) hide.add('question');
+    if (!show.theorem) hide.add('theorem');
+    if (!show.note) hide.add('note');
+    if (hide.size) {
+      nodes = nodes.filter(n => !hide.has(n.type));
+      const kept = new Set(nodes.map(n => n.id));
+      links = links.filter(l => kept.has(idOf(l.source)) && kept.has(idOf(l.target)));
     }
 
     return { nodes, links };
-  }, [data, focus, adjacency, showQuestions]);
+  }, [data, focus, adjacency, show]);
 
   // ── 搜索聚光：命中节点保亮，其余沉入夜色 ──
   const matchIds = useMemo(() => {
@@ -249,14 +256,28 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
         </div>
 
         <div className="pointer-events-auto flex items-center gap-2">
-          <button
-            onClick={() => setShowQuestions(v => !v)}
-            title={showQuestions ? '隐藏题目节点（只看知识网）' : '显示题目节点'}
-            className="flex items-center gap-1.5 rounded-xl border border-zinc-200/60 bg-white/70 px-2.5 py-1.5 text-sm font-medium text-zinc-600 shadow-sm backdrop-blur-xl transition-colors hover:text-zinc-900 dark:border-zinc-700/60 dark:bg-zinc-900/70 dark:text-zinc-300 dark:hover:text-zinc-50"
-          >
-            {showQuestions ? <Eye size={14} /> : <EyeOff size={14} />}
-            <span className="hidden sm:inline">题目</span>
-          </button>
+          {/* 类型筛选 chip 组：分组开关题/定理/笔记（知识点恒显） */}
+          <div className="flex items-center gap-1 rounded-xl border border-zinc-200/60 bg-white/70 p-0.5 shadow-sm backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/70">
+            {([
+              { key: 'question' as const, label: '题', color: '#a1a1aa' },
+              { key: 'theorem' as const, label: '定理', color: '#d97706' },
+              { key: 'note' as const, label: '笔记', color: '#06b6d4' },
+            ]).map(({ key, label, color }) => (
+              <button
+                key={key}
+                onClick={() => setShow(s => ({ ...s, [key]: !s[key] }))}
+                title={`${show[key] ? '隐藏' : '显示'}${label}节点`}
+                className={`flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-medium transition-colors ${
+                  show[key]
+                    ? 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100'
+                    : 'text-zinc-400 dark:text-zinc-500'
+                }`}
+              >
+                <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: color, opacity: show[key] ? 1 : 0.4 }} />
+                {label}
+              </button>
+            ))}
+          </div>
           <div className="rounded-xl border border-zinc-200/60 bg-white/70 shadow-sm backdrop-blur-xl dark:border-zinc-700/60 dark:bg-zinc-900/70">
             <ThemeToggle />
           </div>

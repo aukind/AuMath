@@ -4,16 +4,21 @@
 export interface CanvasNodeData {
   /** text 卡：自由文本（Markdown/LaTeX，渲染走 MathRenderer） */
   text?: string;
-  /** note 卡：引用的笔记 id + 标题快照（标题随手改名可能过期，打开时以 id 为准） */
+  /** note 卡：引用的笔记 id；theorem/question 卡：对应实体 id（见各自字段） */
   noteId?: string;
+  theoremId?: string;
+  questionId?: string;
+  /** 卡片标题/摘要快照（实体改名可能过期，打开时以 id 为准） */
   title?: string;
-  /** 卡片底色（可选，便于分组着色） */
+  /** 卡片底色（可选，便于分组着色；存色板 key 或 hex） */
   color?: string;
 }
 
+export type CanvasNodeType = 'text' | 'note' | 'theorem' | 'question';
+
 export interface CanvasNode {
   id: string;
-  type: 'text' | 'note';
+  type: CanvasNodeType;
   position: { x: number; y: number };
   data: CanvasNodeData;
   width?: number;
