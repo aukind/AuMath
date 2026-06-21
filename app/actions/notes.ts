@@ -16,6 +16,30 @@ const MAX_NOTES = 1000;        // 单用户笔记上限，挡脚本刷爆
 const MAX_TITLE_LEN = 120;
 const MAX_BODY_LEN = 100_000;  // 单篇正文上限（约 10 万字符）
 
+const MAX_TAGS = 12;
+const MAX_TAG_LEN = 24;
+
+/** 从 metadata JSONB 读出 tags（容错：非数组/越界一律收窄）。 */
+function readTags(metadata: unknown): string[] {
+  const raw = (metadata as { tags?: unknown } | null)?.tags;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((t): t is string => typeof t === 'string' && !!t.trim()).map(t => t.trim());
+}
+
+/** 规整用户输入的 tags：去空、去重、限长限量。 */
+function normalizeTags(tags: string[]): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const t of tags) {
+    const v = t.trim().replace(/^#/, '').slice(0, MAX_TAG_LEN);
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+    if (out.length >= MAX_TAGS) break;
+  }
+  return out;
+}
+
 /** 正文去公式/markdown 标记，取前 N 字作列表预览。 */
 function makeSnippet(body: string, n = 100): string {
   const plain = body
@@ -38,7 +62,7 @@ export async function getMyNotes(): Promise<NoteSummary[]> {
 
   const { data, error } = await supabase
     .from('user_notes')
-    .select('id, title, is_public, body_md, updated_at, note_links(note_id)')
+    .select('id, title, is_public, body_md, metadata, updated_at, note_links(note_id)')
     .eq('user_id', user.id)
     .order('updated_at', { ascending: false });
   if (error) {
@@ -53,6 +77,7 @@ export async function getMyNotes(): Promise<NoteSummary[]> {
     updatedAt: n.updated_at,
     snippet: makeSnippet(n.body_md ?? ''),
     linkCount: Array.isArray(n.note_links) ? n.note_links.length : 0,
+    tags: readTags(n.metadata),
   }));
 }
 
@@ -63,7 +88,7 @@ async function buildDetail(noteId: string): Promise<NoteDetail | null> {
 
   const { data: note, error } = await supabase
     .from('user_notes')
-    .select('id, user_id, title, body_md, is_public, created_at, updated_at')
+    .select('id, user_id, title, body_md, is_public, metadata, created_at, updated_at')
     .eq('id', noteId)
     .maybeSingle();
   if (error || !note) return null;
@@ -103,6 +128,7 @@ async function buildDetail(noteId: string): Promise<NoteDetail | null> {
     title: note.title,
     bodyMd: note.body_md ?? '',
     isPublic: note.is_public,
+    tags: readTags(note.metadata),
     createdAt: note.created_at,
     updatedAt: note.updated_at,
     outLinks,
@@ -199,12 +225,13 @@ export async function updateNote(input: {
   title?: string;
   bodyMd?: string;
   isPublic?: boolean;
+  tags?: string[];
 }): Promise<NoteResult> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { ok: false, error: '请先登录' };
 
-  const patch: { title?: string; body_md?: string; is_public?: boolean } = {};
+  const patch: { title?: string; body_md?: string; is_public?: boolean; metadata?: { tags: string[] } } = {};
   if (input.title !== undefined) {
     const t = input.title.trim();
     if (!t) return { ok: false, error: '标题不能为空' };
@@ -213,6 +240,7 @@ export async function updateNote(input: {
   }
   if (input.bodyMd !== undefined) patch.body_md = input.bodyMd.slice(0, MAX_BODY_LEN);
   if (input.isPublic !== undefined) patch.is_public = input.isPublic;
+  if (input.tags !== undefined) patch.metadata = { tags: normalizeTags(input.tags) };
   if (Object.keys(patch).length === 0) return { ok: true };
 
   const { error } = await supabase

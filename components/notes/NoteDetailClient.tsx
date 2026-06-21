@@ -5,7 +5,7 @@
 import { useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Pencil, Trash2, Save, X, Globe, Lock, Link2, CornerUpLeft, ArrowUpRight, Sparkles, Plus } from 'lucide-react';
+import { Pencil, Trash2, Save, X, Globe, Lock, Link2, CornerUpLeft, ArrowUpRight, Sparkles, Plus, Tag } from 'lucide-react';
 import { updateNote, deleteNote, linkMention } from '@/app/actions/notes';
 import type { NoteDetail, NoteOutLink, UnlinkedMention } from '@/types/notes';
 
@@ -41,6 +41,8 @@ export default function NoteDetailClient({
   const [title, setTitle] = useState(note.title);
   const [body, setBody] = useState(note.bodyMd);
   const [isPublic, setIsPublic] = useState(note.isPublic);
+  const [tags, setTags] = useState<string[]>(note.tags);
+  const [tagDraft, setTagDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [confirmDel, setConfirmDel] = useState(false);
@@ -50,7 +52,7 @@ export default function NoteDetailClient({
     if (!t) { setError('标题不能为空'); return; }
     setError(null);
     startTransition(async () => {
-      const res = await updateNote({ id: note.id, title: t, bodyMd: body, isPublic });
+      const res = await updateNote({ id: note.id, title: t, bodyMd: body, isPublic, tags });
       if (res.ok) {
         setEditing(false);
         router.refresh(); // 重渲 RSC 正文 + 重建出链/反链面板
@@ -64,9 +66,18 @@ export default function NoteDetailClient({
     setTitle(note.title);
     setBody(note.bodyMd);
     setIsPublic(note.isPublic);
+    setTags(note.tags);
+    setTagDraft('');
     setError(null);
     setEditing(false);
   };
+
+  const addTag = () => {
+    const v = tagDraft.trim().replace(/^#/, '');
+    if (v && !tags.includes(v) && tags.length < 12) setTags([...tags, v]);
+    setTagDraft('');
+  };
+  const removeTag = (t: string) => setTags(tags.filter((x) => x !== t));
 
   const remove = () => {
     startTransition(async () => {
@@ -127,6 +138,17 @@ export default function NoteDetailClient({
         </div>
       </div>
 
+      {/* 标签（阅读态展示，点击去 /notes?tag= 过滤） */}
+      {!editing && tags.length > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-1.5">
+          {tags.map((t) => (
+            <Link key={t} href={`/notes?tag=${encodeURIComponent(t)}`} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700">
+              <Tag size={11} /> {t}
+            </Link>
+          ))}
+        </div>
+      )}
+
       {error && <p className="mb-3 text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       {/* 正文 */}
@@ -139,6 +161,24 @@ export default function NoteDetailClient({
             rows={18}
             className="w-full resize-y rounded-xl border border-zinc-300 bg-white px-4 py-3 font-mono text-sm leading-relaxed text-zinc-900 outline-none focus:border-cyan-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
           />
+          {/* 标签编辑 */}
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <Tag size={14} className="text-zinc-400" />
+            {tags.map((t) => (
+              <span key={t} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-0.5 text-xs text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200">
+                {t}
+                <button onClick={() => removeTag(t)} className="text-zinc-400 hover:text-red-500"><X size={11} /></button>
+              </span>
+            ))}
+            <input
+              value={tagDraft}
+              onChange={(e) => setTagDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(); } }}
+              onBlur={addTag}
+              placeholder="加标签…"
+              className="w-24 bg-transparent text-xs text-zinc-700 outline-none placeholder:text-zinc-400 dark:text-zinc-200"
+            />
+          </div>
           <label className="mt-3 flex w-fit cursor-pointer items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
             <input type="checkbox" checked={isPublic} onChange={(e) => setIsPublic(e.target.checked)} className="accent-cyan-600" />
             公开此笔记（他人可只读）

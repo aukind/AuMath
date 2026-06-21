@@ -9,6 +9,8 @@ export interface NoteSummary {
   snippet: string;
   /** 该笔记的出链条数（含悬挂） */
   linkCount: number;
+  /** 用户给笔记打的标签（存 metadata.tags） */
+  tags: string[];
 }
 
 /** 笔记的一条出链（已解析或悬挂） */
@@ -37,6 +39,7 @@ export interface NoteDetail {
   title: string;
   bodyMd: string;
   isPublic: boolean;
+  tags: string[];
   createdAt: string;
   updatedAt: string;
   /** 本笔记 [[维基链接]] 出去的实体 */
