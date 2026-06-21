@@ -3,6 +3,7 @@
 import { useId, useState } from 'react';
 import { motion, LayoutGroup } from 'framer-motion';
 import KnowledgeTree from '@/components/KnowledgeTree';
+import BackfillKnowledgeButton from '@/components/BackfillKnowledgeButton';
 import PaperList from '@/components/PaperList';
 import MockPapers from '@/components/MockPapers';
 import type { TopicWithChildren, PaperRow } from '@/types/database';
@@ -52,6 +53,7 @@ export default function SidebarTabs({
       {/* ── Tab 内容：三棵子树常驻挂载，仅 hidden 切显隐 → 切换零重建、目录状态保留 ── */}
       <div className="flex-1 overflow-y-auto min-h-0">
         <div className={tab === 'topics' ? '' : 'hidden'}>
+          {isAdmin && <BackfillKnowledgeButton />}
           <KnowledgeTree topics={topics} selectedId={selectedTopicId} isAdmin={isAdmin} />
         </div>
         <div className={tab === 'real' ? '' : 'hidden'}>
