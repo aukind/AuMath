@@ -9,7 +9,8 @@ import { createClient } from '@/lib/supabase/server';
 import { revalidatePath } from 'next/cache';
 import { extractWikiRefs } from '@/lib/utils/wikiLinks';
 import { resolveWikiRefs } from '@/lib/notes/resolve';
-import type { NoteSummary, NoteDetail, NoteOutLink, NoteBacklink, NoteResult } from '@/types/notes';
+import { findUnlinkedNames, wrapFirstMention } from '@/lib/notes/mentions';
+import type { NoteSummary, NoteDetail, NoteOutLink, NoteBacklink, NoteResult, UnlinkedMention } from '@/types/notes';
 
 const MAX_NOTES = 1000;        // 单用户笔记上限，挡脚本刷爆
 const MAX_TITLE_LEN = 120;
@@ -231,6 +232,66 @@ export async function updateNote(input: {
   }
   revalidatePath('/notes');
   revalidatePath(`/notes/${input.id}`);
+  return { ok: true };
+}
+
+// ── 未链接提及：正文里以纯文本出现、却没建双链的知识点/定理 ──────────
+export async function getUnlinkedMentions(noteId: string): Promise<UnlinkedMention[]> {
+  if (!noteId) return [];
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return [];
+
+  const { data: note } = await supabase
+    .from('user_notes')
+    .select('body_md, user_id')
+    .eq('id', noteId)
+    .maybeSingle();
+  if (!note || note.user_id !== user.id || !note.body_md?.trim()) return [];
+
+  const [topicsRes, theoremsRes] = await Promise.all([
+    supabase.from('topics').select('name'),
+    supabase.from('theorems').select('name'),
+  ]);
+  const topicNames = (topicsRes.data ?? []).map(t => t.name);
+  const theoremNames = theoremsRes.error ? [] : (theoremsRes.data ?? []).map(t => t.name);
+
+  const hitTopics = new Set(findUnlinkedNames(note.body_md, topicNames));
+  const hitTheorems = new Set(findUnlinkedNames(note.body_md, theoremNames));
+
+  const out: UnlinkedMention[] = [];
+  for (const name of hitTopics) out.push({ type: 'topic', name });
+  // 定理优先级略低，且与知识点同名时只保留知识点。
+  for (const name of hitTheorems) if (!hitTopics.has(name)) out.push({ type: 'theorem', name });
+  return out.slice(0, 24);
+}
+
+/** 一键把某个未链接提及在正文首个出现处补成 [[双链]]，并保存（重建出链）。 */
+export async function linkMention(noteId: string, type: 'topic' | 'theorem', name: string): Promise<NoteResult> {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { ok: false, error: '请先登录' };
+
+  const { data: note } = await supabase
+    .from('user_notes')
+    .select('body_md')
+    .eq('id', noteId)
+    .eq('user_id', user.id)
+    .maybeSingle();
+  if (!note) return { ok: false, error: '笔记不存在' };
+
+  const next = wrapFirstMention(note.body_md ?? '', name, type === 'theorem' ? 'thm:' : '');
+  if (next === (note.body_md ?? '')) return { ok: false, error: '未找到该提及' };
+
+  const { error } = await supabase
+    .from('user_notes')
+    .update({ body_md: next })
+    .eq('id', noteId)
+    .eq('user_id', user.id);
+  if (error) { console.error('[linkMention]', error.message); return { ok: false, error: '补链失败' }; }
+
+  await rebuildNoteLinks(supabase, user.id, noteId, next);
+  revalidatePath(`/notes/${noteId}`);
   return { ok: true };
 }
 

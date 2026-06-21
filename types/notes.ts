@@ -20,6 +20,12 @@ export interface NoteOutLink {
   label: string;
 }
 
+/** 未链接提及：正文纯文本含、却未建双链的知识点/定理 */
+export interface UnlinkedMention {
+  type: 'topic' | 'theorem';
+  name: string;
+}
+
 /** 引用了某实体（或某笔记）的来源笔记 */
 export interface NoteBacklink {
   noteId: string;

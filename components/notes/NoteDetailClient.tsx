@@ -5,9 +5,9 @@
 import { useState, useTransition, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Pencil, Trash2, Save, X, Globe, Lock, Link2, CornerUpLeft, ArrowUpRight } from 'lucide-react';
-import { updateNote, deleteNote } from '@/app/actions/notes';
-import type { NoteDetail, NoteOutLink } from '@/types/notes';
+import { Pencil, Trash2, Save, X, Globe, Lock, Link2, CornerUpLeft, ArrowUpRight, Sparkles, Plus } from 'lucide-react';
+import { updateNote, deleteNote, linkMention } from '@/app/actions/notes';
+import type { NoteDetail, NoteOutLink, UnlinkedMention } from '@/types/notes';
 
 const TYPE_LABEL: Record<NoteOutLink['targetType'], string> = {
   topic: '知识点', theorem: '定理', question: '题目', note: '笔记',
@@ -28,10 +28,12 @@ function outHref(l: NoteOutLink): string {
 export default function NoteDetailClient({
   note,
   startEditing = false,
+  mentions = [],
   children,
 }: {
   note: NoteDetail;
   startEditing?: boolean;
+  mentions?: UnlinkedMention[];
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -70,6 +72,14 @@ export default function NoteDetailClient({
     startTransition(async () => {
       const res = await deleteNote(note.id);
       if (res.ok) router.push('/notes');
+      else setError(res.error);
+    });
+  };
+
+  const link = (m: UnlinkedMention) => {
+    startTransition(async () => {
+      const res = await linkMention(note.id, m.type, m.name);
+      if (res.ok) router.refresh();
       else setError(res.error);
     });
   };
@@ -125,7 +135,7 @@ export default function NoteDetailClient({
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            placeholder={'支持 Markdown 与 $LaTeX$。\n双链：[[知识点]] · [[thm:韦达定理]] · [[note:另一篇笔记]]\n嵌入：![[另一篇笔记]] 整段插入该笔记内容'}
+            placeholder={'支持 Markdown 与 $LaTeX$。\n双链：[[知识点]] · [[thm:韦达定理]] · [[note:另一篇笔记]]\n嵌入：![[另一篇笔记]] 整段插入；![[笔记#^锚点]] 只嵌某段（段末写 ^锚点 起锚）'}
             rows={18}
             className="w-full resize-y rounded-xl border border-zinc-300 bg-white px-4 py-3 font-mono text-sm leading-relaxed text-zinc-900 outline-none focus:border-cyan-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
           />
@@ -138,6 +148,29 @@ export default function NoteDetailClient({
         <article className="rounded-xl border border-zinc-200 bg-white px-5 py-4 dark:border-zinc-800 dark:bg-zinc-900">
           {children}
         </article>
+      )}
+
+      {/* 未链接提及：正文里出现却没建双链的知识点/定理，一键补链 */}
+      {!editing && mentions.length > 0 && (
+        <section className="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-500/30 dark:bg-amber-500/[0.07]">
+          <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-amber-700 dark:text-amber-300">
+            <Sparkles size={15} /> 未链接提及 · {mentions.length}
+            <span className="font-normal text-xs text-amber-600/70 dark:text-amber-400/70">正文提到了它们，点一下即可建双链</span>
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {mentions.map((m) => (
+              <button
+                key={`${m.type}-${m.name}`}
+                onClick={() => link(m)}
+                disabled={pending}
+                className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-white px-2.5 py-1 text-sm text-amber-800 transition-colors hover:bg-amber-100 disabled:opacity-50 dark:border-amber-500/40 dark:bg-zinc-900 dark:text-amber-200 dark:hover:bg-amber-500/10"
+              >
+                <Plus size={12} /> {m.name}
+                <span className="rounded bg-amber-100 px-1 text-[10px] text-amber-600 dark:bg-amber-500/20 dark:text-amber-300">{m.type === 'topic' ? '知识点' : '定理'}</span>
+              </button>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* 出链 / 反链面板（仅阅读态） */}

@@ -31,13 +31,15 @@ const PREFIX_MAP: Record<string, WikiTargetType> = {
   topic: 'topic', 知识点: 'topic',
 };
 
-/** 把 [[...]] 里捕获的 target 文本拆成 {type,name}。无已知前缀则整体当知识点名。 */
+/** 把 [[...]] 里捕获的 target 文本拆成 {type,name}。无已知前缀则整体当知识点名。
+ *  末尾的 #^块id / #小标题 仅用于定位，解析实体时一律剥掉，按裸名命中。 */
 function parseTarget(target: string): { type: WikiTargetType; name: string } {
+  const stripHash = (s: string) => s.replace(/#\^?[^\[\]\n]*$/, '').trim() || s.trim();
   const m = target.match(/^([A-Za-z一-龥]{1,6})[:：]\s*(.+)$/);
   if (m && PREFIX_MAP[m[1]]) {
-    return { type: PREFIX_MAP[m[1]], name: m[2].trim() };
+    return { type: PREFIX_MAP[m[1]], name: stripHash(m[2]) };
   }
-  return { type: 'topic', name: target.trim() };
+  return { type: 'topic', name: stripHash(target) };
 }
 
 /** 单条 WikiRef 对应的目标 URL。 */
