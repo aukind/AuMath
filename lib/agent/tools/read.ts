@@ -4,6 +4,7 @@ import { searchAll } from '@/app/actions/search';
 import { semanticSearchQuestionIds } from '@/app/actions/embeddings';
 import { getQuestionById } from '@/app/actions/questions';
 import { listFavoriteFolders } from '@/app/actions/favorites';
+import * as adminOps from '../admin-ops';
 import type { AnyAgentTool, ToolResult } from '../types';
 
 /** 截断题面，避免把整页 LaTeX 灌给模型/审计。 */
@@ -74,7 +75,9 @@ const getQuestion: AnyAgentTool = {
   scopes: ['read'],
   mutates: false,
   confirm: 'never',
-  async run({ id }): Promise<ToolResult> {
+  async run({ id }, ctx): Promise<ToolResult> {
+    // MCP 路无 cookie，走令牌身份 + service-role；面板路保持原 action。
+    if (ctx.surface === 'mcp') return adminOps.getQuestion(ctx, id);
     const q = await getQuestionById(id);
     if (!q) return { status: 'error', error: '题目不存在或无权访问' };
     return { status: 'ok', data: q };

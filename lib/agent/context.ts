@@ -17,14 +17,29 @@ export async function resolvePanelContext(autopilot: boolean): Promise<AgentCtx 
 }
 
 /**
- * MCP：从 Authorization: Bearer <supabase-access-token> 解析上下文。
- * 用携带该 token 的客户端验明身份，token 无效返回 null。
- * MCP 默认开自动驾驶（CLI 场景无交互确认面板），但仍受 dangerous scope 与审计约束。
+ * MCP：从 Authorization: Bearer <token> 解析上下文。两种令牌：
+ *   1. 静态管理员令牌（MCP_ADMIN_TOKEN）——专给本地 Claude（Claude Code/桌面端，跑会员）
+ *      接入用，配一次永久有效、不过期。需同时配 MCP_ADMIN_USER_ID（管理员的 auth.users UUID，
+ *      录题 created_by/审计外键要用真实用户 id）。
+ *   2. Supabase access token——网页登录态派生，会过期。
+ * token 无效返回 null。MCP 默认开自动驾驶（CLI 无交互确认面板），但仍受 dangerous scope 与审计约束。
  */
 export async function resolveMcpContext(authHeader: string | null): Promise<AgentCtx | null> {
   const token = authHeader?.replace(/^Bearer\s+/i, '').trim();
   if (!token) return null;
 
+  // 1. 静态管理员令牌（常量时间比较，避免计时侧信道）
+  const adminToken = process.env.MCP_ADMIN_TOKEN;
+  const adminUserId = process.env.MCP_ADMIN_USER_ID;
+  if (adminToken && adminUserId && token.length === adminToken.length) {
+    let diff = 0;
+    for (let i = 0; i < token.length; i++) diff |= token.charCodeAt(i) ^ adminToken.charCodeAt(i);
+    if (diff === 0) {
+      return { userId: adminUserId, isAdmin: true, autopilot: true, surface: 'mcp' };
+    }
+  }
+
+  // 2. Supabase access token
   const client = createSupabaseJsClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,

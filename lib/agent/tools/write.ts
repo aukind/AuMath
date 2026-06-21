@@ -3,6 +3,7 @@ import { createQuestion, type CreateQuestionInput } from '@/app/actions/question
 import { suggestKnowledgePoints } from '@/app/actions/knowledge-points';
 import { toggleFavorite } from '@/app/actions/user-workspace';
 import { createFavoriteFolder, moveFavoritesToFolder } from '@/app/actions/favorites';
+import * as adminOps from '../admin-ops';
 import type { AnyAgentTool, ToolResult } from '../types';
 
 const createQuestionTool: AnyAgentTool = {
@@ -26,7 +27,7 @@ const createQuestionTool: AnyAgentTool = {
   scopes: ['write'],
   mutates: true,
   confirm: 'never',
-  async run(input): Promise<ToolResult> {
+  async run(input, ctx): Promise<ToolResult> {
     const payload: CreateQuestionInput = {
       content: input.content,
       answer: input.answer,
@@ -34,11 +35,13 @@ const createQuestionTool: AnyAgentTool = {
       question_type: input.question_type,
       year: input.year ?? null,
       source: input.source ?? null,
-      topic_ids: [], // 留空 → action 内 Gemini 自动打标
+      topic_ids: [], // 留空 → Gemini 自动打标
       status: input.status ?? 'draft',
       options: input.options ?? null,
       choice_type: input.choice_type ?? null,
     };
+    // MCP 路无 cookie，走令牌身份 + service-role；面板路保持原 action。
+    if (ctx.surface === 'mcp') return adminOps.createQuestion(ctx, payload);
     const r = await createQuestion(payload);
     if (!r.success) return { status: 'error', error: r.error ?? '录题失败' };
     return { status: 'ok', data: { id: r.id } };

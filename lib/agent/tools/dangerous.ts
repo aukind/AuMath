@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { deleteQuestion, getQuestionById } from '@/app/actions/questions';
+import * as adminOps from '../admin-ops';
 import type { AnyAgentTool, ToolResult } from '../types';
 
 /**
@@ -14,7 +15,9 @@ const deleteQuestionTool: AnyAgentTool = {
   scopes: ['dangerous'],
   mutates: true,
   confirm: 'irreversible',
-  async run({ id }): Promise<ToolResult> {
+  async run({ id }, ctx): Promise<ToolResult> {
+    // MCP 路无 cookie，走令牌身份 + service-role；面板路保持原 action。
+    if (ctx.surface === 'mcp') return adminOps.deleteQuestion(ctx, id);
     const r = await deleteQuestion(id);
     if (!r.success) return { status: 'error', error: r.error ?? '删除失败' };
     return { status: 'ok', data: { deleted: id } };
