@@ -27,6 +27,8 @@ interface Props {
   onTopicClick: (id: string) => void;
   /** 点击定理节点回调 theorem id（编排层打开 TheoremInspector） */
   onTheoremClick: (id: string) => void;
+  /** 点击笔记节点回调 note id（编排层跳转 /notes/[id]） */
+  onNoteClick: (id: string) => void;
   /** 点击空白处（清除选中） */
   onBackgroundClick?: () => void;
   /** 当前选中节点（持久聚光灯 + 脉冲描环） */
@@ -50,6 +52,7 @@ const TOPIC_LEVEL_COLORS: { light: string; dark: string }[] = [
 ];
 const MANUAL_LINK_COLOR = { light: '#d97706', dark: '#fbbf24' }; // 手动双链=琥珀金
 const THEOREM_COLOR = { light: '#d97706', dark: '#fbbf24' };     // 定理=琥珀金菱形
+const NOTE_COLOR = { light: '#06b6d4', dark: '#22d3ee' };        // 用户笔记=青色圆角方块
 
 const idOf = (end: any): string => (typeof end === 'object' && end ? end.id : end);
 const nodeRadius = (n: GraphNode) => Math.sqrt(Math.max(1, n.val)) * 2.2;
@@ -74,7 +77,7 @@ function makeStars(count: number, spread: number): Star[] {
 }
 
 export default function KnowledgeCanvas({
-  data, onQuestionClick, onTopicClick, onTheoremClick, onBackgroundClick,
+  data, onQuestionClick, onTopicClick, onTheoremClick, onNoteClick, onBackgroundClick,
   selectedId = null, matchIds = null, onHandleReady,
 }: Props) {
   const { resolvedTheme } = useTheme();
@@ -175,8 +178,10 @@ export default function KnowledgeCanvas({
     const r = nodeRadius(n);
     const isTopic = n.type === 'topic';
     const isTheorem = n.type === 'theorem';
+    const isNote = n.type === 'note';
     const color = isTopic ? topicColor(n.level, dark)
       : isTheorem ? pick(THEOREM_COLOR)
+      : isNote ? pick(NOTE_COLOR)
       : pick(STATUS_COLORS[n.status ?? 'unattempted']);
     const dimmed = isDimmed(n.id);
     const selected = selectedId === n.id;
@@ -184,8 +189,8 @@ export default function KnowledgeCanvas({
     ctx.save();
     ctx.globalAlpha = dimmed ? 0.08 : 1;
 
-    // 辉光：径向渐变光晕（比 shadowBlur 廉价且可控），聚光灯内增强。知识点与定理皆有。
-    if ((isTopic || isTheorem) && !dimmed) {
+    // 辉光：径向渐变光晕（比 shadowBlur 廉价且可控），聚光灯内增强。知识点/定理/笔记皆有。
+    if ((isTopic || isTheorem || isNote) && !dimmed) {
       const haloR = r * (highlight?.has(n.id) ? 3.2 : 2.4);
       const grad = ctx.createRadialGradient(node.x, node.y, r * 0.4, node.x, node.y, haloR);
       grad.addColorStop(0, color + (dark ? '55' : '40'));
@@ -196,7 +201,7 @@ export default function KnowledgeCanvas({
       ctx.fill();
     }
 
-    // 节点本体：知识点/题目=圆，定理=菱形（一眼区分第三类节点）。
+    // 节点本体：知识点/题目=圆，定理=菱形，笔记=圆角方块（一眼区分四类节点）。
     ctx.beginPath();
     if (isTheorem) {
       ctx.moveTo(node.x, node.y - r);
@@ -204,6 +209,10 @@ export default function KnowledgeCanvas({
       ctx.lineTo(node.x, node.y + r);
       ctx.lineTo(node.x - r, node.y);
       ctx.closePath();
+    } else if (isNote) {
+      const s = r * 0.92;       // 方块半边长，略小于半径以观感相称
+      const rad = s * 0.45;     // 圆角
+      ctx.roundRect(node.x - s, node.y - s, s * 2, s * 2, rad);
     } else {
       ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
     }
@@ -245,6 +254,13 @@ export default function KnowledgeCanvas({
       ctx.textBaseline = 'top';
       ctx.fillStyle = dark ? '#fbbf24' : '#b45309';
       ctx.fillText(n.name, node.x, node.y + r + 1.5 / globalScale);
+    } else if (isNote && !dimmed) {
+      const fontSize = 11 / globalScale;
+      ctx.font = `600 ${fontSize}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = dark ? '#67e8f9' : '#0e7490';
+      ctx.fillText(n.name, node.x, node.y + r + 1.5 / globalScale);
     } else if (n.type === 'question' && !dimmed && globalScale > 2.2) {
       const alpha = Math.min(1, (globalScale - 2.2) / 1.2);
       const fontSize = 10 / globalScale;
@@ -282,6 +298,8 @@ export default function KnowledgeCanvas({
         return dark ? 'rgba(251,191,36,0.55)' : 'rgba(217,119,6,0.5)';
       case 'theorem_cite':
         return dark ? 'rgba(251,191,36,0.26)' : 'rgba(217,119,6,0.28)';
+      case 'note_ref':
+        return dark ? 'rgba(34,211,238,0.5)' : 'rgba(6,182,212,0.45)';
       default:
         return dark ? 'rgba(113,113,122,0.22)' : 'rgba(212,212,216,0.55)';
     }
@@ -305,6 +323,7 @@ export default function KnowledgeCanvas({
   const linkWidth = useCallback((link: any) => {
     const l = link as GraphLink;
     const base = l.kind === 'manual' ? 1.8
+      : l.kind === 'note_ref' ? 1.4
       : l.kind === 'theorem_topic' ? 1.4
       : l.kind === 'hierarchy' ? 1.1
       : l.kind === 'theorem_cite' ? 0.7
@@ -317,7 +336,7 @@ export default function KnowledgeCanvas({
 
   const linkLineDash = useCallback((link: any) => {
     const k = (link as GraphLink).kind;
-    return k === 'hierarchy' ? [3, 2] : k === 'theorem_topic' ? [1, 3] : null;
+    return k === 'hierarchy' ? [3, 2] : k === 'theorem_topic' ? [1, 3] : k === 'note_ref' ? [2, 2] : null;
   }, []);
 
   // 能量粒子：手动双链常驻流光；聚光灯内的连线点亮时也淌粒子（华丽但量小，不掉帧）。
@@ -352,8 +371,10 @@ export default function KnowledgeCanvas({
       if (fgRef.current && typeof node.x === 'number') {
         fgRef.current.centerAt(node.x, node.y, 600);
       }
+    } else if (node?.type === 'note') {
+      onNoteClick(node.id);
     }
-  }, [onQuestionClick, onTopicClick, onTheoremClick]);
+  }, [onQuestionClick, onTopicClick, onTheoremClick, onNoteClick]);
 
   const handleBackgroundClick = useCallback(() => {
     onBackgroundClick?.();

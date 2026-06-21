@@ -185,8 +185,63 @@ async function getUserStatusSets(): Promise<{ errorSet: Set<string>; masteredSet
 }
 
 /**
+ * 当前用户的私人笔记层（Obsidian 灵魂层）。绝不进 getBaseGraphCached（那是匿名共享缓存），
+ * 每次按登录用户用「带 cookie 的鉴权客户端」现算，RLS 保证只读到本人笔记。
+ * 返回笔记节点 + note_ref 边（仅当目标节点已在本次保留集合内才连，避免悬挂引用）。
+ * 迁移 036 未跑 / 未登录时静默返回空，星图其余层不受影响。
+ */
+async function getUserNoteLayer(
+  keptTopicIds: Set<string>,
+  keptQuestionIds: Set<string>,
+  keptTheoremIds: Set<string>,
+): Promise<{ noteNodes: GraphNode[]; noteEdges: GraphLink[] }> {
+  try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { noteNodes: [], noteEdges: [] };
+
+    const [notesRes, linksRes] = await Promise.all([
+      supabase.from('user_notes').select('id, title').eq('user_id', user.id),
+      supabase.from('note_links').select('note_id, target_type, target_id').not('target_id', 'is', null),
+    ]);
+    if (notesRes.error || !notesRes.data?.length) return { noteNodes: [], noteEdges: [] };
+
+    const noteIds = new Set(notesRes.data.map(n => n.id));
+    // 出链计数（仅本人笔记的、且目标已解析的链）→ 决定笔记节点大小。
+    const outDegree = new Map<string, number>();
+    const noteEdges: GraphLink[] = [];
+    for (const l of linksRes.data ?? []) {
+      if (!noteIds.has(l.note_id) || !l.target_id) continue;
+      const t = l.target_type;
+      const present =
+        t === 'topic' ? keptTopicIds.has(l.target_id)
+        : t === 'question' ? keptQuestionIds.has(l.target_id)
+        : t === 'theorem' ? keptTheoremIds.has(l.target_id)
+        : t === 'note' ? noteIds.has(l.target_id)
+        : false;
+      if (!present) continue;
+      if (t === 'note' && l.target_id === l.note_id) continue; // 自环
+      noteEdges.push({ source: l.note_id, target: l.target_id, kind: 'note_ref' });
+      outDegree.set(l.note_id, (outDegree.get(l.note_id) ?? 0) + 1);
+    }
+
+    // 全部本人笔记都作为节点（孤儿笔记也显示，鼓励补建链接）。
+    const noteNodes: GraphNode[] = notesRes.data.map(n => ({
+      id: n.id,
+      type: 'note',
+      name: n.title,
+      degree: outDegree.get(n.id) ?? 0,
+      val: 3 + Math.log2((outDegree.get(n.id) ?? 0) + 1) * 1.6,
+    }));
+    return { noteNodes, noteEdges };
+  } catch {
+    return { noteNodes: [], noteEdges: [] };
+  }
+}
+
+/**
  * 获取全站图谱，并按当前登录用户的 user_errors / user_question_attempts 计算 status。
- * 公共底图走缓存；个人染色层每次现算；超节点上限时降采样（保留全部错题/已掌握）。
+ * 公共底图走缓存；个人染色层（含私人笔记层）每次现算；超节点上限时降采样（保留全部错题/已掌握）。
  */
 export async function getPersonalizedGraphData(): Promise<GraphDataPayload> {
   const base = await getBaseGraphCached();
@@ -266,12 +321,16 @@ export async function getPersonalizedGraphData(): Promise<GraphDataPayload> {
     ...base.theoremQuestionLinks.filter(l => keptTheoremIds.has(l.source) && keptIds.has(l.target)),
   ];
 
+  // ── 私人笔记层：按当前用户现算，连到已保留的知识点/题/定理/别的笔记 ──
+  const { noteNodes, noteEdges } = await getUserNoteLayer(keptTopicIds, keptIds, keptTheoremIds);
+
   return {
-    nodes: [...topicNodes, ...questionNodes, ...theoremNodes],
+    nodes: [...topicNodes, ...questionNodes, ...theoremNodes, ...noteNodes],
     links: [
       ...topicTopicLinks.filter(l => keptTopicIds.has(l.source) && keptTopicIds.has(l.target)),
       ...qtLinks.filter(l => keptTopicIds.has(l.target)),
       ...theoremEdges,
+      ...noteEdges,
     ],
   };
 }

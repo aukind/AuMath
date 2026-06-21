@@ -7,7 +7,7 @@
 // 不再是孤立星团，而是一张真正的知识网。
 // ============================================================
 
-export type NodeType = 'topic' | 'question' | 'theorem';
+export type NodeType = 'topic' | 'question' | 'theorem' | 'note';
 
 /** 题目掌握度，用于前端染色：未做(灰) / 已掌握(绿) / 错题(红) */
 export type NodeStatus = 'unattempted' | 'mastered' | 'error_prone';
@@ -20,8 +20,9 @@ export type NodeStatus = 'unattempted' | 'mastered' | 'error_prone';
  * - manual        手动双向链接（topic_links 表，Obsidian 式显式双链）
  * - theorem_topic 定理 → 所属知识点（归属边）
  * - theorem_cite  定理 → 用到它的题目（引用边，题库×定理库的桥）
+ * - note_ref      用户笔记 → 它 [[维基链接]] 到的任意节点（知识点/定理/题/别的笔记，个人化层，不缓存）
  */
-export type LinkKind = 'qt' | 'hierarchy' | 'cooccur' | 'manual' | 'theorem_topic' | 'theorem_cite';
+export type LinkKind = 'qt' | 'hierarchy' | 'cooccur' | 'manual' | 'theorem_topic' | 'theorem_cite' | 'note_ref';
 
 export interface GraphNode {
   id: string;

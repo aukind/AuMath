@@ -24,6 +24,7 @@ interface Props {
 const NODE_LEGEND: { color: string; label: string }[] = [
   { color: '#8b5cf6', label: '知识点' },
   { color: '#d97706', label: '定理' },
+  { color: '#06b6d4', label: '笔记' },
   { color: '#a1a1aa', label: '未做' },
   { color: '#ef4444', label: '错题' },
   { color: '#10b981', label: '已掌握' },
@@ -211,6 +212,7 @@ export default function GraphExplorer({ data, initialFocusName }: Props) {
           onQuestionClick={setSelectedQuestionId}
           onTopicClick={id => { setSelectedTheoremId(null); setSelectedTopicId(id); }}
           onTheoremClick={id => { setSelectedTopicId(null); setSelectedTheoremId(id); }}
+          onNoteClick={id => router.push(`/notes/${id}`)}
           onBackgroundClick={() => { setSelectedTopicId(null); setSelectedTheoremId(null); }}
           onHandleReady={h => { canvasRef.current = h; }}
         />

@@ -1249,6 +1249,74 @@ export type Database = {
         }
         Relationships: []
       }
+      user_notes: {
+        Row: {
+          body_md: string
+          created_at: string
+          id: string
+          is_public: boolean
+          metadata: Json
+          title: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          body_md?: string
+          created_at?: string
+          id?: string
+          is_public?: boolean
+          metadata?: Json
+          title: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          body_md?: string
+          created_at?: string
+          id?: string
+          is_public?: boolean
+          metadata?: Json
+          title?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      note_links: {
+        Row: {
+          created_at: string
+          id: string
+          note_id: string
+          target_id: string | null
+          target_label: string
+          target_type: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          note_id: string
+          target_id?: string | null
+          target_label: string
+          target_type: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          note_id?: string
+          target_id?: string | null
+          target_label?: string
+          target_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "note_links_note_id_fkey"
+            columns: ["note_id"]
+            isOneToOne: false
+            referencedRelation: "user_notes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_favorites: {
         Row: {
           created_at: string

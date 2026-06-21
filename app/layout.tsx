@@ -11,6 +11,8 @@ import SmoothScrollProvider from "@/components/providers/SmoothScrollProvider";
 import BackgroundProvider from "@/components/background/BackgroundProvider";
 import { Toaster } from "sonner";
 import AgentPanel from "@/components/agent/AgentPanel";
+import CommandPalette from "@/components/command/CommandPalette";
+import LinkHoverPreview from "@/components/command/LinkHoverPreview";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://aumath.com"),
@@ -68,6 +70,10 @@ export default function RootLayout({
             {/* Claude 站内助手：登录后浮现入口；管理员拿全权工具集（含删除/批量回填）。
                 未登录由组件自身探测 /api/agent 后静默不渲染。 */}
             <AgentPanel />
+            {/* 全局命令面板 / Quick Switcher（⌘K）：搜知识点/定理/笔记/题目/用户，键盘直达。 */}
+            <CommandPalette />
+            {/* 维基链接悬停预览：hover [[知识点]]/[[定理]]/[[笔记]] 弹摘要卡（仅鼠标设备）。 */}
+            <LinkHoverPreview />
           </ThemeProvider>
         </SmoothScrollProvider>
       </body>
