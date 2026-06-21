@@ -29,8 +29,9 @@ export async function resolveMcpContext(authHeader: string | null): Promise<Agen
   if (!token) return null;
 
   // 1. 静态管理员令牌（常量时间比较，避免计时侧信道）
-  const adminToken = process.env.MCP_ADMIN_TOKEN;
-  const adminUserId = process.env.MCP_ADMIN_USER_ID;
+  //    env 值 trim：Vercel 粘贴常带首尾空格/换行，不 trim 会因长度不符而误判失败。
+  const adminToken = process.env.MCP_ADMIN_TOKEN?.trim();
+  const adminUserId = process.env.MCP_ADMIN_USER_ID?.trim();
   if (adminToken && adminUserId && token.length === adminToken.length) {
     let diff = 0;
     for (let i = 0; i < token.length; i++) diff |= token.charCodeAt(i) ^ adminToken.charCodeAt(i);
