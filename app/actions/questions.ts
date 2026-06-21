@@ -291,18 +291,20 @@ export async function getQuestions(
     return (data ?? []) as unknown as QuestionWithTopics[];
   }
 
-  // 公共题库：先从关联表查出所有 question_id，再精确查 questions
+  // 公共题库：先从关联表查出所有 question_id，再精确查 questions。
+  // 点章节时聚合其全部子知识点（数列 → 含 数列通项公式… 的题），故按子树 topic_id 集合 in 查询。
   let matchingIds: string[] | null = null;
   if (topicId) {
+    const subtreeIds = collectSubtreeIds(await getTopicsCached(), topicId);
     const { data: rels, error: relErr } = await supabase
       .from('question_topic_relations')
       .select('question_id')
-      .eq('topic_id', topicId);
+      .in('topic_id', subtreeIds);
     if (relErr) {
       console.error('[getQuestions] topic relations lookup:', relErr.message);
       return [];
     }
-    matchingIds = (rels ?? []).map((r: { question_id: string }) => r.question_id);
+    matchingIds = [...new Set((rels ?? []).map((r: { question_id: string }) => r.question_id))];
     if (matchingIds.length === 0) return [];
   }
 
@@ -361,22 +363,65 @@ function buildTopicTree(flat: TopicRow[]): TopicWithChildren[] {
   return roots;
 }
 
+/** 给每个节点算「子树（含自身）关联的已发布公开题目去重数」，自底向上聚合。返回该节点的题目集合。 */
+function annotateCounts(node: TopicWithChildren, direct: Map<string, Set<string>>): Set<string> {
+  const set = new Set(direct.get(node.id) ?? []);
+  for (const child of node.children) {
+    for (const q of annotateCounts(child, direct)) set.add(q);
+  }
+  node.questionCount = set.size;
+  return set;
+}
+
+/** 在树里收集某知识点子树（含自身）的全部 topic_id，用于「点章节聚合子知识点的题」。 */
+function collectSubtreeIds(roots: TopicWithChildren[], topicId: string): string[] {
+  const dfsFind = (nodes: TopicWithChildren[]): TopicWithChildren | null => {
+    for (const n of nodes) {
+      if (n.id === topicId) return n;
+      const hit = dfsFind(n.children);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const node = dfsFind(roots);
+  if (!node) return [topicId];
+  const ids: string[] = [];
+  const walk = (n: TopicWithChildren) => { ids.push(n.id); n.children.forEach(walk); };
+  walk(node);
+  return ids;
+}
+
 // 题目分类树 —— 与用户无关、极少变。用 unstable_cache 缓存，避免每次导航/切卷都重查数据库。
+// 现额外带每个知识点子树的题目数，供侧栏动态知识点树显示徽章/隐藏空节点。
 // 失效：tag 'topics'（见各 mutation 处）或 1 小时 TTL 兜底。
 const getTopicsCached = unstable_cache(
   async (): Promise<TopicWithChildren[]> => {
-    const { data, error } = await createPublicClient()
-      .from('topics')
-      .select('*')
-      .order('order_index', { ascending: true });
-    if (error) {
-      console.error('[getQuestionTopics]', error.message);
+    const sb = createPublicClient();
+    const [topicsRes, qRes, relsRes] = await Promise.all([
+      sb.from('topics').select('*').order('order_index', { ascending: true }),
+      sb.from('questions').select('id').eq('status', 'published').eq('is_public', true),
+      sb.from('question_topic_relations').select('question_id, topic_id'),
+    ]);
+    if (topicsRes.error) {
+      console.error('[getQuestionTopics]', topicsRes.error.message);
       return [];
     }
-    return buildTopicTree((data ?? []) as TopicRow[]);
+    const tree = buildTopicTree((topicsRes.data ?? []) as TopicRow[]);
+
+    // 只统计已发布公开题（与浏览结果一致），按 topic 归集去重题集合后自底向上聚合。
+    const publishedIds = new Set((qRes.data ?? []).map((q) => q.id));
+    const direct = new Map<string, Set<string>>();
+    for (const r of relsRes.data ?? []) {
+      if (!publishedIds.has(r.question_id)) continue;
+      let s = direct.get(r.topic_id);
+      if (!s) { s = new Set(); direct.set(r.topic_id, s); }
+      s.add(r.question_id);
+    }
+    tree.forEach((root) => annotateCounts(root, direct));
+    return tree;
   },
-  ['question-topics'],
-  { tags: ['topics'], revalidate: 3600 },
+  ['question-topics-v2'],
+  { tags: ['topics', 'questions'], revalidate: 3600 },
 );
 
 export async function getQuestionTopics(): Promise<TopicWithChildren[]> {

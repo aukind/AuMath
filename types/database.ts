@@ -191,6 +191,8 @@ export interface QuestionWithTopics extends QuestionRow {
 /** 带子节点的知识点（用于渲染目录树） */
 export interface TopicWithChildren extends TopicRow {
   children: TopicWithChildren[];
+  /** 该知识点子树下（含自身）关联的已发布公开题目去重数；侧栏知识点树用，未计算时为 undefined */
+  questionCount?: number;
 }
 
 /** 知识点 + 该节点下的题目数量（用于侧边栏统计展示） */
