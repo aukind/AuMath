@@ -152,6 +152,14 @@ function Flow({ doc, notes, theorems }: { doc: CanvasDoc; notes: Ref[]; theorems
   const nodeTypes = useMemo(() => ({ text: TextCardNode, note: NoteCardNode, theorem: TheoremCardNode, question: QuestionCardNode }), []);
   const onConnect = useCallback((c: Connection) => setEdges((eds) => addEdge(c, eds)), [setEdges]);
 
+  // 双击连线：编辑关系标签（如「推出 / 反例 / 同源」）。留空清除。
+  const onEdgeDoubleClick = useCallback((_e: React.MouseEvent, edge: Edge) => {
+    const cur = typeof edge.label === 'string' ? edge.label : '';
+    const next = window.prompt('连线标签（留空清除）', cur);
+    if (next === null) return;
+    setEdges((es) => es.map((x) => (x.id === edge.id ? { ...x, label: next.trim() || undefined } : x)));
+  }, [setEdges]);
+
   const placeCount = useRef(0);
   const dropPoint = () => {
     const p = screenToFlowPosition({ x: window.innerWidth / 2, y: window.innerHeight / 2 });
@@ -206,6 +214,7 @@ function Flow({ doc, notes, theorems }: { doc: CanvasDoc; notes: Ref[]; theorems
       <ReactFlow
         nodes={nodes} edges={edges}
         onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect}
+        onEdgeDoubleClick={onEdgeDoubleClick}
         nodeTypes={nodeTypes} fitView proOptions={{ hideAttribution: true }}
         className="bg-zinc-50 dark:bg-zinc-950"
       >
