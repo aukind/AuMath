@@ -4,12 +4,14 @@
 // 结构：面包屑层级 → 简介/统计 → 双向链接（手动双链+共现推导）→ 反向链接（子知识点+关联题目）。
 // 管理员可在此增删手动双链；普通用户只读。数据走 getTopicInspector，不携带 LaTeX 正文。
 import { useEffect, useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X, Link2, Sparkles, ChevronRight, CornerDownRight,
-  Crosshair, Plus, Trash2, CircleDot, Sigma,
+  Crosshair, Plus, Trash2, CircleDot, Sigma, Wand2, Loader2,
 } from 'lucide-react';
 import { getTopicInspector, addTopicLink, removeTopicLink } from '@/app/actions/graph';
+import { generateTopicSummary } from '@/app/actions/topic-summary';
 import type { TopicInspectorData, NodeStatus } from '@/types/graph';
 
 interface Props {
@@ -43,6 +45,19 @@ export default function TopicInspector({
   const [linkQuery, setLinkQuery] = useState('');
   const [linkError, setLinkError] = useState<string | null>(null);
   const [mutating, startMutation] = useTransition();
+  const router = useRouter();
+  const [summarizing, startSummary] = useTransition();
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+
+  const onSummarize = () => {
+    if (!topicId) return;
+    setSummaryError(null);
+    startSummary(async () => {
+      const res = await generateTopicSummary(topicId);
+      if (res.ok) router.push(`/notes/${res.noteId}`);
+      else setSummaryError(res.error);
+    });
+  };
   const reqSeq = useRef(0);
 
   // 渲染期调整（仓库约定：set-state-in-effect 会卡 build）：topicId 变更时同步重置面板态。
@@ -174,6 +189,22 @@ export default function TopicInspector({
                   {data.description && (
                     <p className="mt-1.5 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">{data.description}</p>
                   )}
+                </div>
+
+                {/* AI 考点总结卡：从本知识点的真题解析+定理自动归纳，落为可编辑笔记 */}
+                <div>
+                  <button
+                    onClick={onSummarize}
+                    disabled={summarizing}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 to-purple-500 px-3 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:shadow-md hover:shadow-indigo-500/25 disabled:opacity-70"
+                  >
+                    {summarizing
+                      ? <><Loader2 size={15} className="animate-spin" /> 正在归纳真题，生成考点卡…</>
+                      : <><Wand2 size={15} /> AI 生成考点总结</>}
+                  </button>
+                  {summaryError
+                    ? <p className="mt-1.5 text-xs text-red-500 dark:text-red-400">{summaryError}</p>
+                    : <p className="mt-1.5 text-center text-[11px] text-zinc-400 dark:text-zinc-500">基于本考点关联真题解析归纳，存入「我的笔记」可改可链</p>}
                 </div>
 
                 {/* 掌握度统计条 */}
