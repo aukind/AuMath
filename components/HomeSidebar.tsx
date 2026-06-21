@@ -19,6 +19,7 @@ import {
   Orbit,
   NotebookPen,
   LayoutDashboard,
+  Target,
   ChevronDown,
   BadgeCheck,
   Users,
@@ -168,6 +169,7 @@ export default function HomeSidebar({
   const graphActive = pathname.startsWith('/explore');
   const notesActive = pathname.startsWith('/notes');
   const canvasActive = pathname.startsWith('/canvas');
+  const reviewActive = pathname.startsWith('/review');
   const dailyActive = pathname.startsWith('/daily');
   const calendarActive = pathname.startsWith('/calendar');
   const contributeActive = pathname.startsWith('/contribute');
@@ -274,6 +276,16 @@ export default function HomeSidebar({
           className={rowClass(canvasActive)}
         >
           <RowInner Icon={LayoutDashboard} label="白板" active={canvasActive} loading={pendingHref === '/canvas'} />
+        </Link>
+
+        {/* 学习复盘（弱点雷达 + 热力图 + AI 点评） */}
+        <Link
+          href="/review"
+          onClick={goLink('/review')}
+          aria-current={reviewActive ? 'page' : undefined}
+          className={rowClass(reviewActive)}
+        >
+          <RowInner Icon={Target} label="学习复盘" active={reviewActive} loading={pendingHref === '/review'} />
         </Link>
 
         {/* 每日一题 */}
