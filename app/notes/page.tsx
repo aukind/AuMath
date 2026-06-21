@@ -2,11 +2,15 @@
 // ?ref=标题：来自正文 [[note:标题]] 维基链接的直达入口，命中即重定向到该笔记。
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
-import { ChevronLeft, Infinity as InfinityIcon, NotebookPen, Link2, Globe, Lock, Tag } from 'lucide-react';
+import { ChevronLeft, Infinity as InfinityIcon, NotebookPen, Link2, Globe, Lock, Tag, LayoutList, Table2, Columns3 } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
 import NewNoteButton from '@/components/notes/NewNoteButton';
+import NotesTable, { type SortKey } from '@/components/notes/NotesTable';
+import NotesBoard from '@/components/notes/NotesBoard';
 import { getMyNotes, getNoteByTitle } from '@/app/actions/notes';
 import { createClient } from '@/lib/supabase/server';
+
+type View = 'card' | 'table' | 'board';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '我的笔记 · AuMath' };
@@ -14,25 +18,52 @@ export const metadata = { title: '我的笔记 · AuMath' };
 export default async function NotesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ref?: string; tag?: string }>;
+  searchParams: Promise<{ ref?: string; tag?: string; view?: string; sort?: string; dir?: string }>;
 }) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect('/login?redirectTo=/notes');
 
-  const { ref, tag } = await searchParams;
+  const sp = await searchParams;
+  const { ref, tag } = sp;
   // [[note:标题]] 直达：命中本人笔记则跳转详情。
   if (ref) {
     const hit = await getNoteByTitle(ref);
     if (hit) redirect(`/notes/${hit.id}`);
   }
 
+  const view: View = sp.view === 'table' ? 'table' : sp.view === 'board' ? 'board' : 'card';
+  const sort: SortKey = sp.sort === 'title' ? 'title' : sp.sort === 'links' ? 'links' : 'updated';
+  const dir: 'asc' | 'desc' = sp.dir === 'asc' ? 'asc' : 'desc';
+
   const allNotes = await getMyNotes();
   // 全部标签（按出现频次降序），供过滤条。
   const tagCount = new Map<string, number>();
   for (const n of allNotes) for (const t of n.tags) tagCount.set(t, (tagCount.get(t) ?? 0) + 1);
   const allTags = [...tagCount.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
-  const notes = tag ? allNotes.filter((n) => n.tags.includes(tag)) : allNotes;
+  let notes = tag ? allNotes.filter((n) => n.tags.includes(tag)) : allNotes;
+
+  // 表格视图按所选列排序（其余视图保留 getMyNotes 的更新时间倒序）。
+  if (view === 'table') {
+    const cmp = (a: typeof notes[number], b: typeof notes[number]) => {
+      const v = sort === 'title' ? a.title.localeCompare(b.title, 'zh')
+        : sort === 'links' ? a.linkCount - b.linkCount
+        : a.updatedAt.localeCompare(b.updatedAt);
+      return dir === 'asc' ? v : -v;
+    };
+    notes = [...notes].sort(cmp);
+  }
+
+  // 构造保留视图/标签的 URL。
+  const buildHref = (opts: { tag?: string; view?: View }) => {
+    const p = new URLSearchParams();
+    const t = opts.tag ?? tag;
+    const v = opts.view ?? view;
+    if (t) p.set('tag', t);
+    if (v !== 'card') p.set('view', v);
+    const qs = p.toString();
+    return qs ? `/notes?${qs}` : '/notes';
+  };
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
@@ -51,7 +82,7 @@ export default async function NotesPage({
         </div>
       </header>
 
-      <main className="mx-auto max-w-3xl px-4 py-8">
+      <main className={`mx-auto px-4 py-8 ${view === 'card' ? 'max-w-3xl' : 'max-w-6xl'}`}>
         <div className="mb-6 flex items-center justify-between gap-3">
           <div>
             <h1 className="flex items-center gap-2 text-xl font-bold text-zinc-900 dark:text-zinc-50">
@@ -67,6 +98,23 @@ export default async function NotesPage({
           <NewNoteButton />
         </div>
 
+        {/* 视图切换器（卡片 / 表格 / 看板 —— Bases 式多视图） */}
+        <div className="mb-4 inline-flex items-center gap-0.5 rounded-lg border border-zinc-200 bg-white p-0.5 dark:border-zinc-800 dark:bg-zinc-900">
+          {([
+            { v: 'card' as View, icon: <LayoutList size={14} />, label: '卡片' },
+            { v: 'table' as View, icon: <Table2 size={14} />, label: '表格' },
+            { v: 'board' as View, icon: <Columns3 size={14} />, label: '看板' },
+          ]).map(({ v, icon, label }) => (
+            <Link
+              key={v}
+              href={buildHref({ view: v })}
+              className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium ${view === v ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'}`}
+            >
+              {icon} {label}
+            </Link>
+          ))}
+        </div>
+
         {ref && (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
             没有找到标题为「{ref}」的笔记。可在上方「新建」一篇同名笔记补上这条链接。
@@ -76,11 +124,11 @@ export default async function NotesPage({
         {/* 标签过滤条 */}
         {allTags.length > 0 && (
           <div className="mb-4 flex flex-wrap items-center gap-1.5">
-            <Link href="/notes" className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ${!tag ? 'bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300'}`}>
+            <Link href={buildHref({ tag: undefined })} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ${!tag ? 'bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300'}`}>
               全部
             </Link>
             {allTags.map((t) => (
-              <Link key={t} href={`/notes?tag=${encodeURIComponent(t)}`} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ${tag === t ? 'bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300'}`}>
+              <Link key={t} href={buildHref({ tag: t })} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs ${tag === t ? 'bg-zinc-800 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300'}`}>
                 <Tag size={11} /> {t} <span className="opacity-60">{tagCount.get(t)}</span>
               </Link>
             ))}
@@ -92,6 +140,10 @@ export default async function NotesPage({
             <NotebookPen size={28} className="mx-auto text-zinc-300 dark:text-zinc-600" />
             <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">还没有笔记。新建第一条，开始搭建你的第二大脑。</p>
           </div>
+        ) : view === 'table' ? (
+          <NotesTable notes={notes} sort={sort} dir={dir} tag={tag} />
+        ) : view === 'board' ? (
+          <NotesBoard notes={notes} />
         ) : (
           <ul className="space-y-2.5">
             {notes.map((n) => (
