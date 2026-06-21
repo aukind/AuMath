@@ -18,6 +18,7 @@ import {
   BookOpen,
   Orbit,
   NotebookPen,
+  LayoutDashboard,
   ChevronDown,
   BadgeCheck,
   Users,
@@ -166,6 +167,7 @@ export default function HomeSidebar({
   const libraryActive = pathname.startsWith('/library');
   const graphActive = pathname.startsWith('/explore');
   const notesActive = pathname.startsWith('/notes');
+  const canvasActive = pathname.startsWith('/canvas');
   const dailyActive = pathname.startsWith('/daily');
   const calendarActive = pathname.startsWith('/calendar');
   const contributeActive = pathname.startsWith('/contribute');
@@ -262,6 +264,16 @@ export default function HomeSidebar({
           className={rowClass(notesActive)}
         >
           <RowInner Icon={NotebookPen} label="我的笔记" active={notesActive} loading={pendingHref === '/notes'} />
+        </Link>
+
+        {/* 白板（无限画布，卡片连线） */}
+        <Link
+          href="/canvas"
+          onClick={goLink('/canvas')}
+          aria-current={canvasActive ? 'page' : undefined}
+          className={rowClass(canvasActive)}
+        >
+          <RowInner Icon={LayoutDashboard} label="白板" active={canvasActive} loading={pendingHref === '/canvas'} />
         </Link>
 
         {/* 每日一题 */}
