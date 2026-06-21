@@ -21,6 +21,51 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      agent_audit_logs: {
+        Row: {
+          id: string
+          user_id: string
+          surface: string
+          tool: string
+          scopes: string[]
+          mutates: boolean
+          confirmed: boolean
+          status: string
+          input: Json
+          result: Json | null
+          error: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          surface?: string
+          tool: string
+          scopes?: string[]
+          mutates?: boolean
+          confirmed?: boolean
+          status: string
+          input?: Json
+          result?: Json | null
+          error?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          surface?: string
+          tool?: string
+          scopes?: string[]
+          mutates?: boolean
+          confirmed?: boolean
+          status?: string
+          input?: Json
+          result?: Json | null
+          error?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       forum_comment_votes: {
         Row: {
           comment_id: string

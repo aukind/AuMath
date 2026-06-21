@@ -10,6 +10,7 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import SmoothScrollProvider from "@/components/providers/SmoothScrollProvider";
 import BackgroundProvider from "@/components/background/BackgroundProvider";
 import { Toaster } from "sonner";
+import AgentPanel from "@/components/agent/AgentPanel";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://aumath.com"),
@@ -53,6 +54,9 @@ export default function RootLayout({
               {modal}
             </LayoutGroup>
             <Toaster richColors position="top-right" />
+            {/* Claude 站内助手：登录后浮现入口；管理员拿全权工具集（含删除/批量回填）。
+                未登录由组件自身探测 /api/agent 后静默不渲染。 */}
+            <AgentPanel />
           </ThemeProvider>
         </SmoothScrollProvider>
       </body>
