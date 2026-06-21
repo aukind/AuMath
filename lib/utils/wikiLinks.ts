@@ -85,7 +85,12 @@ export function extractWikiRefs(input: string): WikiRef[] {
     WIKI_RE.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = WIKI_RE.exec(seg)) !== null) {
-      const { type, name } = parseTarget(m[1]);
+      // 紧邻 ! 前缀即「嵌入」![[..]]：本质是嵌入另一篇笔记，强制记为 note 边
+      // （否则裸 [[标题]] 会被当知识点，错连或悬挂）。
+      const isEmbed = m.index > 0 && seg[m.index - 1] === '!';
+      const parsed = parseTarget(m[1]);
+      const type = isEmbed ? 'note' : parsed.type;
+      const name = parsed.name;
       if (!name) continue;
       const key = `${type}|${name}`;
       if (seen.has(key)) continue;

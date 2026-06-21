@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { ChevronLeft, Infinity as InfinityIcon } from 'lucide-react';
 import ThemeToggle from '@/components/ThemeToggle';
-import MathRenderer from '@/components/MathRenderer';
+import NoteBody from '@/components/notes/NoteBody';
 import NoteDetailClient from '@/components/notes/NoteDetailClient';
 import { getNote } from '@/app/actions/notes';
 import { createClient } from '@/lib/supabase/server';
@@ -48,7 +48,7 @@ export default async function NoteDetailPage({
       <main className="mx-auto max-w-3xl px-4 py-8">
         <NoteDetailClient note={note} startEditing={edit === '1'}>
           {note.bodyMd.trim()
-            ? <MathRenderer content={note.bodyMd} academicTypography />
+            ? <NoteBody body={note.bodyMd} />
             : <p className="text-sm italic text-zinc-400 dark:text-zinc-500">（空白笔记，点「编辑」开始书写）</p>}
         </NoteDetailClient>
       </main>

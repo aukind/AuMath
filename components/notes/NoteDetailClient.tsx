@@ -125,7 +125,7 @@ export default function NoteDetailClient({
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            placeholder={'支持 Markdown 与 $LaTeX$。\n双链：[[知识点]] · [[thm:韦达定理]] · [[note:另一篇笔记]]'}
+            placeholder={'支持 Markdown 与 $LaTeX$。\n双链：[[知识点]] · [[thm:韦达定理]] · [[note:另一篇笔记]]\n嵌入：![[另一篇笔记]] 整段插入该笔记内容'}
             rows={18}
             className="w-full resize-y rounded-xl border border-zinc-300 bg-white px-4 py-3 font-mono text-sm leading-relaxed text-zinc-900 outline-none focus:border-cyan-500 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
           />
