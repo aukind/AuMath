@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 // KaTeX 字体与符号样式必须全局引入，MathRenderer 渲染的数学公式才能正确显示
 import "katex/dist/katex.min.css";
@@ -21,6 +21,17 @@ export const metadata: Metadata = {
     type: "website",
     locale: "zh_CN",
   },
+  // PWA：清单 + iOS「添加到主屏幕」全屏启动（apple-mobile-web-app-capable 等由此注入）
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "AuMath",
+    statusBarStyle: "default",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#4f46e5",
 };
 
 export default function RootLayout({
