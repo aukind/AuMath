@@ -722,10 +722,14 @@ async function callModel(
     // the user tops up; 401/403 are auth issues; INVALID_ARGUMENT is a bug.
     const isPermanent = /RESOURCE_EXHAUSTED|prepayment|depleted|billing|401|403|INVALID_ARGUMENT|PERMISSION_DENIED/i.test(msg);
     if (isPermanent) throw e;
-    // Only retry on genuine transient failures.
-    const isTransient = /\b429\b|\b503\b|\b504\b|UNAVAILABLE|fetch failed|ECONNRESET|ETIMEDOUT|socket hang up/i.test(msg);
-    if (!isTransient) throw e;
-    console.warn(`[callModel:${model}] 瞬时错误，1.5s 后重试一次:`, msg);
+    // 只对「快速失败」的瞬时错误内部重试（429/503/UNAVAILABLE，几乎立即返回）。
+    // **绝不**在此重试超时/连接类（ETIMEDOUT / fetch failed / socket hang up / 504）——
+    // Pro 单次就可能耗满 GEMINI_TIMEOUT_MS(120s)，若内部再重一次=240s，叠加外层
+    // primary→fallback 会冲破 maxDuration(300s) 让函数被杀、前端只看到 "Failed to fetch"。
+    // 超时交给外层两段重试，单次 callModel 因此封顶在一个 120s 内。
+    const isFastTransient = /\b429\b|\b503\b|UNAVAILABLE/i.test(msg);
+    if (!isFastTransient) throw e;
+    console.warn(`[callModel:${model}] 限流/不可用，1.5s 后重试一次:`, msg);
     await new Promise((r) => setTimeout(r, 1500));
     return await call();
   }
