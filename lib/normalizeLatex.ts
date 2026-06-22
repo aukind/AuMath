@@ -72,7 +72,7 @@ const SYNONYMS: Record<string, string> = {
 
 // ─── Math region extractor ────────────────────────────────────────────────────
 
-type Region =
+export type Region =
   | { kind: "text";    raw:  string }
   | { kind: "inline";  body: string }
   | { kind: "display"; body: string };
@@ -83,7 +83,7 @@ type Region =
  * Uses a character-level scan rather than regex so that nested structures and
  * escaped dollars are handled without catastrophic backtracking risk.
  */
-function extractRegions(input: string): Region[] {
+export function extractRegions(input: string): Region[] {
   const regions: Region[] = [];
   let i = 0;
   let textStart = 0;

@@ -5,6 +5,7 @@ import { revalidatePath, revalidateTag } from 'next/cache';
 // 录入流程统一走 Smart 入口：默认 TS AST 版，USE_WASM_NORMALIZER=1 时切 Rust→WASM 版。
 import { normalizeLaTeXSmart as normalizeLaTeX } from '@/lib/normalizeLatexSmart';
 import { stripInlineOptionTail, isMultiAnswer } from '@/lib/questions/content';
+import { validateQuestionLatex } from '@/lib/latex/validate';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { createClient } from '@/lib/supabase/server';
 import { isAdminUser } from '@/lib/utils/auth';
@@ -31,6 +32,8 @@ export interface ExtractedQuestion {
   knowledge_points?: string[];
   /** 本题配图张数（Gemini 数图，供图文配额分发；三视图「图①②③④⑤」按张数计）。缺省=未知 */
   figure_count?: number;
+  /** KaTeX 渲染校验失败的公式条数（0/缺省=全部可渲染）。批量录入质检用，供校对页亮红旗。 */
+  latex_issues?: number;
 }
 
 /** 答案卷里单题的答案与解析（按题号回填到题目上） */
@@ -80,8 +83,11 @@ export type PublishBatchResult =
 
 // ── 模型配置 ───────────────────────────────────────────────────
 
-const FLASH_MODEL = 'gemini-2.5-flash'; // 兜底（与主模型相同，配置 disableThinking 加速）
-const PRO_MODEL   = 'gemini-2.5-flash'; // 主提取：Flash 速度最快、最稳定，单次 5-10 秒
+// 批量录入以「保真优先」：主提取走 2.5 Pro。下标 / 希腊字母 / 指数 / 补集 的 OCR
+// 保真度明显优于 Flash，多花的 API 成本远低于事后手修 600 套里坏题的返工成本。
+// 注意：gemini-2.5-pro **不能**关闭思考（thinkingBudget 不可为 0），所以 callModel
+// 里对 Pro 走最小思考预算，绝不能照搬 Flash 的 thinkingBudget:0（会 INVALID_ARGUMENT）。
+const EXTRACT_MODEL = 'gemini-2.5-pro';
 
 // ── PDF 分块配置 ──────────────────────────────────────────────
 const GEMINI_PDF_PAGE_LIMIT = 1000; // Gemini 单次最多 1000 页
@@ -320,6 +326,121 @@ async function splitPdfIntoChunks(
   return chunks;
 }
 
+// ── 卷边界探测：按「整套卷」切，而非固定 30 页 ──────────────────────
+//
+// 一个文件含多套卷时，固定页切块会把跨页大题腰斩、把续页与卷头标题割裂，
+// 导致同一套卷被拆成两份或题串到隔壁卷。先用一次便宜的 Flash 调用扫全本、
+// 只输出每套卷的「起始页码」，再按页范围精确切分 → 每块恰好一套完整卷。
+// 任何失败都返回 null，调用方静默降级回固定页切块（不会更差）。
+
+const BOUNDARY_SYSTEM_PROMPT = `你是试卷版面边界分析器。输入是一份可能含多套独立试卷的 PDF。
+你的唯一任务：扫描全部页面，按出现顺序找出每一套独立试卷的「起始页码」。绝不要转写题目内容。
+
+判定「新一套试卷开始」的信号（命中任一即是）：
+- 出现新的试卷标题行（如「2023年新高考一卷数学」「1991年全国卷」「上海卷理」）
+- 题号从大数跳回 1（上一页还是第 12 题，下一页又出现「1.」或「一、选择题」）
+- 「考试时间120分钟」「满分150分」等试卷头/尾元信息再次出现
+- 明显的分卷封面/分隔页
+
+只输出严格 JSON（无解释、无 markdown 围栏）：
+{"papers":[{"title":"极简卷名","start_page":1},{"title":"...","start_page":9}]}
+
+要点：
+- start_page = 该套卷第一页的页码，**从 1 开始计**，按顺序严格递增。这是最重要的字段。
+- title 用最精简可辨识的卷名即可（不必精确，仅辅助你判断边界）。
+- 哪怕只有 0.1% 把握是新卷，也要拆出来——宁可多分，绝不漏分/合并。
+- 若整份文档其实只有一套卷，返回单元素数组 [{"title":"...","start_page":1}]。`;
+
+/** 扫全本 PDF 探测每套卷的起始页码。失败返回 null（调用方降级固定切块）。 */
+async function detectPaperBoundaries(
+  client:     GoogleGenAI,
+  buffer:     ArrayBuffer,
+  totalPages: number,
+): Promise<{ startPage: number }[] | null> {
+  try {
+    const { data } = bufferToImageData(buffer, 'application/pdf');
+    const result = await client.models.generateContent({
+      model: 'gemini-2.5-flash', // 边界探测是结构任务，Flash 足够且快/省
+      contents: [{
+        role: 'user',
+        parts: [
+          { inlineData: { mimeType: 'application/pdf', data } },
+          { text: '请按系统指令输出本文档每套试卷的起始页码 JSON。' },
+        ],
+      }],
+      config: {
+        systemInstruction: BOUNDARY_SYSTEM_PROMPT,
+        responseMimeType:  'application/json',
+        thinkingConfig:    { thinkingBudget: 0 },
+        maxOutputTokens:   8192,
+      },
+    });
+    const text = result.text ?? '';
+    const parsed = JSON.parse(text) as unknown;
+    const arr: unknown =
+      parsed && typeof parsed === 'object' && Array.isArray((parsed as Record<string, unknown>).papers)
+        ? (parsed as Record<string, unknown>).papers
+        : Array.isArray(parsed) ? parsed : [];
+    const out = (arr as Record<string, unknown>[])
+      .map((p) => ({ startPage: Math.round(Number(p.start_page ?? p.startPage)) }))
+      .filter((p) => Number.isFinite(p.startPage) && p.startPage >= 1 && p.startPage <= totalPages);
+    if (out.length === 0) return null;
+    console.info(`[detectPaperBoundaries] ${totalPages} 页 → 探到 ${out.length} 套卷起始页:`, out.map((p) => p.startPage).join(','));
+    return out;
+  } catch (e) {
+    console.warn('[detectPaperBoundaries] 失败，降级固定分块:', (e as Error).message);
+    return null;
+  }
+}
+
+/**
+ * 由「起始页码」推出互不重叠、完整覆盖全本的页范围（1-based，闭区间）。
+ * 只信 start_page（比 end_page 可靠）：相邻起点之间即一套卷的范围，末套延伸到末页。
+ * 任一范围超过 maxChunk 页时再细分（防极长单卷一次调用截断）。返回 null → 降级。
+ */
+function buildRangesFromBoundaries(
+  boundaries: { startPage: number }[],
+  totalPages: number,
+  maxChunk:   number,
+): { start: number; end: number }[] | null {
+  const starts = Array.from(new Set(boundaries.map((b) => b.startPage))).sort((a, b) => a - b);
+  if (starts.length === 0) return null;
+  if (starts[0] !== 1) starts.unshift(1); // 首套若不从第 1 页起，补上以免丢页
+
+  const ranges: { start: number; end: number }[] = [];
+  for (let i = 0; i < starts.length; i++) {
+    const start = starts[i];
+    const end   = i + 1 < starts.length ? starts[i + 1] - 1 : totalPages;
+    if (end < start) continue;
+    if (end - start + 1 > maxChunk) {
+      for (let s = start; s <= end; s += maxChunk) {
+        ranges.push({ start: s, end: Math.min(s + maxChunk - 1, end) });
+      }
+    } else {
+      ranges.push({ start, end });
+    }
+  }
+  return ranges.length ? ranges : null;
+}
+
+/** 按 1-based 闭区间页范围切 PDF，每个范围一段 Uint8Array（顺序对应）。 */
+async function splitPdfByRanges(
+  buffer: ArrayBuffer,
+  ranges: { start: number; end: number }[],
+): Promise<Uint8Array[]> {
+  const { PDFDocument } = await import('pdf-lib');
+  const srcDoc = await PDFDocument.load(buffer, { ignoreEncryption: true });
+  const out: Uint8Array[] = [];
+  for (const { start, end } of ranges) {
+    const indices = Array.from({ length: end - start + 1 }, (_, k) => start - 1 + k);
+    const doc     = await PDFDocument.create();
+    const copied  = await doc.copyPages(srcDoc, indices);
+    copied.forEach((p) => doc.addPage(p));
+    out.push(await doc.save());
+  }
+  return out;
+}
+
 /**
  * 并发分块处理 PDF。全部用 Flash + 禁用 thinking 极速。
  * 同标题+年份的分块结果会合并为一套（防止跨页试卷被切成两个对象）。
@@ -338,11 +459,11 @@ async function processChunksParallel(
         // Same primary→thinking-fallback pattern as the single-document path
         // so a truncated/garbled chunk doesn't drop silently.
         try {
-          const text = await callModel(client, FLASH_MODEL, [imgData], USER_PROMPT, true);
+          const text = await callModel(client, EXTRACT_MODEL, [imgData], USER_PROMPT, true);
           return await parseAndNormalize(text);
         } catch (e) {
           console.warn(`[chunk ${i + chunkIdx}] 主调用失败，启用 thinking 重试:`, (e as Error).message);
-          const text = await callModel(client, FLASH_MODEL, [imgData], USER_PROMPT, false);
+          const text = await callModel(client, EXTRACT_MODEL, [imgData], USER_PROMPT, false);
           return await parseAndNormalize(text);
         }
       }),
@@ -365,11 +486,19 @@ function mergeBundlesByTitle(bundles: ExtractedPaperBundle[]): ExtractedPaperBun
     if (!existing) {
       map.set(key, { ...b, questions: [...b.questions] });
     } else {
-      const seen = new Set(existing.questions.map(q => q.question_number));
+      // 同题号去重：分块边界会把一道跨页大题切成两半、各落一块。原先「先到先得、
+      // 后到的同题号直接丢」会保留被截断的那半。改为冲突时**保留 content 更长的一份**，
+      // 防止长解答题被分块边界腰斩。
+      const idxByNum = new Map<number, number>();
+      existing.questions.forEach((q, i) => { if (q.question_number != null) idxByNum.set(q.question_number, i); });
       for (const q of b.questions) {
-        if (q.question_number == null || !seen.has(q.question_number)) {
+        if (q.question_number == null) { existing.questions.push(q); continue; }
+        const at = idxByNum.get(q.question_number);
+        if (at == null) {
+          idxByNum.set(q.question_number, existing.questions.length);
           existing.questions.push(q);
-          if (q.question_number != null) seen.add(q.question_number);
+        } else if (q.content.length > existing.questions[at].content.length) {
+          existing.questions[at] = q;
         }
       }
     }
@@ -441,7 +570,9 @@ async function normalizeQuestions(
       const cleanContent = stripInlineOptionTail(content, options.length >= 2);
       // 多选判定：模型显式标记 is_multi，或（配对模式有答案时）答案是 2+ 选项字母（"AD"）兜底。
       const is_multi = options.length >= 2 && (q.is_multi === true || isMultiAnswer(answer));
-      return { id: crypto.randomUUID(), question_number, content: cleanContent, options, is_multi, answer, analysis, category, knowledge_points: knowledge_points.length ? knowledge_points : undefined, figure_count };
+      // 录入期 KaTeX 渲染校验：把「渲染即报错」的坏公式在发布前计数标出（详见 lib/latex/validate）。
+      const { errorCount } = validateQuestionLatex({ content: cleanContent, options, answer, analysis });
+      return { id: crypto.randomUUID(), question_number, content: cleanContent, options, is_multi, answer, analysis, category, knowledge_points: knowledge_points.length ? knowledge_points : undefined, figure_count, latex_issues: errorCount || undefined };
     }),
   );
   // 过滤掉完全空的题（content/options/answer 全空 = 模型输出被截断的残骸）
@@ -566,11 +697,15 @@ async function callModel(
         maxOutputTokens:   65536, // 2.5 Pro 上限，足够 10+ 套试卷 + 大量 SVG
         // Always set thinkingConfig explicitly so the fallback path can't run
         // away with unlimited thinking tokens — that's the single biggest
-        // cost spike when extractions retry. 4096 is enough to recover from
-        // truncation without burning more than $0.01 in thinking.
-        thinkingConfig: disableThinking
-          ? { thinkingBudget: 0 }
-          : { thinkingBudget: 4096 },
+        // cost spike when extractions retry.
+        //   • Flash: disableThinking → budget 0（可彻底关思考提速）；否则 4096。
+        //   • Pro:   **不允许 budget 0** —— 照搬 0 会 INVALID_ARGUMENT、主调用每次白白
+        //            降级到兜底。故 Pro 的「快」档给最小 1024，兜底档给 4096。
+        thinkingConfig: (() => {
+          const isPro = model.includes('pro');
+          if (disableThinking) return { thinkingBudget: isPro ? 1024 : 0 };
+          return { thinkingBudget: 4096 };
+        })(),
       },
     });
     const text = result.text;
@@ -726,17 +861,30 @@ async function processPaperInner(
       const totalPages = pdfDoc.getPageCount();
 
       if (totalPages > PARALLEL_TRIGGER_PAGES) {
-        const chunkCount = Math.ceil(totalPages / PDF_CHUNK_SIZE);
-        const chunks     = await splitPdfIntoChunks(rawBuffer, PDF_CHUNK_SIZE);
-        const papers     = await processChunksParallel(client, chunks);
+        // 先探卷边界、按「整套卷」切（根治跨页腰斩/续页丢标题导致的拆卷错乱）；
+        // 探不到边界（大文件超 inline 上限、模型乱答等）则降级回固定 30 页切块——不会更差。
+        const boundaries = await detectPaperBoundaries(client, rawBuffer, totalPages);
+        const ranges     = boundaries ? buildRangesFromBoundaries(boundaries, totalPages, PDF_CHUNK_SIZE) : null;
+
+        let chunks: Uint8Array[];
+        let label:  string;
+        if (ranges && ranges.length > 0) {
+          chunks = await splitPdfByRanges(rawBuffer, ranges);
+          label  = `pro-byPaper×${ranges.length}`;
+        } else {
+          chunks = await splitPdfIntoChunks(rawBuffer, PDF_CHUNK_SIZE);
+          label  = `pro-parallel×${chunks.length}`;
+        }
+
+        const papers   = await processChunksParallel(client, chunks);
         // 过滤空套子（mergeBundlesByTitle 后可能仍有 questions.length === 0 的残骸）
-        const nonEmpty   = papers.filter(p => p.questions.length > 0);
-        const totalQ     = nonEmpty.reduce((s, p) => s + p.questions.length, 0);
+        const nonEmpty = papers.filter(p => p.questions.length > 0);
+        const totalQ   = nonEmpty.reduce((s, p) => s + p.questions.length, 0);
 
         if (totalQ === 0)
-          return { success: false, error: `PDF 共 ${totalPages} 页已分 ${chunkCount} 批并行处理，但未识别到题目。请确认文件包含数学题目并重试。` };
+          return { success: false, error: `PDF 共 ${totalPages} 页已分 ${chunks.length} 批处理，但未识别到题目。请确认文件包含数学题目并重试。` };
 
-        return await packResult(nonEmpty, `flash-parallel×${chunkCount}`);
+        return await packResult(nonEmpty, label);
       }
     } catch (e) {
       console.error('[processPaper] PDF 页数检测失败，降级处理:', (e as Error).message);
@@ -753,36 +901,44 @@ async function processPaperInner(
     return nonEmpty;
   };
 
-  // ── 主提取：Flash + thinking 关闭（5–10s, 大多数情况已足够） ─
+  // ── 主提取：Pro + 最小思考（保真优先；单次 ~15–40s） ─
   // 失败时的兜底必须真正"不一样"，否则等于重试同样的失败：
-  //   primary:  FLASH + thinking off  (speed)
-  //   fallback: FLASH + thinking ON   (accuracy, ~30–60s)
+  //   primary:  Pro + thinking 最小 (1024)
+  //   fallback: Pro + thinking 4096 (更多预算救截断/坏 JSON)
+  // 另：assessQuality（识别失败比例闸门）原为死代码，现接进主路径——主提取质量
+  // 不达标也走兜底重试，而不是把疑似乱码直接放行入库。
+  const validateQuality = (papers: ExtractedPaperBundle[]): ExtractedPaperBundle[] => {
+    const q = assessQuality(papers.flatMap(p => p.questions));
+    if (!q.pass) throw new Error(`质量校验未通过：${q.reason}`);
+    return papers;
+  };
+
   let primaryText: string;
   try {
-    primaryText = await callModel(client, FLASH_MODEL, [imageData], USER_PROMPT, true);
+    primaryText = await callModel(client, EXTRACT_MODEL, [imageData], USER_PROMPT, true);
   } catch (e) {
-    console.warn('[processPaper] 主调用失败，启用 thinking 重试:', (e as Error).message);
+    console.warn('[processPaper] 主调用失败，启用更多思考重试:', (e as Error).message);
     try {
-      const fallbackText = await callModel(client, FLASH_MODEL, [imageData], USER_PROMPT, false);
+      const fallbackText = await callModel(client, EXTRACT_MODEL, [imageData], USER_PROMPT, false);
       const papers = validateNonEmpty(await parseAndNormalize(fallbackText));
-      return await packResult(papers, 'flash-thinking-fallback');
+      return await packResult(papers, 'pro-fallback');
     } catch (e2) {
       return { success: false, error: `两次调用均失败：${(e2 as Error).message}` };
     }
   }
 
   try {
-    const papers = validateNonEmpty(await parseAndNormalize(primaryText));
-    return await packResult(papers, 'flash-fast');
+    const papers = validateQuality(validateNonEmpty(await parseAndNormalize(primaryText)));
+    return await packResult(papers, 'pro-primary');
   } catch (e) {
-    // Parse/empty failure — almost always due to truncated or hallucinated
-    // output. Retry with thinking enabled so the model has budget to produce
+    // Parse/empty/quality failure — almost always due to truncated or hallucinated
+    // output. Retry with more thinking budget so the model has room to produce
     // a complete, well-formed JSON.
-    console.warn('[processPaper] 主解析失败/全空，启用 thinking 重试:', (e as Error).message);
+    console.warn('[processPaper] 主解析失败/全空/质量不达标，启用更多思考重试:', (e as Error).message);
     try {
-      const fallbackText = await callModel(client, FLASH_MODEL, [imageData], USER_PROMPT, false);
+      const fallbackText = await callModel(client, EXTRACT_MODEL, [imageData], USER_PROMPT, false);
       const papers = validateNonEmpty(await parseAndNormalize(fallbackText));
-      return await packResult(papers, 'flash-thinking-fallback');
+      return await packResult(papers, 'pro-fallback');
     } catch (e2) {
       return { success: false, error: `提取失败：${(e2 as Error).message}` };
     }
@@ -812,13 +968,13 @@ export async function extractAnswers(answerUrl: string): Promise<ExtractAnswersR
 
     // 主调用 Flash + thinking 关闭；空/解析失败时开一次 thinking 兜底
     try {
-      const text = await callModel(client, FLASH_MODEL, [part], USER_PROMPT_ANSWERS, true, SYSTEM_INSTRUCTION_ANSWERS);
+      const text = await callModel(client, EXTRACT_MODEL, [part], USER_PROMPT_ANSWERS, true, SYSTEM_INSTRUCTION_ANSWERS);
       const map  = parseAnswers(text);
       if (map.size > 0) return { success: true, answers: toItems(map) };
       throw new Error('未解析到任何答案');
     } catch (e) {
       console.warn('[extractAnswers] 主提取失败/为空，启用 thinking 重试:', (e as Error).message);
-      const text = await callModel(client, FLASH_MODEL, [part], USER_PROMPT_ANSWERS, false, SYSTEM_INSTRUCTION_ANSWERS);
+      const text = await callModel(client, EXTRACT_MODEL, [part], USER_PROMPT_ANSWERS, false, SYSTEM_INSTRUCTION_ANSWERS);
       return { success: true, answers: toItems(parseAnswers(text)) };
     }
   } catch (e) {

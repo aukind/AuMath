@@ -818,7 +818,13 @@ function MultiBulkPublisher({
 
       {/* 试卷勾选列表（难度改为发布后由用户众包评分，这里不再设置） */}
       <ul className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
-        {editedPapers.map((paper, i) => (
+        {editedPapers.map((paper, i) => {
+          // 批量录入分诊：渲染失败的公式数（录入期 KaTeX 校验）+ 配图缺口（期望张数 vs 已贴回）。
+          const latexErrors = paper.questions.reduce((s, q) => s + (q.latex_issues ?? 0), 0);
+          const expectedFigs = paper.questions.reduce((s, q) => s + (q.figure_count ?? 0), 0);
+          const placedFigs = paper.questions.reduce((s, q) => s + (q.content.match(/!\[/g)?.length ?? 0), 0);
+          const figDeficit = Math.max(0, expectedFigs - placedFigs);
+          return (
           <li key={i} className={['rounded-lg border p-4 transition-colors', activePapers[i] ? 'bg-muted/30' : 'opacity-50'].join(' ')}>
             <div className="flex items-start gap-3">
               <input
@@ -838,6 +844,16 @@ function MultiBulkPublisher({
                       {paper.paper_type === 'real' ? '真题' : '模拟'}
                     </span>
                   )}
+                  {latexErrors > 0 && (
+                    <span className="rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-700 dark:bg-red-950 dark:text-red-300" title="录入期 KaTeX 渲染校验失败的公式数，建议进单卷校对修正">
+                      ⚠ {latexErrors} 个公式渲染失败
+                    </span>
+                  )}
+                  {figDeficit > 0 && (
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-300" title={`Gemini 数出本卷应有 ${expectedFigs} 张配图，目前已贴回 ${placedFigs} 张`}>
+                      缺 {figDeficit} 张图
+                    </span>
+                  )}
                   <span className="ml-auto text-xs font-mono text-muted-foreground">{paper.questions.length} 题</span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground line-clamp-1 font-mono">
@@ -846,7 +862,8 @@ function MultiBulkPublisher({
               </div>
             </div>
           </li>
-        ))}
+          );
+        })}
       </ul>
 
       {/* 发布按钮 */}
@@ -857,6 +874,12 @@ function MultiBulkPublisher({
           </button>
           <span className="text-sm text-muted-foreground">
             已选 {selectedPapers.length}/{papers.length} 套 · 共 {selectedPapers.reduce((s, p) => s + p.questions.length, 0)} 道题
+            {(() => {
+              const totalLatexErrors = selectedPapers.reduce((s, p) => s + p.questions.reduce((t, q) => t + (q.latex_issues ?? 0), 0), 0);
+              return totalLatexErrors > 0
+                ? <span className="ml-2 text-red-600 dark:text-red-400">· ⚠ {totalLatexErrors} 个公式渲染失败</span>
+                : null;
+            })()}
           </span>
         </div>
         <button
