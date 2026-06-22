@@ -83,13 +83,12 @@ export type PublishBatchResult =
 
 // ── 模型配置 ───────────────────────────────────────────────────
 
-// 混合档（兼顾速度与保真）：主提取走 Flash（快，~5-10s，95% 一次过）；当 Flash
-// 解析失败 / 质量不达标 / 公式渲染失败比例偏高时，自动升级 Pro 重做该份——坏题仍享
-// Pro 的 OCR 保真（下标/希腊字母/指数/补集）。避免 Pro 全程导致单次逼近 120s、叠加
-// 兜底冲破 maxDuration(300s) 的 Failed to fetch。
-// 注意：gemini-2.5-pro **不能**关闭思考（thinkingBudget 不可为 0），callModel 已按模型分流。
-const FAST_MODEL     = 'gemini-2.5-flash'; // 主提取：快档
-const FIDELITY_MODEL = 'gemini-2.5-pro';   // 升级档：Flash 出问题/低质时重做，保真
+// 全 Flash（Pro token 约贵 10 倍，已弃用）。两档区别只在思考预算：
+//   主档 FAST_MODEL  = Flash + thinking off（快，~5-10s，95% 一次过）
+//   升级 FIDELITY_MODEL = Flash + thinking on（4096，救解析失败/截断/低质）
+// 同一个 Flash，升级只是"开思考重跑一次"，成本远低于 Pro。
+const FAST_MODEL     = 'gemini-2.5-flash'; // 主提取：快档（thinking off）
+const FIDELITY_MODEL = 'gemini-2.5-flash'; // 升级档：thinking on 重跑（非 Pro，省 token）
 
 // ── PDF 分块配置 ──────────────────────────────────────────────
 const GEMINI_PDF_PAGE_LIMIT = 1000; // Gemini 单次最多 1000 页
@@ -458,12 +457,12 @@ async function processChunksParallel(
     const results = await Promise.allSettled(
       batch.map(async (chunk, chunkIdx) => {
         const imgData = bufferToImageData(chunk.buffer as ArrayBuffer, 'application/pdf');
-        // 混合档：Flash 快档主跑；失败/截断的块升级 Pro 重做，不静默丢块。
+        // 混合档：Flash 快档主跑；失败/截断的块升级思考档 重做，不静默丢块。
         try {
           const text = await callModel(client, FAST_MODEL, [imgData], USER_PROMPT, true);
           return await parseAndNormalize(text);
         } catch (e) {
-          console.warn(`[chunk ${i + chunkIdx}] Flash 失败，升级 Pro 重试:`, (e as Error).message);
+          console.warn(`[chunk ${i + chunkIdx}] Flash 失败，升级思考档 重试:`, (e as Error).message);
           const text = await callModel(client, FIDELITY_MODEL, [imgData], USER_PROMPT, false);
           return await parseAndNormalize(text);
         }
@@ -906,8 +905,8 @@ async function processPaperInner(
     return nonEmpty;
   };
 
-  // ── 混合档：Flash 快档主跑 → 不达标自动升级 Pro 保真档 ──────────────
-  // 主：Flash + thinking off（~5-10s，95% 一次过）。判定是否需要升级 Pro：
+  // ── 混合档：Flash 快档主跑 → 不达标自动升级思考档 ──────────────
+  // 主：Flash + thinking off（~5-10s，95% 一次过）。判定是否需要升级思考档：
   //   ① 解析失败 / 全空（截断、乱码）
   //   ② assessQuality 识别失败比例超阈（原死代码，现生效）
   //   ③ 公式渲染失败题占比 ≥20%（Flash 把公式 OCR 坏了 → Pro 重做更准）
@@ -931,21 +930,21 @@ async function processPaperInner(
     const papers = await parseAndNormalize(text);
     const verdict = evaluate(papers);
     if (verdict.ok) return await packResult(papers.filter(p => p.questions.length > 0), 'flash-fast');
-    console.warn('[processPaper] Flash 质量不足，升级 Pro:', verdict.reason);
+    console.warn('[processPaper] Flash 质量不足，升级思考档:', verdict.reason);
     flashPapers = papers.filter(p => p.questions.length > 0); // Pro 也挂时的兜底
   } catch (e) {
-    console.warn('[processPaper] Flash 主调用/解析失败，升级 Pro:', (e as Error).message);
+    console.warn('[processPaper] Flash 主调用/解析失败，升级思考档:', (e as Error).message);
   }
 
-  // 升级：Pro 保真档
+  // 升级：Flash 开思考重跑（4096）
   try {
     const text   = await callModel(client, FIDELITY_MODEL, [imageData], USER_PROMPT, false);
     const papers = validateNonEmpty(await parseAndNormalize(text));
-    return await packResult(papers, 'pro-escalated');
+    return await packResult(papers, 'flash-escalated');
   } catch (e2) {
-    // Pro 也失败：若 Flash 至少出了有效题，退而求其次返回它（校对页有公式红旗可修），别让用户白等。
+    // 思考档也失败：若快档至少出了有效题，退而求其次返回它（校对页有公式红旗可修），别让用户白等。
     if (flashPapers && flashPapers.length > 0)
-      return await packResult(flashPapers, 'flash-degraded(pro-failed)');
+      return await packResult(flashPapers, 'flash-degraded');
     return { success: false, error: `提取失败：${(e2 as Error).message}` };
   }
 }
@@ -972,14 +971,14 @@ export async function extractAnswers(answerUrl: string): Promise<ExtractAnswersR
     const toItems = (m: Map<number, { answer: string; analysis: string }>): ExtractedAnswerItem[] =>
       Array.from(m.entries()).map(([question_number, v]) => ({ question_number, ...v }));
 
-    // 混合档：Flash 快档主跑；空/解析失败时升级 Pro 保真档重做。
+    // 混合档：Flash 快档主跑；空/解析失败时升级思考档重做。
     try {
       const text = await callModel(client, FAST_MODEL, [part], USER_PROMPT_ANSWERS, true, SYSTEM_INSTRUCTION_ANSWERS);
       const map  = parseAnswers(text);
       if (map.size > 0) return { success: true, answers: toItems(map) };
       throw new Error('未解析到任何答案');
     } catch (e) {
-      console.warn('[extractAnswers] Flash 失败/为空，升级 Pro 重做:', (e as Error).message);
+      console.warn('[extractAnswers] Flash 失败/为空，升级思考档 重做:', (e as Error).message);
       const text = await callModel(client, FIDELITY_MODEL, [part], USER_PROMPT_ANSWERS, false, SYSTEM_INSTRUCTION_ANSWERS);
       return { success: true, answers: toItems(parseAnswers(text)) };
     }
@@ -1380,7 +1379,7 @@ ${figureHint ? `【图形描述】\n${figureHint}` : ''}`;
   let finishReason: string | undefined;
   try {
     const result = await client.models.generateContent({
-      model: 'gemini-2.5-pro',
+      model: 'gemini-2.5-flash', // 全 Flash 省 token（原 2.5-pro）
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
         maxOutputTokens: SVG_MAX_OUTPUT_TOKENS,
