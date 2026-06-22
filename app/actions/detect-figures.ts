@@ -127,5 +127,15 @@ export async function detectPageFigures(
     const box = toNormBox(f, w, h);
     if (box) figures.push({ box, kind: '几何图' });
   }
+
+  // YOLO 召回兜底：DocLayout-YOLO 的 figure 类按学术图表/照片训练，对密集文字里的
+  // **小幅几何线条图**（正方体/三角形/坐标系等）召回很弱，常整页返回 0 框 → 图丢失。
+  // 这种页改用 Gemini 视觉兜底：它语义上认得「立体图/几何图」，召回高得多（框稍松，
+  // 但漏图远比框松糟糕）。只在 YOLO 空手时触发，保留 YOLO 能用时的紧框，成本也低。
+  if (figures.length === 0) {
+    const gem = await detectFiguresOnPage(imageBase64, mimeType);
+    if (gem.success && gem.figures.length > 0) return gem;
+  }
+
   return { success: true, figures };
 }
