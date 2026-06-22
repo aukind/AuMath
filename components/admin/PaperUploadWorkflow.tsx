@@ -1089,6 +1089,10 @@ function columnRanks(centers: number[]): number[] {
 
 type RawFigure = { url: string; box: number[]; page: number; fileIdx: number };
 
+// 几何图逐页检测的并发度。每页一次「编码 2000px PNG→Vercel 中转→Fly YOLO→裁剪上传」，
+// 串行时大的多卷文件会拖到几分钟。4 个并发先把墙钟砍数倍；Fly 扩容/多开后可再调高。
+const FIGURE_DETECT_CONCURRENCY = 4;
+
 /** 慢活：客户端 pdf.js 光栅化每页 → Gemini 视觉检测几何图 bbox → canvas 裁剪 → 上传 Storage。
  *  纯 Vercel、不依赖本地 cv-service。**与 Gemini 文字提取并行跑**（不依赖其结果，图↔题对位在
  *  matchFiguresToQuestions 里用 figure_count 配额完成）。
@@ -1119,48 +1123,65 @@ async function detectAndUploadFigures(
   const totalPages = filePages.reduce((s, fp) => s + fp.pages.length, 0) || 1;
   let donePages = 0;
 
-  // 2) 逐页检测 + 裁剪上传
-  for (const fp of filePages) {
-    for (const pg of fp.pages) {
-      const { base64, mime } = canvasToDetectBase64(pg.canvas);
-      if (!base64) {
-        firstError ??= '页面取图失败（图片跨域未配 CORS？）';
-        donePages++;
-        onProgress?.({ percent: Math.min(99, Math.round((donePages / totalPages) * 100)) });
-        continue;
-      }
-      const det = await detectPageFigures(base64, mime);
+  // 2) 并发检测 + 裁剪上传。
+  //    原先逐页串行：大的多卷文件（几十页）会被「一页编码 2000px PNG→中转→检测→上传」
+  //    这条串行链路放大成几分钟。改为跨文件展平任务队列 + 限流并发池（一次 FIGURE_DETECT_CONCURRENCY
+  //    页），墙钟时间砍数倍。不开全量 Promise.all：并发受 Fly YOLO 机器数/CPU 约束，过高会互相挤 CPU。
+  type Task = { fp: { fileIdx: number; pages: PageRaster[] }; pg: PageRaster };
+  const tasks: Task[] = [];
+  for (const fp of filePages) for (const pg of fp.pages) tasks.push({ fp, pg });
+
+  const processOne = async ({ fp, pg }: Task) => {
+    const { base64, mime } = canvasToDetectBase64(pg.canvas);
+    if (!base64) {
+      firstError ??= '页面取图失败（图片跨域未配 CORS？）';
       donePages++;
       onProgress?.({ percent: Math.min(99, Math.round((donePages / totalPages) * 100)) });
-      if (!det.success) { firstError ??= det.error; continue; }
-
-      // 同一页的图并发处理（裁剪同步 + 上传异步）。
-      await Promise.all(det.figures.map(async (fb) => {
-        const cropBase64 = cropBox(pg.canvas, fb.box);
-        if (!cropBase64) return;
-        let url: string | null = null;
-        if (mode === 'cloud-vector') {
-          try {
-            const tk = await screenshotToTikz(cropBase64, 'image/png');
-            if (tk.success) {
-              const cp = await compileTikzAction(tk.tikz, { tikzLibraries: tk.libraries });
-              if (cp.success) {
-                const up = await uploadTikzFigureAction(cp.svg);
-                if (up.success) url = up.url;
-              }
-            }
-          } catch { /* 回退位图 */ }
-        }
-        if (!url) {
-          const up = await uploadFigureImage(cropBase64);
-          if (up.success) url = up.url;
-        }
-        if (!url) return;
-        raws.push({ url, box: toXYXY(fb.box), page: pg.pageNumber, fileIdx: fp.fileIdx });
-        onProgress?.({ detected: raws.length });
-      }));
+      return;
     }
-  }
+    const det = await detectPageFigures(base64, mime);
+    donePages++;
+    onProgress?.({ percent: Math.min(99, Math.round((donePages / totalPages) * 100)) });
+    if (!det.success) { firstError ??= det.error; return; }
+
+    // 同一页的图并发处理（裁剪同步 + 上传异步）。
+    await Promise.all(det.figures.map(async (fb) => {
+      const cropBase64 = cropBox(pg.canvas, fb.box);
+      if (!cropBase64) return;
+      let url: string | null = null;
+      if (mode === 'cloud-vector') {
+        try {
+          const tk = await screenshotToTikz(cropBase64, 'image/png');
+          if (tk.success) {
+            const cp = await compileTikzAction(tk.tikz, { tikzLibraries: tk.libraries });
+            if (cp.success) {
+              const up = await uploadTikzFigureAction(cp.svg);
+              if (up.success) url = up.url;
+            }
+          }
+        } catch { /* 回退位图 */ }
+      }
+      if (!url) {
+        const up = await uploadFigureImage(cropBase64);
+        if (up.success) url = up.url;
+      }
+      if (!url) return;
+      raws.push({ url, box: toXYXY(fb.box), page: pg.pageNumber, fileIdx: fp.fileIdx });
+      onProgress?.({ detected: raws.length });
+    }));
+  };
+
+  // 限流并发池：N 个 worker 从同一队列取页（JS 单线程，cursor++ / push 无竞态）。
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < tasks.length) {
+      await processOne(tasks[cursor++]);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(FIGURE_DETECT_CONCURRENCY, tasks.length) }, () => worker()),
+  );
+
   onProgress?.({ percent: 100 });
   return { raws, error: firstError };
 }
